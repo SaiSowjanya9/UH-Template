@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+image_cache/
+output/
+__pycache__/
+~$*.xlsx
+.venv/
+backups/
+lookup_state/

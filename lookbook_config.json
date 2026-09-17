@@ -1,0 +1,23 @@
+{
+  "company_name": "UH Homes",
+  "tagline": "Selections Lookbook",
+  "contact_line": "www.example.com  |  (000) 000-0000  |  hello@example.com",
+  "logo_path": "brand_assets/uh-wordmark.png",
+  "logo_mark_path": "brand_assets/uh-symbol.png",
+  "colors": {
+    "dark": "#23282B",
+    "accent": "#A8845A",
+    "paper": "#F6F2EC",
+    "text": "#23282B",
+    "muted": "#7A7F83",
+    "rule": "#D9D2C7"
+  },
+  "fonts": {
+    "heading": "",
+    "body": "",
+    "body_bold": ""
+  },
+  "cards_per_row": 3,
+  "rows_per_page": 2,
+  "disclaimer": "Product images, names and links are provided by each manufacturer and may change. Colors can vary on screen and in print. Final selections are confirmed on the signed selections sheet."
+}

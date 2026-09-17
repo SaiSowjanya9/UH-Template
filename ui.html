@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="uh-token" content="{{ token }}">
+  <title>UH Homes · Selections Studio</title>
+  <link rel="icon" type="image/png" href="/brand/icon.png">
+  <link rel="stylesheet" href="/assets/ui.css">
+  <script src="/assets/ui.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="/" class="brand" aria-label="UH Homes home"><img class="brand-wordmark" src="/brand/wordmark.png" alt="UH Homes"><small>SELECTIONS STUDIO</small></a>
+    <div class="workspace-label">YOUR WORKSPACE <span>LOCAL</span></div>
+    <nav aria-label="Workspace navigation">
+      <button class="nav-item active" data-view="selections"><span class="nav-symbol">▦</span> Project selections</button>
+      <button class="nav-item" data-view="review"><span class="nav-symbol">◇</span> Review matches <span id="review-count" class="nav-count">0</span></button>
+      <button class="nav-item" data-view="presentation"><span class="nav-symbol">▤</span> Client presentations</button>
+    </nav>
+    <div class="project-label"><span>PROJECTS</span><button id="new-project" class="icon-button" aria-label="Add project">+</button></div>
+    <div id="project-list" class="project-list"><span class="muted">Loading projects…</span></div>
+    <div class="sidebar-bottom">
+      <button class="nav-item" data-view="manufacturers"><span class="nav-symbol">◫</span> Manufacturers</button>
+      <button id="setup-button" class="nav-item"><span class="nav-symbol">⚙</span> Setup & workbook</button>
+      <div class="local-note"><span class="status-dot"></span><div>Saved to your master Excel<small>On this computer · No cloud sync</small></div></div>
+    </div>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-name">Project selections</strong></div><div class="topbar-actions"><button id="refresh" class="text-button">↻ Refresh</button><span class="avatar"><img src="/brand/symbol.png" alt="UH Homes workspace"></span></div></header>
+    <main>
+      <div id="load-error" class="notice error" hidden></div>
+      <div id="automation-banner" class="notice automation-notice" role="status" hidden><span id="automation-message"></span><button id="retry-automation" class="text-button" hidden>Retry automatic lookup</button></div>
+      <div id="busy-banner" class="notice" role="status" hidden><span id="busy-message"></span><button id="cancel-lookup" class="text-button" hidden>Stop after this item</button></div>
+      <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><div class="heading-actions"><button id="import-button" class="button secondary">↑ Import Excel</button><a class="button secondary" href="/api/workbook">↓ Export Excel</a></div></section>
+      <section id="project-summary" class="project-summary" hidden>
+        <div class="project-emblem" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none"><path d="M13 48 50 17 87 48M23 41v42h54V41M42 83V58h16v25M29 48h7v10h-7M64 48h7v10h-7" stroke="currentColor" stroke-width="1.5"/><path d="M10 87h80M63 27V17h10v19" stroke="currentColor"/></svg></div>
+        <div class="project-info"><div class="project-meta"><span id="project-id" class="pill"></span><span id="project-date"></span></div><h2 id="project-name"></h2><p id="project-address"></p><div id="project-client" class="project-client"></div></div>
+        <button id="edit-project" class="text-button">Edit project ↗</button>
+      </section>
+      <section id="stats" class="stats" aria-label="Project statistics"></section>
+      <section id="selections-view" class="view">
+        <div class="section-heading"><div><h2>Selections schedule <span id="selection-count" class="count-pill">0</span></h2><p>The source of truth for your client’s home.</p></div><div class="heading-actions"><button id="find-links" class="button secondary">Find missing product links</button><button id="add-selection" class="button primary">+ Add selection</button></div></div>
+        <div class="table-panel"><div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Search selections" placeholder="Search items, brands, model numbers…"></label><select id="section-filter" aria-label="Filter by category"><option value="">All categories</option></select><select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="review">Needs review</option><option value="Verified">Verified</option><option value="missing">Missing links</option></select></div>
+          <div class="table-scroll"><table><thead><tr><th>ITEM / LOCATION</th><th>MANUFACTURER / MODEL</th><th>FINISH / QTY</th><th>PRODUCT LINK</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="selection-rows"></tbody></table></div>
+          <div id="table-empty" class="empty-state" hidden><div class="empty-icon">◇</div><h3>No selections here yet</h3><p>Add your first selection, import a workbook, or adjust your filters.</p></div>
+          <div class="table-footer"><span id="table-summary"></span><div><button id="previous-page" class="text-button">← Previous</button><button id="next-page" class="text-button">Next →</button></div></div>
+        </div>
+        <div class="workflow-note"><span class="note-icon">i</span><p><strong>A little review makes all the difference.</strong> Saved product edits automatically queue a search. Check the exact manufacturer, model, and finish before marking a selection verified.</p></div>
+      </section>
+      <section id="review-view" class="view" hidden><div class="section-heading"><div><h2>A second look, before the final look.</h2><p>Open each product page and confirm the model and finish. Verified items stay protected from automatic lookup.</p></div></div><div id="review-grid" class="review-grid"></div><button id="more-reviews" class="button secondary" hidden>Show more selections</button></section>
+      <section id="presentation-view" class="view" hidden>
+        <div class="presentation-layout"><div class="template-preview"><div class="preview-top"><img src="/brand/wordmark.png" alt="UH Homes"><span>DEFAULT COLLECTION / 01</span></div><div class="preview-content"><div class="eyebrow">SELECTIONS LOOKBOOK</div><h2 id="preview-title">Your next<br>beautiful home.</h2><div class="preview-rule"></div><p id="preview-client"></p><span id="preview-date"></span></div><div class="preview-art" aria-hidden="true"><div class="arch"></div><div class="swatch swatch-one"></div><div class="swatch swatch-two"></div><div class="swatch swatch-three"></div></div><div class="preview-footer">MATERIALS & FINISHES <span>UH HOMES</span></div></div>
+        <div class="export-panel"><div class="eyebrow">FROM SCHEDULE TO SHOWCASE</div><h2>Ready for the reveal.</h2><p>Your project’s Excel selections become a consistent presentation, without copying and pasting.</p><ul class="feature-list"><li>Project cover & client details</li><li>Selections grouped by category</li><li>Product images & clickable links</li><li>Complete selections schedule</li><li>Editable text and images in PowerPoint</li></ul><label class="field">Presentation content<select id="export-mode"><option value="draft">Draft — all included selections</option><option value="final">Final — all included selections must be verified</option><option value="verified">Final — verified selections only</option></select></label><p id="export-summary" class="export-summary"></p><button id="export-pdf" class="button primary full">Download PDF ↗</button><button id="export-pptx" class="button secondary full">Download editable PowerPoint ↗</button><small class="muted">Design illustration at left. PDF and PowerPoint layouts are optimized for their respective formats. Missing images use labeled placeholders.</small></div></div>
+      </section>
+      <section id="manufacturers-view" class="view" hidden><div class="section-heading"><div><h2>The brands behind the details.</h2><p>Official domains help the lookup prioritize the manufacturer’s own product pages.</p></div><button id="add-manufacturer" class="button primary">+ Add manufacturer</button></div><div id="manufacturer-grid" class="manufacturer-grid"></div></section>
+      <footer class="main-footer"><span class="footer-brand"><img src="/brand/symbol.png" alt="">UH HOMES <span class="footer-separator">/</span> SELECTIONS STUDIO</span><span>Thoughtful details. Beautiful homes.</span></footer>
+    </main>
+  </div>
+  <dialog id="editor"><form id="editor-form"><div class="dialog-heading"><div><div class="eyebrow" id="editor-eyebrow">PROJECT DETAILS</div><h2 id="editor-title">New project</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div id="editor-fields" class="form-grid"></div><p id="editor-note" class="form-note"></p><p id="editor-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button id="editor-save" type="submit" class="button primary">Save changes</button></div></form></dialog>
+  <dialog id="setup-dialog"><div class="dialog-heading"><div><div class="eyebrow">LOCAL WORKSPACE</div><h2>Setup & workbook</h2></div><button class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div class="setup-content"><h3>Master workbook</h3><p id="workbook-name"></p><p>Excel is the source of truth. Close the workbook in Excel before making changes here. The app backs it up before each save, and detects conflicting edits. While the app is running, saved Excel edits are detected automatically. Close Excel to allow the updated links to be written back. Product-name, item-name, manufacturer, model, and finish changes trigger lookup; quantity and notes changes do not.</p><h3>Product search</h3><div id="provider-status" class="notice"></div><p>Copy <code>.env.example</code> to <code>.env</code> in the project folder. Set <code>SEARCH_PROVIDER=brave</code> and add your own <code>BRAVE_API_KEY</code>, then restart the app. SerpAPI and Claude are also supported by the existing lookup script.</p><p>Keep API keys only in your local <code>.env</code> file. Automatic search sends the manufacturer, model number, and product/item name to the provider, not client details. Provider charges may apply after saved product edits. Existing unchanged selections are not searched on first launch. Failed requests retry up to three times, then wait for a manual retry.</p><h3>Presentation branding</h3><p>Your supplied UH Homes wordmark and gold symbol are installed. Edit <code>lookbook_config.json</code> to adjust contact details or brand settings, then restart the app. The starter contact information is a placeholder—replace it before sending final presentations.</p><h3>Excel import</h3><p>Import replaces the master workbook after confirmation, preserving a timestamped copy in <code>backups/</code>. Use the same Projects, Selections, Manufacturers, and Lists sheets as the exported template. Maximum upload: 8 MB.</p><div class="notice">This version is for local use on one computer. It does not include accounts, shared hosting, or multi-user collaboration.</div></div></dialog>
+  <input type="file" id="import-file" accept=".xlsx" hidden>
+  <div id="toast" role="status" class="toast" hidden></div>
+</body>
+</html>
