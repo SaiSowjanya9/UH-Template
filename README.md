@@ -12,6 +12,8 @@ python -m venv .venv
 
 Open **http://127.0.0.1:5000**. The app runs only on this computer; it does not include shared hosting or user accounts.
 
+If another service occupies port 5000, run `.venv\Scripts\python.exe app.py --port 5001` and open **http://127.0.0.1:5001** instead. The app remains bound to loopback on either port.
+
 1. Add a project, then add its selections (manufacturer, model, finish, room, and quantity).
 2. Save a new selection or edit its item/product name, manufacturer, model, or finish. **Automatic lookup** queues that selection and writes its candidate URL back to Excel. Live lookup needs a search-provider API key; see **Setup & workbook**. The manual **Find missing product links** button is still available for unchanged existing rows.
 3. Use **Review matches** to open candidate pages and verify the exact manufacturer, model, and finish.
@@ -27,6 +29,18 @@ Changed selections cannot contribute old links to app-generated presentations: d
 Provider requests can incur charges after saved product edits. Keep the app running for Excel monitoring, and generate a new PDF/PowerPoint after the lookup completes; previously downloaded files are not rewritten automatically.
 
 The supplied projects and contact details are examples. Replace the branding/contact placeholders in `lookbook_config.json` and restart the app before preparing client deliverables. PowerPoint uses editable text boxes, tables, and separately embedded images; its widescreen layout is distinct from the landscape-letter PDF.
+
+## Project and selection custom fields
+
+The Selection tracker shows the selected project's complete standard details. Use **Project details → Add field** to enter an additional field name and value, then save. Use **Edit details** to rename, update, or remove existing custom fields. Fields belong only to that project, not to every project.
+
+For an individual selection, choose **Edit → Additional fields → Add field**. Saved fields can be expanded under that item in the selections schedule and are included in selection searches. Custom-field-only changes do not start a product search or reset verification.
+
+Each record supports up to 30 custom fields, with unique names of up to 80 characters and text values of up to 2,000 characters (subject to the combined workbook-cell limit). Custom fields appear in client presentations on additional, paginated detail pages/slides; do not put internal-only information there if you do not intend to share it.
+
+Excel import/export is now under **Data tools**. Custom data is preserved in an optional `Custom Fields` JSON column on each relevant sheet. Keep this column with the rest of the row when sorting or importing. Use the web forms to edit custom fields rather than manually editing their JSON. Existing workbooks without this column remain compatible.
+
+This is still a local preview backed by Excel. Hosted deployment, shared database storage, and user authentication have not been configured.
 
 ## Optional command-line workflow
 

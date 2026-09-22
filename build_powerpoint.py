@@ -1,6 +1,7 @@
 import argparse
 import io
 import re
+import textwrap
 from pathlib import Path
 
 from PIL import Image
@@ -12,6 +13,7 @@ from pptx.util import Inches, Pt
 
 from build_lookbook import CFG, OUT, fmt_date, get_image, group_sections, load_data
 from branding import load_logo
+from workbook_store import presentation_details
 
 
 COLORS = {key: value.lstrip("#") for key, value in CFG["colors"].items()}
@@ -101,6 +103,25 @@ def product_card(slide, row, x, draft):
         text(slide, x + 2.6, 6.34, 3.1, .22, row.get("Lookup Status", "Not run"), 9, COLORS["muted"], align=PP_ALIGN.RIGHT)
 
 
+def custom_detail_slides(prs, project, rows, draft):
+    for heading, fields in presentation_details(project, rows):
+        slide, y = None, 7
+        for field in fields:
+            wrapped = []
+            for line in (field["value"] or "Not provided").splitlines():
+                wrapped.extend(textwrap.wrap(line, width=85, break_long_words=True, break_on_hyphens=False) or [""])
+            for offset in range(0, len(wrapped), 8):
+                chunk = wrapped[offset:offset + 8]
+                height = .48 + len(chunk) * .23
+                if y + height > 6.7:
+                    slide = new_slide(prs, project, draft)
+                    title(slide, "Additional details", heading)
+                    y = 1.85
+                text(slide, .65, y, 12, .32, field["name"] + (" (continued)" if offset else ""), 12, COLORS["accent"], bold=True)
+                text(slide, .65, y + .37, 12, len(chunk) * .23, "\n".join(chunk), 12)
+                y += height + .14
+
+
 def build(pid, project, rows, draft=False, output_dir=None):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -161,6 +182,7 @@ def build(pid, project, rows, draft=False, output_dir=None):
                         run.font.color.rgb = RGBColor.from_string("FFFFFF" if i == 0 else COLORS["text"])
                         if i and j == 4 and value == "View product":
                             run.hyperlink.address = row["Product URL"]
+    custom_detail_slides(prs, project, rows, draft)
     slide = new_slide(prs, project, draft, dark=True)
     if not picture(slide, CFG.get("logo_path"), 4.15, 2.1, 5.03, .75, brand=True):
         text(slide, 1, 2.2, 11.3, .6, CFG["company_name"].upper(), 24, "FFFFFF", bold=True, align=PP_ALIGN.CENTER)

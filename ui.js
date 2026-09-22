@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, reviewLimit: 24, busy: false, cancel: false, editor: null };
-const names = { selections: "Project selections", review: "Review matches", presentation: "Client presentations", manufacturers: "Manufacturers" };
+const names = { selections: "Selection tracker", review: "Review matches", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
 const selectedProject = () => state.data?.projects.find((p) => p["Project ID"] === state.project);
@@ -66,6 +66,17 @@ function thumb(row, review = false) {
   return review ? "<span>PRODUCT IMAGE PENDING</span>" : '<span class="item-thumb item-placeholder" aria-hidden="true">◇</span>';
 }
 
+function detailValue(value) {
+  if (!value) return '<span class="muted">Not provided</span>';
+  return isUrl(value) ? `<a href="${esc(value)}" target="_blank" rel="noopener noreferrer">${esc(value)}</a>` : esc(value);
+}
+
+function selectionDetails(row) {
+  const fields = row.custom_fields || [];
+  if (!fields.length) return "";
+  return `<details class="selection-details"><summary>${fields.length} additional field${fields.length === 1 ? "" : "s"}</summary><dl>${fields.map((field) => `<div><dt>${esc(field.name)}</dt><dd>${detailValue(field.value)}</dd></div>`).join("")}</dl></details>`;
+}
+
 function render() {
   const data = state.data;
   if (!data) return;
@@ -81,6 +92,13 @@ function render() {
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
   $("project-summary").hidden = !project || state.view === "manufacturers";
   $("stats").hidden = !project || state.view === "manufacturers";
+  $("project-details-panel").hidden = !project || state.view !== "selections";
+  if (project) {
+    const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"].map((name) => ({ name, value: project[name] }));
+    const custom = project.custom_fields || [];
+    $("project-detail-values").innerHTML = [...standard, ...custom].map((field, index) => `<div class="detail-entry ${index >= standard.length ? "custom-detail" : ""}"><dt>${esc(field.name)}${index >= standard.length ? '<span class="custom-tag">CUSTOM</span>' : ""}</dt><dd>${detailValue(field.value)}</dd></div>`).join("");
+    $("project-custom-empty").hidden = custom.length > 0;
+  }
   if (project) {
     $("project-id").textContent = project["Project ID"];
     $("project-name").textContent = project["Project Name"];
@@ -91,7 +109,7 @@ function render() {
   $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
   $("review-count").textContent = rows.length - verified;
   $("page-title").textContent = names[state.view];
-  $("breadcrumb-name").textContent = names[state.view];
+  $("breadcrumb-name").textContent = project && state.view !== "manufacturers" ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
   $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", review: "The right product, down to the last detail.", presentation: "Your selections, beautifully presented.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
@@ -121,10 +139,10 @@ function render() {
 
 function renderTable() {
   const query = $("search").value.trim().toLowerCase(), category = $("section-filter").value, status = $("status-filter").value;
-  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"]].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
+  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small></div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">View product ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">View product ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -155,14 +173,25 @@ function field(name, value = "", options = {}) {
   const attrs = `name="${esc(name)}"${required}${readonly}`;
   let control;
   if (options.choices) control = `<select ${attrs}>${options.choices.map((choice) => `<option value="${esc(choice)}" ${choice === value ? "selected" : ""}>${esc(choice)}</option>`).join("")}</select>`;
-  else if (options.textarea) control = `<textarea ${attrs} maxlength="4000">${esc(value)}</textarea>`;
+  else if (options.textarea) control = `<textarea ${attrs} aria-label="${esc(name)}" maxlength="4000">${esc(value)}</textarea>`;
   else control = `<input ${attrs} type="${options.type || "text"}" value="${esc(value)}" maxlength="${options.max || 4000}" ${options.type === "number" ? 'min="0" max="1000000" step="any"' : ""}>`;
   return `<label class="field ${options.wide ? "wide" : ""}">${esc(name)}${options.required ? " *" : ""}${control}</label>`;
 }
 
+function addCustomField(field = { name: "", value: "" }, focus = true) {
+  const container = $("custom-field-rows");
+  if (container.children.length >= 30) { toast("A record can have up to 30 additional fields.", true); return; }
+  const row = document.createElement("div");
+  row.className = "custom-field-row";
+  row.innerHTML = `<label class="field">Field name<input class="custom-name" type="text" maxlength="80" required value="${esc(field.name)}" placeholder="e.g. Lot number"></label><label class="field">Field value<textarea class="custom-value" aria-label="Field value" maxlength="2000" placeholder="Enter a value">${esc(field.value)}</textarea></label><button type="button" class="remove-custom-field icon-button" aria-label="Remove field">×</button>`;
+  container.append(row);
+  $("custom-fields-empty").hidden = true;
+  if (focus) row.querySelector("input").focus();
+}
+
 function openEditor(kind, record) {
   if (state.busy || !state.data) return;
-  state.editor = { kind, record };
+  state.editor = { kind, record, revision: state.data.revision };
   $("editor-error").hidden = true;
   $("editor-title").textContent = `${record ? "Edit" : "New"} ${kind}`;
   $("editor-eyebrow").textContent = kind === "selection" ? "MATERIALS & FINISHES" : "WORKSPACE DETAILS";
@@ -180,6 +209,10 @@ function openEditor(kind, record) {
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
   }
   $("editor-fields").innerHTML = fields;
+  $("custom-fields-editor").hidden = kind === "manufacturer";
+  $("custom-field-rows").replaceChildren();
+  $("custom-fields-empty").hidden = false;
+  if (kind !== "manufacturer") (r.custom_fields || []).forEach((field) => addCustomField(field, false));
   $("editor-note").textContent = note;
   $("editor").showModal();
 }
@@ -190,14 +223,15 @@ async function saveEditor(event) {
   const { kind, record } = state.editor;
   const values = Object.fromEntries(new FormData($("editor-form")));
   if (kind === "selection") values["Project ID"] = state.project;
-  setBusy(true, "Saving changes to the master workbook…");
+  const custom = kind === "manufacturer" ? {} : { custom_fields: Array.from($("custom-field-rows").children, (row) => ({ name: row.querySelector(".custom-name").value, value: row.querySelector(".custom-value").value })) };
+  setBusy(true, "Saving project details…");
   $("editor-save").disabled = true;
   try {
-    const result = await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record?._row, create: !record });
+    const result = await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record?._row, create: !record, revision: state.editor.revision, ...custom });
     if (kind === "project") state.project = result.project_id;
     $("editor").close();
     await refresh();
-    toast(result.queued ? "Saved to Excel. Automatic product lookup is queued; results will appear here when ready." : "Saved to Excel. A backup of the previous workbook was preserved.");
+    toast(result.queued ? "Selection saved. Automatic product lookup is queued; results will appear when ready." : "Project details saved. A backup was preserved.");
   } catch (error) {
     $("editor-error").textContent = error.message;
     $("editor-error").hidden = false;
@@ -293,6 +327,22 @@ $("retry-automation").addEventListener("click", () => action(async () => {
   await refresh();
   toast("Automatic lookup will retry eligible selections.");
 }));
+$("add-custom-field").addEventListener("click", () => { if (!state.busy) addCustomField(); });
+$("project-edit-details").addEventListener("click", () => openEditor("project", selectedProject()));
+$("project-add-field").addEventListener("click", () => {
+  if (state.busy || !selectedProject()) return;
+  openEditor("project", selectedProject());
+  addCustomField();
+});
+$("custom-field-rows").addEventListener("click", (event) => {
+  const button = event.target.closest(".remove-custom-field");
+  if (!button || state.busy) return;
+  const row = button.closest(".custom-field-row");
+  const name = row.querySelector(".custom-name").value;
+  if (name && !confirm(`Remove the field “${name}”? This takes effect when you save changes.`)) return;
+  row.remove();
+  $("custom-fields-empty").hidden = $("custom-field-rows").children.length > 0;
+});
 $("editor-form").addEventListener("submit", saveEditor);
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));

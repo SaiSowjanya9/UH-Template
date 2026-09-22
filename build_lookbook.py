@@ -19,6 +19,7 @@ import math
 import re
 from collections import OrderedDict
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import requests
 from PIL import Image
@@ -28,10 +29,13 @@ from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import Paragraph
 
 from common import BASE_DIR, Sheet, clean, open_workbook, section_order
 from remote import fetch
 from branding import load_logo
+from workbook_store import presentation_details
 
 PAGE_W, PAGE_H = landscape(letter)  # 792 x 612 pt
 M = 42                               # page margin
@@ -553,6 +557,61 @@ def schedule_pages(c, p, rows, start_page, draft, dry=False):
     return page
 
 
+def custom_detail_pages(c, project, rows, start_page, draft):
+    groups = presentation_details(project, rows)
+    if not groups:
+        return 0
+    body = ParagraphStyle("CustomBody", fontName=FONT_B, fontSize=10, leading=15, textColor=C["text"])
+    heading = ParagraphStyle("CustomHeading", fontName=FONT_H, fontSize=20, leading=25, textColor=C["accent"])
+    page_count, y = 0, 0
+
+    def start():
+        nonlocal y
+        c.setFillColor(C["paper"])
+        c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
+        spaced(c, M, PAGE_H - M - 6, "Additional project & selection details", FONT_BB, 8, 1.5, C["accent"])
+        y = PAGE_H - M - 40
+
+    def finish():
+        nonlocal page_count
+        if draft:
+            draft_mark(c)
+        footer(c, project, start_page + page_count)
+        c.showPage()
+        page_count += 1
+
+    start()
+    c.bookmarkPage("custom-details")
+    c.addOutlineEntry("Additional details", "custom-details", level=0)
+    for title, fields in groups:
+        if y < 160:
+            finish()
+            start()
+        flow = [Paragraph(escape(title), heading)]
+        flow.extend(Paragraph(f"<b>{escape(field['name'])}</b><br/>{escape(field['value'] or 'Not provided').replace(chr(10), '<br/>')}", body) for field in fields)
+        while flow:
+            paragraph = flow.pop(0)
+            width, height = paragraph.wrap(PAGE_W - 2 * M, y - 48)
+            if height > y - 48:
+                parts = paragraph.split(PAGE_W - 2 * M, y - 48)
+                if not parts:
+                    finish()
+                    start()
+                    flow.insert(0, paragraph)
+                    continue
+                paragraph = parts[0]
+                flow[0:0] = parts[1:]
+                width, height = paragraph.wrap(PAGE_W - 2 * M, y - 48)
+            paragraph.drawOn(c, M, y - height)
+            y -= height + 15
+            if y < 75 and flow:
+                finish()
+                start()
+        y -= 10
+    finish()
+    return page_count
+
+
 def page_back(c, p, page_no, draft):
     c.setFillColor(C["dark"])
     c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
@@ -603,6 +662,7 @@ def build(pid, project, rows, draft, output_dir=None):
                       section_offset=index * 10, page_no=2 + index, show_schedule=index == overview_count - 1)
     selection_pages(c, project, pages, sections, start_page, draft)
     n = schedule_pages(c, project, rows, schedule_start, draft)
+    n += custom_detail_pages(c, project, rows, schedule_start + n, draft)
     page_back(c, project, schedule_start + n, draft)
     c.save()
     return out

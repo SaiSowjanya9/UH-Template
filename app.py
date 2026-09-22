@@ -16,7 +16,7 @@ import find_urls
 from auto_lookup import AutoLookup
 from workbook_store import (ConflictError, IDENTITY_FIELDS, PROJECT_FIELDS, SELECTION_FIELDS,
                             STATUSES, ValidationError, WorkbookStore, next_row, put,
-                            records, validate_values)
+                            records, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
 app = Flask(__name__, template_folder=str(BASE), static_folder=None)
@@ -98,11 +98,11 @@ def provider_info():
 def state():
     with store.lock:
         wb, revision = store.snapshot()
-        rows = records(wb, "Selections")
+        rows = detailed_records(wb, "Selections")
         if automation:
             automation.observe(wb)
             rows = automation.display_rows(rows)
-        return jsonify(projects=records(wb, "Projects"), selections=rows,
+        return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        statuses=STATUSES, revision=revision, provider=provider_info(),
                        automation=automation.status() if automation else {"enabled": False, "pending": [], "message": ""},
@@ -151,6 +151,8 @@ def save_project():
                                "Needs Review": f'=IF(A{row}="","",H{row}-J{row})'}.items():
             if field in sheet.cols:
                 sheet.ws.cell(row, sheet.cols[field], formula)
+        if "custom_fields" in data:
+            set_custom_fields(wb, "Projects", row, data["custom_fields"])
         store.save(wb, revision)
     return jsonify(ok=True, project_id=values.get("Project ID"))
 
@@ -194,7 +196,10 @@ def save_selection():
                 raise ValidationError("Confirm that you checked the manufacturer, model, and finish on the product page.")
             merged["Checked On"] = dt.date.today().isoformat()
         put(sheet, row, merged)
-        sheet.ws.auto_filter.ref = f"A1:P{max(sheet.ws.max_row, row)}"
+        from openpyxl.utils import get_column_letter
+        sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{max(sheet.ws.max_row, row)}"
+        if "custom_fields" in data:
+            set_custom_fields(wb, "Selections", row, data["custom_fields"])
         store.save(wb, revision)
         if automation:
             automation.observe(wb)
@@ -286,13 +291,13 @@ def import_workbook():
 def presentation():
     data = payload()
     wb, _ = current(data)
-    project = next((p for p in records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
+    project = next((p for p in detailed_records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
     if not project:
         raise ValidationError("Choose a valid project.")
     mode, kind = data.get("mode", "draft"), data.get("format", "pdf")
     if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx"}:
         raise ValidationError("Invalid presentation options.")
-    rows = [r for r in records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
+    rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
     if automation:
         with store.lock:
             pending_rows = set(automation.pending)
@@ -321,12 +326,18 @@ def presentation():
 
 
 if __name__ == "__main__":
+    import argparse
     import atexit
+    parser = argparse.ArgumentParser(description="Run the local UH Homes selection tracker.")
+    parser.add_argument("--port", type=int, default=5000)
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("Port must be between 1 and 65535.")
     automation = AutoLookup(store, provider_info)
     automation.observe(store.snapshot()[0])
     automation.start()
     atexit.register(automation.stop)
     print("Automatic lookup watches saved app and Excel edits while this process is running.")
-    print("UH Homes Selections: http://127.0.0.1:5000")
+    print(f"UH Homes Selections: http://127.0.0.1:{args.port}")
     print("Local access only. Close the master workbook in Excel before saving changes.")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=args.port, debug=False)

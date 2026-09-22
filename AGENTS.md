@@ -1,8 +1,8 @@
 # UH Homes Selections
 
 - This is a local-only Flask app backed by one master `.xlsx` workbook. Bind to `127.0.0.1`; shared hosting and authentication are not implemented.
-- On Windows, run `.venv/Scripts/python.exe app.py`. Install runtime dependencies with `.venv/Scripts/python.exe -m pip install -r requirements.txt`.
-- Core verification: `.venv/Scripts/python.exe -m unittest test_workflow test_auto_lookup -v`, `node --check ui.js`, and `.venv/Scripts/python.exe -m pip check`.
+- On Windows, run `.venv/Scripts/python.exe app.py` (or add `--port 5001` if port 5000 is occupied; do not stop unrelated services). Install runtime dependencies with `.venv/Scripts/python.exe -m pip install -r requirements.txt`.
+- Core verification: `.venv/Scripts/python.exe -m unittest test_workflow test_auto_lookup test_custom_fields -v`, `node --check ui.js`, and `.venv/Scripts/python.exe -m pip check`.
 - Browser verification: install `requirements-dev.txt`, then run `.venv/Scripts/python.exe -m unittest test_browser -v`. The browser test uses installed Microsoft Edge through Playwright, runs against a temporary workbook, and saves screenshots under `output/`.
 - Do not run `build_tracker.py` against the working master workbook; it overwrites it with example data. Tests must use temporary copies of the workbook.
 - Web edits go through `WorkbookStore`, which validates headers, detects stale revisions, backs up the existing workbook, and atomically replaces it. Close Excel before saving through the app.
@@ -14,4 +14,5 @@
 - Importing a workbook that Excel has re-saved silently drops the Selections dropdowns: Excel rewrites list validations into the `extLst` form, and openpyxl warns `Data Validation extension is not supported and will be removed`. Check `xl/worksheets/sheet3.xml` for `dataValidation` entries before and after any import, and re-add the four lists (`B` Section from `Lists!$A$2:$A$31`, `L` Lookup Status from `Lists!$B$2:$B$7`, `P` Include in Lookbook from `Lists!$C$2:$C$3`, `A` Project ID from `Projects!$A$2:$A$51`, each over rows 2:501) if they are gone. Prefer the app's own forms over Excel round-trips for data entry.
 - Stop `app.py` before writing to the master workbook from a separate process. `WorkbookStore`'s lock is a per-process `threading.RLock`, so cross-process safety rests only on the revision hash.
 - `POST /api/workbook/import` and other mutating routes require the `X-UH-Token` header carrying the per-start token rendered into `ui.html`; without it they return 403 `This page has expired.`
+- Project/selection custom fields are stored per record in an optional `Custom Fields` JSON column, not global field definitions. Preserve absent custom-field payloads; an explicit empty list clears fields. Validate names and values, keep Excel autofilters inclusive of the extra column, and never include custom metadata in product-lookup identity. App and CLI presentations share `presentation_details` for paginated additional details.
 - Supplied logos live in `brand_assets/`. Use `branding.load_logo` to retain PNG transparency, not the product-image loader that flattens to white. Use the white/gold wordmark on dark backgrounds, the gold symbol for compact branding, and always preserve aspect ratio.

@@ -18,6 +18,71 @@ except ImportError:
 
 @unittest.skipIf(sync_playwright is None, "Install requirements-dev.txt to run browser tests.")
 class BrowserTests(unittest.TestCase):
+    def test_custom_project_and_selection_fields(self):
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "custom.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("dialog", lambda dialog: dialog.accept())
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator("#project-add-field").click()
+                        editor = page.locator("#editor")
+                        editor.get_by_label("Field name", exact=True).fill("Lot number")
+                        editor.get_by_label("Field value", exact=True).fill("Lot 24")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 24")
+                        page.locator('[data-project="UH-102"]').click()
+                        expect(page.locator("#project-detail-values")).not_to_contain_text("Lot 24")
+                        page.locator('[data-project="UH-101"]').click()
+                        page.get_by_role("button", name="Edit Siding", exact=True).click()
+                        editor.locator("#add-custom-field").click()
+                        editor.get_by_label("Field name", exact=True).fill("Supplier")
+                        editor.get_by_label("Field value", exact=True).fill("Approved supplier")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        page.locator(".selection-details summary").first.click()
+                        expect(page.locator("#selection-rows")).to_contain_text("Approved supplier")
+                        page.reload()
+                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 24")
+                        page.locator("#project-edit-details").click()
+                        expect(editor).to_be_visible()
+                        self.assertEqual(editor.get_by_label("Field value", exact=True).count(), 1, {"errors": errors, "labels": editor.locator("label").all_text_contents()})
+                        editor.get_by_label("Field value", exact=True).fill("Lot 25")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 25")
+                        page.locator("#search").fill("Approved supplier")
+                        expect(page.locator("#selection-rows tr")).to_have_count(1)
+                        page.locator("#search").fill("")
+                        output = app.BASE / "output"
+                        output.mkdir(exist_ok=True)
+                        page.screenshot(path=str(output / "custom-fields-desktop.png"), full_page=True)
+                        page.set_viewport_size({"width": 390, "height": 844})
+                        self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
+                        page.screenshot(path=str(output / "custom-fields-mobile.png"), full_page=True)
+                        page.locator("#project-edit-details").click()
+                        editor.get_by_role("button", name="Remove field", exact=True).click()
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator("#project-detail-values")).not_to_contain_text("Lot 25")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_automatic_app_and_excel_edit_workflow(self):
         from auto_lookup import AutoLookup
         from unittest.mock import Mock

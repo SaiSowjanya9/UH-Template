@@ -14,7 +14,7 @@
     <a href="/" class="brand" aria-label="UH Homes home"><img class="brand-wordmark" src="/brand/wordmark.png" alt="UH Homes"><small>SELECTIONS STUDIO</small></a>
     <div class="workspace-label">YOUR WORKSPACE <span>LOCAL</span></div>
     <nav aria-label="Workspace navigation">
-      <button class="nav-item active" data-view="selections"><span class="nav-symbol">▦</span> Project selections</button>
+      <button class="nav-item active" data-view="selections"><span class="nav-symbol">▦</span> Selection tracker</button>
       <button class="nav-item" data-view="review"><span class="nav-symbol">◇</span> Review matches <span id="review-count" class="nav-count">0</span></button>
       <button class="nav-item" data-view="presentation"><span class="nav-symbol">▤</span> Client presentations</button>
     </nav>
@@ -23,7 +23,7 @@
     <div class="sidebar-bottom">
       <button class="nav-item" data-view="manufacturers"><span class="nav-symbol">◫</span> Manufacturers</button>
       <button id="setup-button" class="nav-item"><span class="nav-symbol">⚙</span> Setup & workbook</button>
-      <div class="local-note"><span class="status-dot"></span><div>Saved to your master Excel<small>On this computer · No cloud sync</small></div></div>
+      <div class="local-note"><span class="status-dot"></span><div>Project workspace<small>Local preview · Hosting not configured</small></div></div>
     </div>
   </aside>
   <div class="app-shell">
@@ -32,11 +32,16 @@
       <div id="load-error" class="notice error" hidden></div>
       <div id="automation-banner" class="notice automation-notice" role="status" hidden><span id="automation-message"></span><button id="retry-automation" class="text-button" hidden>Retry automatic lookup</button></div>
       <div id="busy-banner" class="notice" role="status" hidden><span id="busy-message"></span><button id="cancel-lookup" class="text-button" hidden>Stop after this item</button></div>
-      <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><div class="heading-actions"><button id="import-button" class="button secondary">↑ Import Excel</button><a class="button secondary" href="/api/workbook">↓ Export Excel</a></div></section>
+      <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><details class="data-tools"><summary>Data tools</summary><div class="heading-actions"><button id="import-button" class="button secondary">↑ Import Excel</button><a class="button secondary" href="/api/workbook">↓ Export Excel</a></div></details></section>
       <section id="project-summary" class="project-summary" hidden>
         <div class="project-emblem" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none"><path d="M13 48 50 17 87 48M23 41v42h54V41M42 83V58h16v25M29 48h7v10h-7M64 48h7v10h-7" stroke="currentColor" stroke-width="1.5"/><path d="M10 87h80M63 27V17h10v19" stroke="currentColor"/></svg></div>
         <div class="project-info"><div class="project-meta"><span id="project-id" class="pill"></span><span id="project-date"></span></div><h2 id="project-name"></h2><p id="project-address"></p><div id="project-client" class="project-client"></div></div>
         <button id="edit-project" class="text-button">Edit project ↗</button>
+      </section>
+      <section id="project-details-panel" class="details-panel" hidden>
+        <div class="section-heading"><div><h2>Project details</h2><p>Everything about this project, including the fields you define.</p></div><div class="heading-actions"><button id="project-edit-details" class="button secondary">Edit details</button><button id="project-add-field" class="button primary">+ Add field</button></div></div>
+        <dl id="project-detail-values" class="detail-grid"></dl>
+        <div id="project-custom-empty" class="custom-empty">Need another detail? Add a field name and value, such as Lot number, Construction manager, or Completion date.</div>
       </section>
       <section id="stats" class="stats" aria-label="Project statistics"></section>
       <section id="selections-view" class="view">
@@ -57,7 +62,7 @@
       <footer class="main-footer"><span class="footer-brand"><img src="/brand/symbol.png" alt="">UH HOMES <span class="footer-separator">/</span> SELECTIONS STUDIO</span><span>Thoughtful details. Beautiful homes.</span></footer>
     </main>
   </div>
-  <dialog id="editor"><form id="editor-form"><div class="dialog-heading"><div><div class="eyebrow" id="editor-eyebrow">PROJECT DETAILS</div><h2 id="editor-title">New project</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div id="editor-fields" class="form-grid"></div><p id="editor-note" class="form-note"></p><p id="editor-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button id="editor-save" type="submit" class="button primary">Save changes</button></div></form></dialog>
+  <dialog id="editor"><form id="editor-form"><div class="dialog-heading"><div><div class="eyebrow" id="editor-eyebrow">PROJECT DETAILS</div><h2 id="editor-title">New project</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div id="editor-fields" class="form-grid"></div><section id="custom-fields-editor" class="custom-fields-editor" hidden><div class="custom-fields-heading"><h3>Additional fields</h3><button id="add-custom-field" type="button" class="button secondary">+ Add field</button></div><p class="muted">Fields apply only to this record and appear in its client presentation. Up to 30 fields; use a unique name for each.</p><div id="custom-field-rows"></div><p id="custom-fields-empty" class="custom-empty">No additional fields yet. Add any project or selection detail you need.</p></section><p id="editor-note" class="form-note"></p><p id="editor-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button id="editor-save" type="submit" class="button primary">Save changes</button></div></form></dialog>
   <dialog id="setup-dialog"><div class="dialog-heading"><div><div class="eyebrow">LOCAL WORKSPACE</div><h2>Setup & workbook</h2></div><button class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div class="setup-content"><h3>Master workbook</h3><p id="workbook-name"></p><p>Excel is the source of truth. Close the workbook in Excel before making changes here. The app backs it up before each save, and detects conflicting edits. While the app is running, saved Excel edits are detected automatically. Close Excel to allow the updated links to be written back. Product-name, item-name, manufacturer, model, and finish changes trigger lookup; quantity and notes changes do not.</p><h3>Product search</h3><div id="provider-status" class="notice"></div><p>Copy <code>.env.example</code> to <code>.env</code> in the project folder. Set <code>SEARCH_PROVIDER=brave</code> and add your own <code>BRAVE_API_KEY</code>, then restart the app. SerpAPI and Claude are also supported by the existing lookup script.</p><p>Keep API keys only in your local <code>.env</code> file. Automatic search sends the manufacturer, model number, and product/item name to the provider, not client details. Provider charges may apply after saved product edits. Existing unchanged selections are not searched on first launch. Failed requests retry up to three times, then wait for a manual retry.</p><h3>Presentation branding</h3><p>Your supplied UH Homes wordmark and gold symbol are installed. Edit <code>lookbook_config.json</code> to adjust contact details or brand settings, then restart the app. The starter contact information is a placeholder—replace it before sending final presentations.</p><h3>Excel import</h3><p>Import replaces the master workbook after confirmation, preserving a timestamped copy in <code>backups/</code>. Use the same Projects, Selections, Manufacturers, and Lists sheets as the exported template. Maximum upload: 8 MB.</p><div class="notice">This version is for local use on one computer. It does not include accounts, shared hosting, or multi-user collaboration.</div></div></dialog>
   <input type="file" id="import-file" accept=".xlsx" hidden>
   <div id="toast" role="status" class="toast" hidden></div>

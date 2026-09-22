@@ -1,6 +1,7 @@
 import datetime as dt
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from common import Sheet, clean
 
@@ -75,6 +77,81 @@ def records(wb, name):
             for row, data in Sheet(wb[name]).rows()]
 
 
+def validate_custom_fields(fields, reserved=()):
+    if not isinstance(fields, list) or len(fields) > 30:
+        raise ValidationError("Custom fields must be a list of up to 30 name/value pairs.")
+    result, names = [], set()
+    protected = {name.casefold() for name in [*reserved, "Custom Fields"]}
+    for field in fields:
+        if not isinstance(field, dict) or set(field) != {"name", "value"}:
+            raise ValidationError("Each custom field needs a name and value.")
+        if not all(isinstance(field[key], str) for key in ("name", "value")):
+            raise ValidationError("Custom field names and values must be text.")
+        checked = validate_values(field, ["name", "value"])
+        name, value = checked["name"], checked["value"]
+        if not name or len(name) > 80 or "\n" in name or "\r" in name:
+            raise ValidationError("Field names must contain 1–80 characters on one line.")
+        if len(value) > 2000:
+            raise ValidationError("A custom field value cannot exceed 2,000 characters.")
+        if name.casefold() in names or name.casefold() in protected:
+            raise ValidationError(f"Field name '{name}' is duplicated or already used by a standard field.")
+        names.add(name.casefold())
+        result.append({"name": name, "value": value})
+    if len(json.dumps(result, ensure_ascii=False).encode("utf-16-le")) // 2 > 30000:
+        raise ValidationError("The combined custom fields are too long for one workbook record.")
+    return result
+
+
+def read_custom_fields(value, reserved=()):
+    if not clean(value):
+        return []
+    try:
+        fields = json.loads(value)
+    except (ValueError, TypeError):
+        raise ValidationError("Invalid Custom Fields data. Edit these fields in the web app or import an unmodified export.") from None
+    return validate_custom_fields(fields, reserved)
+
+
+def detailed_records(wb, name):
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS
+    return [{**row, "custom_fields": read_custom_fields(row.get("Custom Fields"), reserved)} for row in records(wb, name)]
+
+
+def presentation_details(project, rows):
+    groups = []
+    fields = project.get("custom_fields", read_custom_fields(project.get("Custom Fields"), PROJECT_FIELDS))
+    if fields:
+        groups.append(("Project details", fields))
+    for index, row in enumerate(rows, start=1):
+        fields = row.get("custom_fields", read_custom_fields(row.get("Custom Fields"), SELECTION_FIELDS))
+        if fields:
+            heading = f"Selection {index}: {row.get('Item', '')}"
+            context = " / ".join(filter(None, [row.get("Section"), row.get("Room / Area"), row.get("Model #")]))
+            groups.append((heading + (f" — {context}" if context else ""), fields))
+    return groups
+
+
+def set_custom_fields(wb, name, row, fields):
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS
+    fields = validate_custom_fields(fields, reserved)
+    sheet = Sheet(wb[name])
+    if not fields and "Custom Fields" not in sheet.cols:
+        return
+    if "Custom Fields" not in sheet.cols:
+        column = sheet.ws.max_column + 1
+        if column > 50:
+            raise ValidationError("This worksheet has no space for the Custom Fields column.")
+        cell = sheet.ws.cell(1, column, "Custom Fields")
+        cell._style = copy(sheet.ws.cell(1, 1)._style)
+        sheet.ws.column_dimensions[get_column_letter(column)].width = 50
+        sheet = Sheet(sheet.ws)
+    value = json.dumps(fields, ensure_ascii=False) if fields else ""
+    put(sheet, row, {"Custom Fields": value})
+    cell = sheet.ws.cell(row, sheet.cols["Custom Fields"])
+    cell.alignment = copy(sheet.ws.cell(row, sheet.cols.get("Client Notes", 2)).alignment)
+    sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+
+
 def next_row(sheet):
     used = {row for row, _ in sheet.rows()}
     row = 2
@@ -105,6 +182,10 @@ def validate_workbook(wb):
             raise ValidationError(f"Missing columns in {name}: {', '.join(sorted(missing))}.")
         sheet = Sheet(ws)
         for row, data in sheet.rows():
+            if name in {"Projects", "Selections"} and "Custom Fields" in sheet.cols:
+                if ws.cell(row, sheet.cols["Custom Fields"]).data_type == "f":
+                    raise ValidationError(f"Formulas are not allowed in Custom Fields: {name}, row {row}.")
+                read_custom_fields(data.get("Custom Fields"), fields)
             for field in fields:
                 if ws.cell(row, sheet.cols[field]).data_type == "f":
                     raise ValidationError(f"Formulas are not allowed in input cells: {name}, row {row}, {field}.")
