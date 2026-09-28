@@ -155,10 +155,11 @@ class AutoLookupTests(unittest.TestCase):
         self.engine.tick()
         self.assertEqual(self.search.call_count, 4)
 
-    def test_app_save_queues_and_exports_use_new_link(self):
+    def test_app_save_queues_and_exports_use_new_product(self):
         import io
-        import zipfile
         import app
+        from pptx import Presentation
+        from pypdf import PdfReader
         row = self.rows()[0]
         with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine):
             client = app.app.test_client()
@@ -166,6 +167,8 @@ class AutoLookupTests(unittest.TestCase):
             def post(path, data):
                 revision = client.get("/api/state").json["revision"]
                 return client.post(path, json={"revision": revision, **data}, headers=headers)
+            self.change(row["_row"], {"Product Name": "Superseded fixture"})
+            self.engine.observe(self.store.snapshot()[0])
             saved = post("/api/selections", {"row": row["_row"], "values": {"Model #": "NEW-MODEL"}})
             self.assertEqual(saved.status_code, 200, saved.json)
             self.assertTrue(saved.json["queued"])
@@ -177,12 +180,15 @@ class AutoLookupTests(unittest.TestCase):
             self.engine.tick()
             pdf = post("/api/presentation", {"project": row["Project ID"], "format": "pdf", "mode": "draft"})
             self.assertEqual(pdf.status_code, 200)
-            self.assertIn(b"https://example.com/new-product", pdf.data)
+            text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages)
+            self.assertIn("Matched product", text)
+            self.assertNotIn("Superseded fixture", text)
             pptx = post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "draft"})
             self.assertEqual(pptx.status_code, 200)
-            with zipfile.ZipFile(io.BytesIO(pptx.data)) as archive:
-                links = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".rels"))
-            self.assertIn(b"https://example.com/new-product", links)
+            slides = Presentation(io.BytesIO(pptx.data)).slides
+            text = "\n".join(shape.text for slide in slides for shape in slide.shapes if shape.has_text_frame)
+            self.assertIn("Matched product", text)
+            self.assertNotIn("Superseded fixture", text)
 
     def test_direct_excel_edit_is_hidden_before_worker_runs(self):
         import app

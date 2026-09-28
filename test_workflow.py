@@ -1,4 +1,5 @@
 import io
+import re
 import shutil
 import tempfile
 import unittest
@@ -93,6 +94,34 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("token", state)
         self.assertEqual(set(state["provider"]), {"name", "ready", "key_name"})
 
+    def test_excel_edits_flow_into_the_interface_and_the_schedule(self):
+        """Excel stays the source of truth: sheet edits appear in state and on the deliverable."""
+        wb, revision = self.store.snapshot()
+        wb["Lists"].cell(13, 1, "Outdoor Living")
+        project = wb["Projects"].cell(2, 1).value
+        sheet = common.Sheet(wb["Selections"])
+        row = sheet.ws.max_row + 1
+        for header, value in [("Project ID", project), ("Section", "Outdoor Living"), ("Item", "Pergola"),
+                              ("Manufacturer", "Test Brand"), ("Finish / Color", "Matte Black"),
+                              ("Include in Lookbook", "Yes"), ("Lookup Status", "Not run")]:
+            sheet.set(row, header, value)
+        self.store.save(wb, revision)
+
+        state = self.state()
+        self.assertEqual(state["sections"][-1], "Outdoor Living")
+        self.assertTrue(any(r["Item"] == "Pergola" and r["Section"] == "Outdoor Living" for r in state["selections"]))
+        response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
+        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        self.assertIn("O U T D O O R   L I V I N G", text)
+        self.assertIn("Test Brand Matte Black", text)
+        sections = [line for line in text.splitlines() if line.startswith(("E X", "R O", "W I", "K I", "O U"))]
+        self.assertEqual(sections[-1], "O U T D O O R   L I V I N G")
+
     def test_create_project_and_selection_preserve_text_models(self):
         response = self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-1", "Project Name": "Test House"}})
         self.assertEqual(response.status_code, 200, response.json)
@@ -175,9 +204,9 @@ class AppTests(unittest.TestCase):
         data = self.state()
         project = data["projects"][0]
         other = data["projects"][1]
-        with patch("build_lookbook.get_image", return_value=None), patch("build_powerpoint.get_image", return_value=None):
-            pdf = self.post("/api/presentation", {"project": project["Project ID"], "format": "pdf", "mode": "draft"})
-            pptx = self.post("/api/presentation", {"project": project["Project ID"], "format": "pptx", "mode": "draft"})
+        options = {"project": project["Project ID"], "mode": "draft", "title": "Exterior Selections", "prefix": "EX"}
+        pdf = self.post("/api/presentation", {**options, "format": "pdf"})
+        pptx = self.post("/api/presentation", {**options, "format": "pptx"})
         self.assertEqual(pdf.status_code, 200, pdf.json if pdf.is_json else "")
         self.assertTrue(pdf.data.startswith(b"%PDF-"))
         self.assertGreater(len(pdf.data), 5000)
@@ -190,14 +219,33 @@ class AppTests(unittest.TestCase):
             text = "\n".join(page.extract_text() for page in reader.pages)
             self.assertIn(project["Project Name"], text)
             self.assertNotIn(other["Project Name"], text)
-            self.assertIn("DRAFT", text)
+            for expected in ["FINISH SCHEDULE", "Exterior Selections", "EX-01", "Client Signature", "DRAFT"]:
+                self.assertIn(expected, text)
         self.assertEqual(pptx.status_code, 200, pptx.json if pptx.is_json else "")
         presentation = Presentation(io.BytesIO(pptx.data))
+        self.assertEqual((presentation.slide_width, presentation.slide_height), (7772400, 10058400))
         text = "\n".join(shape.text for slide in presentation.slides for shape in slide.shapes if shape.has_text_frame)
         self.assertIn(project["Project Name"], text)
         self.assertNotIn(other["Project Name"], text)
-        self.assertIn("DRAFT", text)
-        self.assertGreater(len(presentation.slides), 4)
+        for expected in ["Exterior Selections", "EX-01", "Client Signature", "DRAFT"]:
+            self.assertIn(expected, text)
+
+    def test_schedule_title_and_prefix_are_validated(self):
+        project = self.state()["projects"][0]["Project ID"]
+        for invalid in [{"title": "x" * 81}, {"prefix": "way-too-long"}, {"prefix": "EX 1"}, {"title": "Line\nbreak"}]:
+            response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft", **invalid})
+            self.assertEqual(response.status_code, 400, invalid)
+        response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft",
+                                                   "title": "Interior Selections", "prefix": "in"})
+        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
+        self.assertIn("Interior_Selections", response.headers["Content-Disposition"])
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        self.assertIn("IN-01", text)
+        self.assertNotIn("EX-01", text)
 
     def test_verified_only_export_omits_pending_and_hidden_rows(self):
         from pptx import Presentation
@@ -205,13 +253,14 @@ class AppTests(unittest.TestCase):
         row = data["selections"][0]
         self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/product"}})
         self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
-        with patch("build_powerpoint.get_image", return_value=None):
-            response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "verified"})
+        response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "verified"})
         self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
         prs = Presentation(io.BytesIO(response.data))
         text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if shape.has_text_frame)
-        self.assertIn("1 SELECTIONS", text)
+        self.assertIn(row["Item"], text)
         self.assertNotIn("DRAFT", text)
+        unverified = next(r for r in self.state()["selections"] if r["Project ID"] == row["Project ID"] and r["_row"] != row["_row"])
+        self.assertNotIn(unverified["Item"], text)
         self.post("/api/selections", {"row": row["_row"], "values": {"Include in Lookbook": "No"}})
         response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "verified"})
         self.assertEqual(response.status_code, 400)
@@ -276,29 +325,30 @@ class RemoteTests(unittest.TestCase):
 class BrandingTests(unittest.TestCase):
     def test_logos_retain_transparency_and_aspect_ratio(self):
         from branding import load_logo
-        from build_lookbook import CFG, logo
+        from build_lookbook import CFG, brand_image
         from unittest.mock import Mock
-        for field in ["logo_path", "logo_mark_path"]:
+        for field in ["logo_path", "logo_print_path", "logo_mark_path"]:
             image = load_logo(CFG[field])
             self.assertIsNotNone(image)
             self.assertEqual(image.mode, "RGBA")
             self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
         canvas = Mock()
-        self.assertTrue(logo(canvas, 396, 346, 40, max_width=300, centered=True))
+        self.assertTrue(brand_image(canvas, CFG["logo_print_path"], 46.8, 734.4, height=20.16))
         _, x, y, width, height = canvas.drawImage.call_args.args
-        image = load_logo(CFG["logo_path"])
+        image = load_logo(CFG["logo_print_path"])
         self.assertAlmostEqual(width / height, image.width / image.height)
-        self.assertAlmostEqual(x + width / 2, 396)
-        self.assertLessEqual(width, 300)
+        self.assertEqual((x, y, round(height, 2)), (46.8, 734.4, 20.16))
         self.assertEqual(canvas.drawImage.call_args.kwargs["mask"], "auto")
 
     def test_branding_embedded_in_pdf_and_powerpoint(self):
         import build_lookbook
         from PIL import Image
         from pptx import Presentation
+        from branding import load_logo
         from workbook_store import SELECTION_FIELDS
         project = {"Project ID": "BRAND", "Project Name": "Branding preview"}
         row = {**{key: "" for key in SELECTION_FIELDS}, "Section": "Kitchen", "Item": "Test fixture"}
+        wordmark = load_logo(build_lookbook.CFG["logo_print_path"])
         with tempfile.TemporaryDirectory() as folder:
             pdf = build_lookbook.build("BRAND", project, [row], True, Path(folder))
             pptx = build_powerpoint.build("BRAND", project, [row], True, Path(folder))
@@ -306,47 +356,150 @@ class BrandingTests(unittest.TestCase):
             prs = Presentation(pptx)
             for slide in [prs.slides[0], prs.slides[-1]]:
                 pictures = [shape for shape in slide.shapes if shape.shape_type == 13]
-                logos = [shape for shape in pictures if shape.image.size == (894, 132)]
+                logos = [shape for shape in pictures if shape.image.size == wordmark.size]
                 self.assertEqual(len(logos), 1)
                 with Image.open(io.BytesIO(logos[0].image.blob)) as image:
                     self.assertEqual(image.mode, "RGBA")
                     self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
-                self.assertAlmostEqual(logos[0].width / logos[0].height, 894 / 132, places=4)
+                self.assertAlmostEqual(logos[0].width / logos[0].height, wordmark.width / wordmark.height, places=3)
 
 
-class PresentationTests(unittest.TestCase):
-    def test_local_images_are_embedded_in_both_formats(self):
+TEMPLATE_ROWS = [
+    ("Walls & Trim", "Stucco", "Smooth stucco finish"),
+    ("Walls & Trim", "Stucco Color", "Sherwin-Williams White Duck (SW 7010) \u2013 warm white"),
+    ("Walls & Trim", "Trim", "Sherwin-Williams White Duck (SW 7010)"),
+    ("Walls & Trim", "Gutters & Downspouts", "Painted to match Sherwin-Williams White Duck (SW 7010)"),
+    ("Roofing", "Roof", "Owens Corning Duration Storm shingles \u2013 Estate Gray"),
+    ("Roofing", "Standing Seam Metal Roof & Awnings", "Matte black"),
+    ("Doors & Windows", "Windows", "Black exterior window frames"),
+    ("Doors & Windows", "Front Door", "Contemporary vertical plank design in a warm natural wood finish"),
+    ("Doors & Windows", "Garage Door", "Contemporary vertical plank design in a warm natural wood finish to coordinate with the front door"),
+    ("Doors & Windows", "Pedestrian Gate", "Black steel frame with horizontal wood-look slats in a warm natural wood finish to coordinate with the front door and garage door"),
+    ("Lighting", "Exterior Lighting", "Contemporary matte black fixtures"),
+]
+
+
+def page_geometry(path):
+    """Absolute positions of every text baseline and rule on a schedule's first page.
+
+    Two harmless differences from the approved template are normalised: its section-heading
+    rules run 6pt past the right margin, and it prints a placeholder for empty band values.
+    """
+    from pypdf import PdfReader
+    stream = PdfReader(str(path)).pages[0].get_contents().get_data().decode("latin-1")
+    marks, stack, x, y = [], [], 0.0, 0.0
+    for line in stream.splitlines():
+        if line == "q":
+            stack.append((x, y))
+        elif line == "Q" and stack:
+            x, y = stack.pop()
+        elif match := re.fullmatch(r"1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm", line):
+            x, y = x + float(match[1]), y + float(match[2])
+        elif match := re.match(r"BT 1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm.*\(.+\) Tj", line):
+            position = (round(x + float(match[1]), 2), round(y + float(match[2]), 2))
+            if position[1] != 657:
+                marks.append(("text", *position))
+        elif match := re.fullmatch(r"n (-?[\d.]+) (-?[\d.]+) m (-?[\d.]+) (-?[\d.]+) l S", line):
+            x1, y1, x2, y2 = (float(match[index]) for index in (1, 2, 3, 4))
+            marks.append(("rule", round(x + x1, 2), round(y + y1, 2), round(min(x + x2, 565.2), 2), round(y + y2, 2)))
+    return sorted(marks)
+
+
+class ScheduleTests(unittest.TestCase):
+    """The client deliverable follows the approved finish schedule template."""
+
+    def test_layout_matches_the_approved_template(self):
         import build_lookbook
-        import build_powerpoint
-        from PIL import Image
-        from pptx import Presentation
         from workbook_store import SELECTION_FIELDS
+        template = Path("brand_assets/finish_schedule_template.pdf")
+        if not template.exists():
+            self.skipTest("Reference template PDF is not available.")
+        rows = [{**{key: "" for key in SELECTION_FIELDS}, "Section": section, "Item": item,
+                 "Client Notes": note, "Lookup Status": "Verified"} for section, item, note in TEMPLATE_ROWS]
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            image = root / "product.png"
-            Image.new("RGBA", (120, 80), (100, 140, 110, 180)).save(image)
-            project = {"Project ID": "IMAGE", "Project Name": "Image test", "Cover Image": str(image)}
-            row = {**{key: "" for key in SELECTION_FIELDS}, "Section": "Kitchen", "Item": "Test fixture", "Image URL": str(image), "Product URL": "https://example.com/product", "Lookup Status": "Verified"}
-            with patch("build_lookbook.CACHE", root / "cache"):
-                pdf = build_lookbook.build("IMAGE", project, [row], False, root)
-                pptx = build_powerpoint.build("IMAGE", project, [row], False, root)
-            self.assertIn(b"/Subtype /Image", pdf.read_bytes())
-            self.assertIn(b"https://example.com/product", pdf.read_bytes())
-            prs = Presentation(pptx)
-            self.assertTrue(any(shape.shape_type == 13 and shape.image.size == (120, 80) for slide in prs.slides for shape in slide.shapes))
-            self.assertTrue(any(run.hyperlink.address == row["Product URL"] for slide in prs.slides for shape in slide.shapes if shape.has_text_frame for p in shape.text_frame.paragraphs for run in p.runs))
+            pdf = build_lookbook.build("UH-000", {"Project Name": ""}, rows, False, Path(folder),
+                                       title="Exterior Selections", prefix="EX")
+            self.assertEqual(page_geometry(pdf), page_geometry(template))
 
-    def test_many_sections_paginate_pdf_and_pptx(self):
+    def rows(self, count=1, **values):
+        from workbook_store import SELECTION_FIELDS
+        return [{**{key: "" for key in SELECTION_FIELDS}, "Section": "Roofing", "Item": f"Item {index}",
+                 "Lookup Status": "Verified", **values} for index in range(1, count + 1)]
+
+    def text(self, path):
+        from pypdf import PdfReader
+        return "\n".join(page.extract_text() for page in PdfReader(str(path)).pages)
+
+    def test_descriptions_are_assembled_from_workbook_columns(self):
+        from build_lookbook import description
+        cases = [
+            ({"Manufacturer": "Sherwin-Williams", "Finish / Color": "White Duck (SW 7010)", "Client Notes": "warm white"},
+             "Sherwin-Williams White Duck (SW 7010) \u2013 warm white"),
+            ({"Manufacturer": "Owens Corning", "Product Name": "Duration Storm shingles", "Finish / Color": "Estate Gray"},
+             "Owens Corning Duration Storm shingles \u2013 Estate Gray"),
+            ({"Manufacturer": "Delta", "Product Name": "Trinsic vanity faucet", "Model #": "559LF-PP",
+              "Finish / Color": "Chrome", "Qty": "2"},
+             "Delta Trinsic vanity faucet (Model 559LF-PP) \u2013 Chrome \u2013 Qty 2"),
+            ({"Manufacturer": "Moen", "Model #": "7594ESRS", "Finish / Color": "Spot Resist Stainless", "Qty": "1"},
+             "Moen 7594ESRS \u2013 Spot Resist Stainless"),
+        ]
+        for values, expected in cases:
+            self.assertEqual(description({**{key: "" for key in ["Manufacturer", "Product Name", "Model #", "Finish / Color", "Qty", "Client Notes"]}, **values}), expected)
+
+    def test_schedule_page_keeps_the_template_furniture_without_links(self):
+        import build_lookbook
+        from pypdf import PdfReader
+        project = {"Project ID": "SCHED", "Project Name": "Template home", "Client Name": "Test client",
+                   "Address": "1 Test Way", "Plan / Elevation": "Plan 1", "Presentation Date": "2026-10-01"}
+        rows = self.rows(2, Manufacturer="Test", **{"Product URL": "https://example.com/product",
+                                                    "Image URL": "https://example.com/image.jpg"})
+        with tempfile.TemporaryDirectory() as folder:
+            pdf = build_lookbook.build("SCHED", project, rows, False, Path(folder), title="Exterior Selections", prefix="EX")
+            reader = PdfReader(str(pdf))
+            self.assertEqual(len(reader.pages), 1)
+            self.assertEqual([round(value) for value in reader.pages[0].mediabox], [0, 0, 612, 792])
+            text = self.text(pdf)
+            for expected in ["FINISH SCHEDULE", "Exterior Selections", "Test client", "Template home / Plan 1",
+                             "1 Test Way", "October 1, 2026", "R O O F I N G", "EX-01", "EX-02",
+                             "Client Signature", "UH Homes Representative", "Page 1"]:
+                self.assertIn(expected, text)
+            self.assertNotIn("DRAFT", text)
+            raw = pdf.read_bytes()
+            self.assertNotIn(b"https://example.com/product", raw)
+            self.assertNotIn(b"https://example.com/image.jpg", raw)
+            self.assertEqual(sorted(image.image.size for image in reader.pages[0].images), [(379, 344), (2364, 346)])
+            self.assertIsNone(reader.pages[0].get("/Annots"))
+
+    def test_long_schedules_paginate_and_repeat_the_furniture(self):
         import build_lookbook
         import build_powerpoint
-        from workbook_store import SELECTION_FIELDS
+        from pptx import Presentation
+        from pypdf import PdfReader
         project = {"Project ID": "TEST", "Project Name": "A test home with many categories", "Client Name": "Test client"}
-        rows = [{**{key: "" for key in SELECTION_FIELDS}, "Section": f"Section {i:02}", "Item": f"Item {i}", "Manufacturer": "Test", "Lookup Status": "Not run"} for i in range(31)]
-        with tempfile.TemporaryDirectory() as folder, patch("build_lookbook.get_image", return_value=None), patch("build_powerpoint.get_image", return_value=None):
+        rows = [{**self.rows(1, Manufacturer="Test", Section=f"Section {index:02}")[0], "Item": f"Item {index}",
+                 "Client Notes": "A long client-facing description that wraps onto a second printed line. " * 2}
+                for index in range(31)]
+        with tempfile.TemporaryDirectory() as folder:
             pdf = build_lookbook.build("TEST", project, rows, True, Path(folder))
             pptx = build_powerpoint.build("TEST", project, rows, True, Path(folder))
-            self.assertTrue(pdf.read_bytes().startswith(b"%PDF-"))
-            self.assertTrue(pptx.read_bytes().startswith(b"PK"))
+            reader = PdfReader(str(pdf))
+            self.assertGreater(len(reader.pages), 1)
+            pages = [page.extract_text() for page in reader.pages]
+            for index, page in enumerate(pages, start=1):
+                self.assertIn(f"Page {index}", page)
+                self.assertIn("FINISH SCHEDULE", page)
+            self.assertIn("Client Signature", pages[-1])
+            joined = "\n".join(pages)
+            for index in range(31):
+                self.assertIn(f"Item {index}", joined)
+            prs = Presentation(pptx)
+            self.assertGreater(len(prs.slides), 1)
+            slides = ["\n".join(shape.text for shape in slide.shapes if shape.has_text_frame) for slide in prs.slides]
+            for index, slide in enumerate(slides, start=1):
+                self.assertIn(f"Page {index}", slide)
+            self.assertIn("Client Signature", slides[-1])
+            for index in range(31):
+                self.assertIn(f"Item {index}", "\n".join(slides))
 
 
 if __name__ == "__main__":

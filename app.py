@@ -2,6 +2,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -72,6 +73,7 @@ def favicon():
 @app.get("/brand/<name>.png")
 def brand_asset(name):
     sources = {"wordmark": build_lookbook.CFG.get("logo_path"),
+               "wordmark-print": build_lookbook.CFG.get("logo_print_path"),
                "symbol": build_lookbook.CFG.get("logo_mark_path"),
                "icon": "brand_assets/uh-icon.png"}
     source = sources.get(name)
@@ -213,7 +215,6 @@ def save_manufacturer():
     values = validate_values(data.get("values"), ["Manufacturer", "Official Domain", "Notes"])
     name = values.get("Manufacturer", "")
     domain = values.get("Official Domain", "").lower().removeprefix("https://").removeprefix("http://").removeprefix("www.").rstrip("/")
-    import re
     if not name or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}", domain):
         raise ValidationError("Enter a manufacturer name and a domain such as brand.com, without a page path.")
     values["Official Domain"] = domain
@@ -287,6 +288,16 @@ def import_workbook():
     return jsonify(ok=True)
 
 
+def schedule_options(data):
+    """Per-export schedule title and item code prefix, falling back to the branding defaults."""
+    title, prefix = common.clean(data.get("title")), common.clean(data.get("prefix"))
+    if len(title) > 80 or any(ord(character) < 32 for character in title):
+        raise ValidationError("Enter a schedule title of up to 80 characters on one line.")
+    if prefix and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,5}", prefix):
+        raise ValidationError("The item code prefix must be 1-6 letters, numbers, or hyphens, such as EX.")
+    return title or None, prefix or None
+
+
 @app.post("/api/presentation")
 def presentation():
     data = payload()
@@ -297,6 +308,7 @@ def presentation():
     mode, kind = data.get("mode", "draft"), data.get("format", "pdf")
     if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx"}:
         raise ValidationError("Invalid presentation options.")
+    title, prefix = schedule_options(data)
     rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
     if automation:
         with store.lock:
@@ -315,12 +327,12 @@ def presentation():
     rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
         if kind == "pdf":
-            output = build_lookbook.build(project["Project ID"], project, rows, mode == "draft", output_dir=Path(folder))
-            mime = "application/pdf"
+            build_schedule, mime = build_lookbook.build, "application/pdf"
         else:
-            from build_powerpoint import build
-            output = build(project["Project ID"], project, rows, mode == "draft", output_dir=Path(folder))
+            from build_powerpoint import build as build_schedule
             mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        output = build_schedule(project["Project ID"], project, rows, mode == "draft",
+                                output_dir=Path(folder), title=title, prefix=prefix)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=mime)
 

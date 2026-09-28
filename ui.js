@@ -77,6 +77,52 @@ function selectionDetails(row) {
   return `<details class="selection-details"><summary>${fields.length} additional field${fields.length === 1 ? "" : "s"}</summary><dl>${fields.map((field) => `<div><dt>${esc(field.name)}</dt><dd>${detailValue(field.value)}</dd></div>`).join("")}</dl></details>`;
 }
 
+const PREVIEW_ROWS = 7;
+
+function scheduleDefaults() {
+  return state.data?.branding?.schedule || {};
+}
+
+function scheduleOptions() {
+  const defaults = scheduleDefaults();
+  return { title: $("export-title").value.trim() || defaults.title || "Selections",
+           prefix: ($("export-prefix").value.trim() || defaults.code_prefix || "EX").toUpperCase() };
+}
+
+function rowDescription(row) {
+  const product = row["Product Name"] || row["Model #"];
+  let identity = [row.Manufacturer, product].filter(Boolean).join(" ");
+  let finish = row["Finish / Color"] || "";
+  if (!product && finish) { identity = [identity, finish].filter(Boolean).join(" "); finish = ""; }
+  const model = row["Model #"];
+  if (model && product !== model && !identity.toLowerCase().includes(model.toLowerCase())) identity = `${identity} (Model ${model})`.trim();
+  const qty = Number(row.Qty) === 1 || !row.Qty ? "" : `Qty ${row.Qty}`;
+  return [identity, finish, qty, row["Client Notes"]].filter(Boolean).join(" \u2013 ");
+}
+
+function renderPreview(project, included) {
+  const branding = state.data.branding || {}, defaults = scheduleDefaults();
+  const { title, prefix } = scheduleOptions();
+  $("preview-eyebrow").textContent = (branding.tagline || "Finish Schedule").toUpperCase();
+  $("preview-title").textContent = title;
+  $("preview-contact").textContent = branding.contact_line || "";
+  $("preview-note").textContent = defaults.note || "";
+  $("preview-sign").innerHTML = (defaults.signatures || []).map((label) => `<span>${esc(label)}</span>`).join("");
+  const plan = [project?.["Project Name"], project?.["Plan / Elevation"]].filter(Boolean).join(" / ");
+  $("preview-band").innerHTML = [["CLIENT", project?.["Client Name"]], ["PROJECT / LOT", plan],
+                                 ["ADDRESS", project?.Address], ["DATE", project?.["Presentation Date"]?.slice(0, 10)]]
+    .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "")}</dd></div>`).join("");
+  const mode = $("export-mode").value;
+  const rows = (mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified") : included);
+  let markup = "", section = "";
+  rows.slice(0, PREVIEW_ROWS).forEach((row, index) => {
+    if (row.Section !== section) { section = row.Section; markup += `<div class="sheet-section">${esc(section || "Other")}</div>`; }
+    markup += `<div class="sheet-row"><span>${esc(prefix)}-${String(index + 1).padStart(2, "0")}</span><strong>${esc(row.Item)}</strong><em>${esc(rowDescription(row))}</em></div>`;
+  });
+  if (rows.length > PREVIEW_ROWS) markup += `<div class="sheet-more">+ ${rows.length - PREVIEW_ROWS} more selection${rows.length - PREVIEW_ROWS === 1 ? "" : "s"} in the download</div>`;
+  $("preview-rows").innerHTML = markup || '<div class="sheet-more">Add selections to this project to see them here.</div>';
+}
+
 function render() {
   const data = state.data;
   if (!data) return;
@@ -110,7 +156,7 @@ function render() {
   $("review-count").textContent = rows.length - verified;
   $("page-title").textContent = names[state.view];
   $("breadcrumb-name").textContent = project && state.view !== "manufacturers" ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
-  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", review: "The right product, down to the last detail.", presentation: "Your selections, beautifully presented.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
+  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", review: "The right product, down to the last detail.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
   $("add-selection").disabled = !project || state.busy;
@@ -121,9 +167,9 @@ function render() {
   $("selection-count").textContent = rows.length;
   renderTable();
   renderReview();
-  $("preview-title").textContent = project?.["Project Name"] || "Your next beautiful home.";
-  $("preview-client").textContent = project?.["Client Name"] ? `Prepared for ${project["Client Name"]}` : "Add a project to begin";
-  $("preview-date").textContent = project?.["Presentation Date"]?.slice(0, 10) || "";
+  $("export-title").placeholder = scheduleDefaults().title || "Selections";
+  $("export-prefix").placeholder = scheduleDefaults().code_prefix || "EX";
+  renderPreview(project, included);
   const mode = $("export-mode").value;
   const count = mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified").length : included.length;
   const pending = included.filter((r) => r["Lookup Status"] !== "Verified").length;
@@ -276,18 +322,19 @@ async function lookup(row) {
 }
 
 async function exportPresentation(format) {
-  setBusy(true, `Building your ${format === "pdf" ? "PDF" : "PowerPoint"} presentation. Product images may take a moment to load…`);
+  const { title, prefix } = scheduleOptions();
+  setBusy(true, `Building your ${format === "pdf" ? "PDF" : "PowerPoint"} finish schedule…`);
   try {
-    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format }, true);
+    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix }, true);
     const blob = await response.blob(), url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${state.project}_Selections${$("export-mode").value === "draft" ? "_DRAFT" : ""}.${format}`;
+    link.download = `${[state.project, title.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")].filter(Boolean).join("_")}${$("export-mode").value === "draft" ? "_DRAFT" : ""}.${format}`;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    toast("Presentation downloaded. Review the layout and branding before sharing with your client.");
+    toast("Finish schedule downloaded. Review the layout and branding before sharing with your client.");
   } finally { setBusy(false); }
 }
 
@@ -355,6 +402,8 @@ $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("can
 $("export-pdf").addEventListener("click", () => action(() => exportPresentation("pdf")));
 $("export-pptx").addEventListener("click", () => action(() => exportPresentation("pptx")));
 $("export-mode").addEventListener("change", render);
+$("export-title").addEventListener("input", render);
+$("export-prefix").addEventListener("input", render);
 $("import-button").addEventListener("click", () => { if (state.data && !state.busy) $("import-file").click(); });
 $("import-file").addEventListener("change", (event) => { const file = event.target.files[0]; event.target.value = ""; action(() => importWorkbook(file)); });
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
