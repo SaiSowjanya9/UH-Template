@@ -28,7 +28,8 @@ from reportlab.lib.utils import simpleSplit
 
 from branding import load_logo
 from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTENT_W, FIELD_GAP,
-                            FIELD_W, FONT_B, FONT_BB, HEADING_GAP, HEADING_H, ITEM_W, LOGO_H, M, MARK_W,
+                            FIELD_W, FONT_B, FONT_BB, HEADING_GAP, HEADING_H, HEADING_OVERHANG, ITEM_W,
+                            LOGO_H, M, MARK_W,
                             OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, SCHEDULE, SECTION_GAP, SIGN_H, SIGN_W,
                             SIGN_X, STATUS_W, band_values, clean, code_prefix, description, fit,
                             group_sections, load_data, numbered, presentation_details, schedule_title, spaced_caps)
@@ -192,8 +193,8 @@ class Deck:
         slide = self.room(HEADING_H + 25)
         text = spaced_caps(text)
         label(slide, M + PAD_X, self.y - HEADING_H + 5, CONTENT_W, text, 8, COLORS["dark"], bold=True)
-        rule(slide, M + PAD_X + pdfmetrics.stringWidth(text, FONT_BB, 8) + HEADING_GAP, PAGE_W - M,
-             self.y - HEADING_H + 8, COLORS["heading_rule"])
+        rule(slide, M + PAD_X + pdfmetrics.stringWidth(text, FONT_BB, 8) + HEADING_GAP,
+             PAGE_W - M + HEADING_OVERHANG, self.y - HEADING_H + 8, COLORS["heading_rule"])
         self.y -= HEADING_H
 
     def row(self, cells, hairline):

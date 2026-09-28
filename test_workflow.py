@@ -382,8 +382,8 @@ TEMPLATE_ROWS = [
 def page_geometry(path):
     """Absolute positions of every text baseline and rule on a schedule's first page.
 
-    Two harmless differences from the approved template are normalised: its section-heading
-    rules run 6pt past the right margin, and it prints a placeholder for empty band values.
+    One harmless difference from the approved template is normalised: it prints a
+    placeholder for empty band values.
     """
     from pypdf import PdfReader
     stream = PdfReader(str(path)).pages[0].get_contents().get_data().decode("latin-1")
@@ -401,7 +401,7 @@ def page_geometry(path):
                 marks.append(("text", *position))
         elif match := re.fullmatch(r"n (-?[\d.]+) (-?[\d.]+) m (-?[\d.]+) (-?[\d.]+) l S", line):
             x1, y1, x2, y2 = (float(match[index]) for index in (1, 2, 3, 4))
-            marks.append(("rule", round(x + x1, 2), round(y + y1, 2), round(min(x + x2, 565.2), 2), round(y + y2, 2)))
+            marks.append(("rule", round(x + x1, 2), round(y + y1, 2), round(x + x2, 2), round(y + y2, 2)))
     return sorted(marks)
 
 

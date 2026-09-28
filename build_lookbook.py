@@ -49,6 +49,7 @@ PAD_X, PAD_Y = 6, 6.5            # table cell padding
 BAND_H, FIELD_W, FIELD_GAP = 56, 113.4, 14.4
 BAND_GAP, SECTION_GAP = 14, 10   # space below the band / above a section heading
 HEADING_H, HEADING_GAP = 15.84, 10   # heading block height, gap between its text and its rule
+HEADING_OVERHANG = 6                 # section-heading rules run past the right margin
 SIGN_W = [172.8, 79.2, 172.8, 79.2]
 SIGN_H, SIGN_X = 42.48, 7.2
 BAND_FIELDS = ["CLIENT", "PROJECT / LOT", "ADDRESS", "DATE"]
@@ -282,7 +283,7 @@ class Band(Flowable):
 
 
 class Heading(Flowable):
-    """Letter-spaced section heading with a rule running to the right margin."""
+    """Letter-spaced section heading with a rule running past the right margin."""
 
     def __init__(self, text):
         super().__init__()
@@ -297,7 +298,8 @@ class Heading(Flowable):
         place(canvas, PAD_X, 5, self.text, FONT_BB, 8, C["dark"])
         canvas.setStrokeColor(C["heading_rule"])
         canvas.setLineWidth(0.5)
-        canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 8) + HEADING_GAP, 8, CONTENT_W, 8)
+        canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 8) + HEADING_GAP, 8,
+                    CONTENT_W + HEADING_OVERHANG, 8)
 
 
 class SignOff(Flowable):
