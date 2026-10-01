@@ -10,7 +10,8 @@ from pathlib import Path
 
 import common
 import find_urls
-from workbook_store import ConflictError, IDENTITY_FIELDS, ValidationError, http_url, put, records, validate_values, SELECTION_FIELDS
+from workbook_store import (ConflictError, IDENTITY_FIELDS, ValidationError, http_url, put, records,
+                            validate_values, SELECTION_FIELDS, workbook_open_elsewhere)
 
 
 def digest(value):
@@ -43,7 +44,9 @@ class AutoLookup:
                     if job["phase"] == "searching":
                         job["phase"] = "queued"
             except (ValueError, KeyError, TypeError):
-                raise ValidationError("Automatic lookup history could not be read. Restore the lookup_state file before generating presentations.") from None
+                stamp_name = f"{self.state_path.name}.corrupt-{dt.datetime.now():%Y%m%d_%H%M%S}"
+                self.state_path.rename(self.state_path.with_name(stamp_name))
+                self.message = "Automatic lookup history was unreadable; the unreadable file was set aside and history rebuilt."
 
     def _persist(self):
         content = json.dumps({"entries": self.entries, "pending": self.pending}, sort_keys=True)
@@ -106,7 +109,7 @@ class AutoLookup:
             self._persist()
 
     def excel_open(self):
-        return self.store.path.with_name("~$" + self.store.path.name).exists()
+        return workbook_open_elsewhere(self.store.path)
 
     def status(self):
         with self.store.lock:
@@ -139,7 +142,7 @@ class AutoLookup:
         updates = validate_values(updates, SELECTION_FIELDS)
         if any(common.clean(row.get(key)) != value for key, value in updates.items()):
             put(common.Sheet(wb["Selections"]), row["_row"], updates)
-            self.store.save(wb, revision)
+            self.store.save(wb, revision, "automatic lookup")
         row.update(updates)
         key = str(row["_row"])
         self.entries[key] = stamp(row)

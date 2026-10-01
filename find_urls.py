@@ -24,9 +24,10 @@ import requests
 from bs4 import BeautifulSoup
 
 from common import (Sheet, clean, load_env, manufacturer_domains, norm_model,
-                    open_workbook, WORKBOOK)
+                    WORKBOOK)
 
 from remote import fetch_html
+from workbook_store import ConflictError, IDENTITY_FIELDS, ValidationError, WorkbookStore
 
 load_env()
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -49,7 +50,7 @@ def search_brave(query):
 
 
 def search_serpapi(query):
-    key = os.environ["SERPAPI_KEY"]
+    key = os.environ.get("SERPAPI_KEY") or os.environ["SERPAPI_API_KEY"]
     r = requests.get("https://serpapi.com/search.json",
                      params={"engine": "google", "q": query, "num": 10, "api_key": key},
                      timeout=TIMEOUT)
@@ -236,12 +237,18 @@ def lookup(search, manufacturer, model, domain, product_name=""):
             "status": status, "notes": notes[:500]}
 
 
+def identity(data):
+    """What a lookup searched for; results are only applied while this still matches."""
+    return tuple(clean(data.get(key)) for key in ["Project ID", *IDENTITY_FIELDS])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", help="Only this Project ID")
     ap.add_argument("--force", action="store_true", help="Re-check rows that already have a URL")
     ap.add_argument("--dry-run", action="store_true", help="Don't save the workbook")
     ap.add_argument("--delay", type=float, default=1.0, help="Seconds between lookups")
+    ap.add_argument("--limit", type=int, default=50, help="Maximum paid searches this run may spend (0 = no cap)")
     args = ap.parse_args()
 
     provider = os.getenv("SEARCH_PROVIDER", "brave").lower()
@@ -249,53 +256,96 @@ def main():
         sys.exit(f"SEARCH_PROVIDER must be one of {list(PROVIDERS)}")
     search = PROVIDERS[provider]
 
-    wb = open_workbook()
+    store = WorkbookStore(WORKBOOK)
+    try:
+        wb, _ = store.snapshot()
+    except ValidationError as error:
+        sys.exit(f"Workbook problem: {error}")
     domains = manufacturer_domains(wb)
-    sel = Sheet(wb["Selections"])
     today = dt.date.today().isoformat()
-    done = 0
 
-    for r, d in sel.rows():
-        pid, mfr, model = clean(d["Project ID"]), clean(d["Manufacturer"]), clean(d["Model #"])
-        status = clean(d["Lookup Status"])
-        if args.project and pid != args.project:
+    # Phase 1 - collect jobs and search. Nothing is written to the workbook yet.
+    jobs = []
+    for r, d in Sheet(wb["Selections"]).rows():
+        if args.project and clean(d["Project ID"]) != args.project:
             continue
-        if status == "Verified":
+        if clean(d["Lookup Status"]) == "Verified":
             continue
         if clean(d["Product URL"]) and not args.force:
             continue
-        if not mfr or not model:
-            sel.set(r, "Lookup Status", "Not found")
-            sel.set(r, "Lookup Notes", "Manufacturer and Model # are both required.")
+        jobs.append({"row": r, "identity": identity(d), "mfr": clean(d["Manufacturer"]),
+                     "model": clean(d["Model #"]), "name": clean(d["Product Name"]) or clean(d["Item"]),
+                     "has_url": bool(clean(d["Product URL"])), "result": None})
+
+    searches = [job for job in jobs if job["mfr"] and job["model"]]
+    if args.limit and len(searches) > args.limit:
+        sys.exit(f"{len(searches)} selections need a search, above --limit {args.limit}. "
+                 f"Narrow with --project or raise --limit.")
+    if args.dry_run:
+        print(f"Dry run - {len(jobs)} row(s) eligible ({len(searches)} searches), nothing checked or saved.")
+        return
+
+    for job in jobs:
+        if not job["mfr"] or not job["model"]:
+            job["result"] = {"status": "Not found", "notes": "Manufacturer and Model # are both required."}
             continue
-
-        domain = domains.get(mfr.lower(), "")
-        print(f"[{pid}] {mfr} {model} ... ", end="", flush=True)
-        res = lookup(search, mfr, model, domain)
-        print(res["status"], res.get("url", ""))
-
-        sel.set(r, "Lookup Status", res["status"])
-        sel.set(r, "Checked On", today)
-        sel.set(r, "Lookup Notes", res.get("notes", "") + ("" if domain else " (Brand missing from Manufacturers sheet.)"))
-        if res.get("url"):
-            sel.set(r, "Product URL", res["url"])
-            sel.ws.cell(row=r, column=sel.cols["Product URL"]).hyperlink = res["url"]
-            if not clean(d["Product Name"]) or args.force:
-                sel.set(r, "Product Name", res["name"])
-            img = clean(d["Image URL"])
-            if (not img or img.startswith("http")) and res.get("image"):
-                sel.set(r, "Image URL", res["image"])
-        done += 1
+        domain = domains.get(job["mfr"].lower(), "")
+        print(f"[{job['identity'][0]}] {job['mfr']} {job['model']} ... ", end="", flush=True)
+        job["result"] = lookup(search, job["mfr"], job["model"], domain, product_name=job["name"])
+        job["domain"] = domain
+        print(job["result"]["status"], job["result"].get("url", ""))
         time.sleep(args.delay)
 
-    if args.dry_run:
-        print(f"Dry run - {done} row(s) checked, nothing saved.")
+    if not jobs:
+        print("Nothing to do.")
         return
+
+    # Phase 2 - apply results to a fresh snapshot in one validated, backed-up save.
+    # Rows whose identity changed since phase 1 are skipped rather than overwritten.
+    wb, revision = store.snapshot()
+    sel = Sheet(wb["Selections"])
+    current = {r: d for r, d in sel.rows()}
+    by_identity = {}
+    for r, d in current.items():
+        by_identity.setdefault(identity(d), r)
+    applied = skipped = 0
+    for job in jobs:
+        res = job["result"]
+        row = job["row"]
+        data = current.get(row)
+        if data is None or identity(data) != job["identity"]:
+            row = by_identity.get(job["identity"])  # row may have moved in Excel
+            data = current.get(row) if row else None
+        if data is None or clean(data["Lookup Status"]) == "Verified":
+            skipped += 1  # deleted, changed, or verified while the search ran
+            continue
+        if clean(data["Product URL"]) and (not job["has_url"] or not args.force):
+            skipped += 1  # a link was added by hand after the search - keep it
+            continue
+        sel.set(row, "Lookup Status", res["status"])
+        notes = res.get("notes", "")
+        if job["mfr"] and job["model"] and not job.get("domain"):
+            notes += " (Brand missing from Manufacturers sheet.)"
+        sel.set(row, "Lookup Notes", notes)
+        if job["mfr"] and job["model"]:
+            sel.set(row, "Checked On", today)
+        if res.get("url"):
+            sel.set(row, "Product URL", res["url"])
+            sel.ws.cell(row=row, column=sel.cols["Product URL"]).hyperlink = res["url"]
+            if not clean(data["Product Name"]) or args.force:
+                sel.set(row, "Product Name", res.get("name", ""))
+            img = clean(data["Image URL"])
+            if (not img or img.startswith("http")) and res.get("image"):
+                sel.set(row, "Image URL", res["image"])
+        applied += 1
+
     try:
-        wb.save(WORKBOOK)
+        store.save(wb, revision, f"find_urls ({applied} rows)")
     except PermissionError:
         sys.exit("Could not save - close the workbook in Excel and run again.")
-    print(f"Done - {done} row(s) checked. Review the 'Lookup Status' column, then mark good rows 'Verified'.")
+    except ConflictError:
+        sys.exit("The workbook changed while saving - close other editors and run again.")
+    print(f"Done - {applied} row(s) updated, {skipped} skipped. Review the 'Lookup Status' column, then mark good rows 'Verified'.")
 
 
 if __name__ == "__main__":

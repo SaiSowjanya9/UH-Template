@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from common import Sheet, clean
 
@@ -21,6 +22,23 @@ PROJECT_FIELDS = ["Project ID", "Project Name", "Client Name", "Address", "Plan 
 SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color", "Qty", "Product URL", "Product Name", "Image URL", "Lookup Status", "Checked On", "Lookup Notes", "Client Notes", "Include in Lookbook"]
 STATUSES = ["Not run", "Found - verify", "Found - retailer", "Multiple matches", "Not found", "Search error", "Verified"]
 IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
+BACKUP_KEEP = 30
+
+# Computed Projects columns (H/I/J/K in the template); backfilled for Excel-added rows.
+PROJECT_FORMULAS = {
+    "Total Items": '=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))',
+    "Links Found": '=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$I:$I,"?*"))',
+    "Verified": '=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$L:$L,"Verified"))',
+    "Needs Review": '=IF(A{row}="","",H{row}-J{row})',
+}
+
+# Selections dropdowns Excel silently drops when it re-saves the workbook.
+LIST_VALIDATIONS = {
+    "Project ID": "Projects!$A$2:$A$51",
+    "Section": "Lists!$A$2:$A$31",
+    "Lookup Status": "Lists!$B$2:$B$7",
+    "Include in Lookbook": "Lists!$C$2:$C$3",
+}
 
 
 class ValidationError(ValueError):
@@ -209,6 +227,53 @@ def validate_workbook(wb):
             raise ValidationError(f"Include in Lookbook must be Yes or No in row {row['_row']}.")
 
 
+def workbook_open_elsewhere(path):
+    """True when another process (e.g. Excel) holds the file open for writing.
+
+    Probing the file itself is more reliable than looking for a '~$' lock file,
+    which Excel can leave behind after a crash and other editors never create.
+    """
+    try:
+        with open(path, "r+b"):
+            return False
+    except PermissionError:
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def ensure_validations(wb):
+    """Re-add the Selections dropdowns Excel silently drops when it re-saves."""
+    ws = wb["Selections"]
+    sheet = Sheet(ws)
+    covered = {clean(dv.formula1) for dv in ws.data_validations.dataValidation if dv.type == "list"}
+    last = max(501, ws.max_row)
+    for header, formula in LIST_VALIDATIONS.items():
+        column = sheet.cols.get(header)
+        if column is None or formula in covered:
+            continue
+        letter = get_column_letter(column)
+        dv = DataValidation(type="list", formula1=formula, allow_blank=True, showErrorMessage=True)
+        dv.add(f"{letter}2:{letter}{last}")
+        ws.add_data_validation(dv)
+
+
+def ensure_project_formulas(wb):
+    """Backfill the computed count columns for project rows added outside the app."""
+    sheet = Sheet(wb["Projects"])
+    targets = {field: sheet.cols[field] for field in PROJECT_FORMULAS if field in sheet.cols}
+    for row, _ in sheet.rows():
+        for field, column in targets.items():
+            if not clean(sheet.ws.cell(row, column).value):
+                sheet.ws.cell(row, column, PROJECT_FORMULAS[field].format(row=row))
+
+
+def delete_record(wb, name, row):
+    ws = wb[name]
+    ws.delete_rows(row)
+    ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+
+
 class WorkbookStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -221,15 +286,30 @@ class WorkbookStore:
             validate_workbook(wb)
             return wb, hashlib.sha256(raw).hexdigest()
 
-    def save(self, wb, revision):
+    def _history(self, backup_dir, note):
+        entry = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "note": note or "save"}
+        with (backup_dir / "history.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def _prune_backups(self, backup_dir):
+        copies = sorted(backup_dir.glob(f"{self.path.stem}_*.xlsx"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in copies[BACKUP_KEEP:]:
+            old.unlink(missing_ok=True)
+
+    def save(self, wb, revision, note=""):
         with self.lock:
             validate_workbook(wb)
             if hashlib.sha256(self.path.read_bytes()).hexdigest() != revision:
                 raise ConflictError("The workbook changed. Refresh the page before saving again.")
+            if workbook_open_elsewhere(self.path):
+                raise PermissionError("The workbook is open in another program.")
             backup_dir = self.path.parent / "backups"
             backup_dir.mkdir(exist_ok=True)
             stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(self.path, backup_dir / f"{self.path.stem}_{stamp}.xlsx")
+            ensure_validations(wb)
+            ensure_project_formulas(wb)
             handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
             os.close(handle)
             try:
@@ -239,6 +319,8 @@ class WorkbookStore:
                 os.replace(temp, self.path)
             finally:
                 Path(temp).unlink(missing_ok=True)
+            self._prune_backups(backup_dir)
+            self._history(backup_dir, note)
 
     def import_bytes(self, raw, revision):
         try:
@@ -252,4 +334,4 @@ class WorkbookStore:
             raise
         except Exception:
             raise ValidationError("This file could not be read as an Excel .xlsx workbook.") from None
-        self.save(wb, revision)
+        self.save(wb, revision, "workbook import")

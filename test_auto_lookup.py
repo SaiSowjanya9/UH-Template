@@ -204,6 +204,20 @@ class AutoLookupTests(unittest.TestCase):
         self.assertEqual(displayed["Product Name"], "Different fixture")
         self.assertEqual(displayed["_auto_phase"], "queued")
 
+    def test_stale_excel_lock_file_does_not_block_lookup(self):
+        self.change(self.rows()[0]["_row"], {"Model #": "NEW-MODEL"})
+        self.store.path.with_name("~$" + self.store.path.name).write_text("")
+        self.engine.tick()
+        self.search.assert_called_once()
+
+    def test_corrupt_lookup_state_is_set_aside_not_fatal(self):
+        self.engine.state_path.write_text("{ not valid json")
+        restarted = AutoLookup(self.store, lambda: self.info, search=self.search)
+        restarted.tick()
+        self.search.assert_not_called()
+        self.assertFalse(restarted.pending)
+        self.assertTrue(list(self.engine.state_path.parent.glob("*.corrupt-*")))
+
     def test_no_match_does_not_retain_old_link(self):
         row = self.rows()[0]["_row"]
         self.change(row, {"Product URL": "https://example.com/old-product"})

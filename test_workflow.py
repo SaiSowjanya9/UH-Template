@@ -294,6 +294,61 @@ class AppTests(unittest.TestCase):
         self.assertIn("Close", response.json["error"])
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_save_refused_while_excel_holds_the_workbook(self):
+        before = self.path.read_bytes()
+        with patch("workbook_store.workbook_open_elsewhere", return_value=True):
+            response = self.post("/api/projects", {"values": {"Project ID": "TEST-1", "Project Name": "Test House"}})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Close", response.json["error"])
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_save_restores_dropdowns_excel_dropped(self):
+        wb, revision = self.store.snapshot()
+        wb["Selections"].data_validations.dataValidation = []
+        self.store.save(wb, revision)
+        restored, _ = self.store.snapshot()
+        formulas = {dv.formula1 for dv in restored["Selections"].data_validations.dataValidation if dv.type == "list"}
+        self.assertEqual({"Lists!$A$2:$A$31", "Lists!$B$2:$B$7", "Lists!$C$2:$C$3", "Projects!$A$2:$A$51"}, formulas)
+
+    def test_excel_added_project_gets_count_formulas(self):
+        wb, revision = self.store.snapshot()
+        sheet = common.Sheet(wb["Projects"])
+        row = wb["Projects"].max_row + 1
+        sheet.set(row, "Project ID", "TEST-9")
+        sheet.set(row, "Project Name", "Added in Excel")
+        self.store.save(wb, revision)
+        restored, _ = self.store.snapshot()
+        ws = restored["Projects"]
+        headers = {c.value: c.column for c in ws[1] if c.value}
+        self.assertEqual(ws.cell(row, headers["Total Items"]).value,
+                         f'=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))')
+        self.assertEqual(ws.cell(row, headers["Needs Review"]).value, f'=IF(A{row}="","",H{row}-J{row})')
+
+    def test_delete_endpoints_and_guards(self):
+        row = self.state()["selections"][0]
+        response = self.post("/api/selections", {"row": row["_row"], "values": {"Item": row["Item"]}, "delete": True})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertFalse(any(r["Item"] == row["Item"] for r in self.state()["selections"]))
+        project = self.state()["projects"][0]
+        response = self.post("/api/projects", {"values": {"Project ID": project["Project ID"]}, "delete": True})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("selections", response.json["error"])
+        self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-9", "Project Name": "Temp"}})
+        self.assertEqual(self.post("/api/projects", {"values": {"Project ID": "TEST-9"}, "delete": True}).status_code, 200)
+        self.assertFalse(any(p["Project ID"] == "TEST-9" for p in self.state()["projects"]))
+        name = self.state()["manufacturers"][0]["Manufacturer"]
+        self.assertEqual(self.post("/api/manufacturers", {"values": {"Manufacturer": name}, "delete": True}).status_code, 200)
+        self.assertFalse(any(m["Manufacturer"] == name for m in self.state()["manufacturers"]))
+
+    def test_backups_are_pruned_and_logged(self):
+        with patch("workbook_store.BACKUP_KEEP", 2):
+            for index in range(4):
+                response = self.post("/api/projects", {"create": True, "values": {"Project ID": f"TEST-{index}", "Project Name": "T"}})
+                self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(len(list((self.path.parent / "backups").glob("*.xlsx"))), 2)
+        history = (self.path.parent / "backups" / "history.jsonl").read_text().strip().splitlines()
+        self.assertEqual(len(history), 4)
+
     def test_csrf_and_host_protection(self):
         self.assertEqual(self.client.post("/api/projects", json={}).status_code, 403)
         self.assertEqual(self.client.get("/", headers={"Host": "attacker.example"}).status_code, 400)

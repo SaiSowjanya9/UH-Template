@@ -15,8 +15,9 @@ import build_lookbook
 import common
 import find_urls
 from auto_lookup import AutoLookup
-from workbook_store import (ConflictError, IDENTITY_FIELDS, PROJECT_FIELDS, SELECTION_FIELDS,
-                            STATUSES, ValidationError, WorkbookStore, next_row, put,
+from workbook_store import (ConflictError, IDENTITY_FIELDS, PROJECT_FIELDS, PROJECT_FORMULAS,
+                            SELECTION_FIELDS, STATUSES, ValidationError, WorkbookStore,
+                            delete_record, next_row, put,
                             records, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
@@ -92,8 +93,10 @@ def asset(name):
 
 def provider_info():
     provider = os.getenv("SEARCH_PROVIDER", "brave").lower()
-    key = {"brave": "BRAVE_API_KEY", "serpapi": "SERPAPI_KEY", "claude": "ANTHROPIC_API_KEY"}.get(provider)
-    return {"name": provider, "ready": bool(key and os.getenv(key)), "key_name": key or "SEARCH_PROVIDER"}
+    keys = {"brave": ["BRAVE_API_KEY"], "serpapi": ["SERPAPI_KEY", "SERPAPI_API_KEY"],
+            "claude": ["ANTHROPIC_API_KEY"]}.get(provider, [])
+    return {"name": provider, "ready": any(os.getenv(key) for key in keys),
+            "key_name": keys[0] if keys else "SEARCH_PROVIDER"}
 
 
 @app.get("/api/state")
@@ -143,19 +146,24 @@ def save_project():
         wb, revision = current(data)
         sheet = common.Sheet(wb["Projects"])
         existing = next((p for p in records(wb, "Projects") if p["Project ID"] == values.get("Project ID")), None)
+        if data.get("delete"):
+            if not existing:
+                raise ConflictError("This project no longer exists. Refresh the page.")
+            if any(r["Project ID"] == existing["Project ID"] for r in records(wb, "Selections")):
+                raise ValidationError("This project still has selections. Remove them first, then delete the project.")
+            delete_record(wb, "Projects", existing["_row"])
+            store.save(wb, revision, f"delete project {existing['Project ID']}")
+            return jsonify(ok=True, deleted=True)
         if data.get("create") and existing:
             raise ValidationError("That Project ID already exists. Choose a unique ID.")
         row = existing["_row"] if existing else next_row(sheet)
         put(sheet, row, values)
-        for field, formula in {"Total Items": f'=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))',
-                               "Links Found": f'=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$I:$I,"?*"))',
-                               "Verified": f'=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$L:$L,"Verified"))',
-                               "Needs Review": f'=IF(A{row}="","",H{row}-J{row})'}.items():
+        for field, formula in PROJECT_FORMULAS.items():
             if field in sheet.cols:
-                sheet.ws.cell(row, sheet.cols[field], formula)
+                sheet.ws.cell(row, sheet.cols[field], formula.format(row=row))
         if "custom_fields" in data:
             set_custom_fields(wb, "Projects", row, data["custom_fields"])
-        store.save(wb, revision)
+        store.save(wb, revision, f"project {values.get('Project ID')}")
     return jsonify(ok=True, project_id=values.get("Project ID"))
 
 
@@ -166,6 +174,15 @@ def save_selection():
     with store.lock:
         wb, revision = current(data)
         sheet = common.Sheet(wb["Selections"])
+        if data.get("delete"):
+            old = next((r for r in records(wb, "Selections") if r["_row"] == data.get("row")), None)
+            if not old:
+                raise ConflictError("This selection no longer exists. Refresh the page.")
+            delete_record(wb, "Selections", old["_row"])
+            store.save(wb, revision, f"delete selection row {old['_row']} ({old['Item']})")
+            if automation:
+                automation.observe(wb)
+            return jsonify(ok=True, deleted=True)
         old = None
         if data.get("row") is not None:
             old = next((r for r in records(wb, "Selections") if r["_row"] == data["row"]), None)
@@ -202,7 +219,7 @@ def save_selection():
         sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{max(sheet.ws.max_row, row)}"
         if "custom_fields" in data:
             set_custom_fields(wb, "Selections", row, data["custom_fields"])
-        store.save(wb, revision)
+        store.save(wb, revision, f"selection row {row}")
         if automation:
             automation.observe(wb)
         queued = bool(automation and str(row) in automation.pending)
@@ -214,16 +231,22 @@ def save_manufacturer():
     data = payload()
     values = validate_values(data.get("values"), ["Manufacturer", "Official Domain", "Notes"])
     name = values.get("Manufacturer", "")
-    domain = values.get("Official Domain", "").lower().removeprefix("https://").removeprefix("http://").removeprefix("www.").rstrip("/")
-    if not name or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}", domain):
-        raise ValidationError("Enter a manufacturer name and a domain such as brand.com, without a page path.")
-    values["Official Domain"] = domain
     with store.lock:
         wb, revision = current(data)
         sheet = common.Sheet(wb["Manufacturers"])
         old = next((r for r in records(wb, "Manufacturers") if r["Manufacturer"].lower() == name.lower()), None)
+        if data.get("delete"):
+            if not old:
+                raise ConflictError("This manufacturer no longer exists. Refresh the page.")
+            delete_record(wb, "Manufacturers", old["_row"])
+            store.save(wb, revision, f"delete manufacturer {name}")
+            return jsonify(ok=True, deleted=True)
+        domain = values.get("Official Domain", "").lower().removeprefix("https://").removeprefix("http://").removeprefix("www.").rstrip("/")
+        if not name or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}", domain):
+            raise ValidationError("Enter a manufacturer name and a domain such as brand.com, without a page path.")
+        values["Official Domain"] = domain
         put(sheet, old["_row"] if old else next_row(sheet), values)
-        store.save(wb, revision)
+        store.save(wb, revision, f"manufacturer {name}")
     return jsonify(ok=True)
 
 
@@ -260,7 +283,7 @@ def lookup_selection(row):
         updates["Lookup Notes"] += " Existing link retained for manual review; it was not confirmed."
     with store.lock:
         put(common.Sheet(wb["Selections"]), row, updates)
-        store.save(wb, revision)
+        store.save(wb, revision, f"lookup row {row}")
         if automation:
             automation.acknowledge(wb, row)
     return jsonify(ok=True, result=result)

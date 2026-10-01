@@ -260,7 +260,32 @@ function openEditor(kind, record) {
   $("custom-fields-empty").hidden = false;
   if (kind !== "manufacturer") (r.custom_fields || []).forEach((field) => addCustomField(field, false));
   $("editor-note").textContent = note;
+  $("editor-delete").hidden = !record;
+  if (record) $("editor-delete").textContent = `Delete ${kind}`;
   $("editor").showModal();
+}
+
+async function deleteEditorRecord() {
+  const { kind, record } = state.editor || {};
+  if (!record || state.busy) return;
+  const label = { selection: `selection “${record.Item}”`, project: `project “${record["Project Name"]}”`, manufacturer: `manufacturer “${record.Manufacturer}”` }[kind];
+  const extra = { project: " Only empty projects can be deleted — remove their selections first.",
+                  manufacturer: " Selections using this brand lose their official-domain search boost." }[kind] || "";
+  if (!confirm(`Delete ${label}? The row is removed from the workbook; a backup is kept.${extra}`)) return;
+  $("editor-error").hidden = true;
+  setBusy(true, "Deleting…");
+  try {
+    const values = Object.fromEntries(new FormData($("editor-form")));
+    if (kind === "selection") values["Project ID"] = state.project;
+    await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record._row, delete: true, revision: state.editor.revision });
+    if (kind === "project") state.project = "";
+    $("editor").close();
+    await refresh();
+    toast("Deleted from the workbook. A backup was preserved.");
+  } catch (error) {
+    $("editor-error").textContent = error.message;
+    $("editor-error").hidden = false;
+  } finally { setBusy(false); }
 }
 
 async function saveEditor(event) {
@@ -391,6 +416,7 @@ $("custom-field-rows").addEventListener("click", (event) => {
   $("custom-fields-empty").hidden = $("custom-field-rows").children.length > 0;
 });
 $("editor-form").addEventListener("submit", saveEditor);
+$("editor-delete").addEventListener("click", deleteEditorRecord);
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
