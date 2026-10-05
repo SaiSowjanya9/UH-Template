@@ -18,6 +18,17 @@ def digest(value):
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
 
 
+def worth_looking_up(row):
+    """A row is queued only when it can be searched, or carries metadata that may now be stale.
+
+    Line items that merely name something to specify later - a template row with no
+    manufacturer or model - have nothing to search for and nothing to invalidate.
+    """
+    if common.clean(row.get("Manufacturer")) and common.clean(row.get("Model #")):
+        return True
+    return any(common.clean(row.get(field)) for field in ("Product URL", "Image URL", "Product Name", "Checked On"))
+
+
 def stamp(row):
     identity = [common.clean(row.get(key)) for key in ["Project ID", *IDENTITY_FIELDS]]
     return {"fingerprint": digest(json.dumps(identity)), "name": digest(row.get("Product Name", "")),
@@ -88,7 +99,7 @@ class AutoLookup:
             self.pending = pending
             for key, row in current.items():
                 entry, old = stamps[key], previous[key]
-                if self.initialized and (old is None or old["fingerprint"] != entry["fingerprint"]):
+                if self.initialized and (old is None or old["fingerprint"] != entry["fingerprint"]) and worth_looking_up(row):
                     self.pending[key] = {"fingerprint": entry["fingerprint"], "project": row["Project ID"],
                                          "clear_name": bool(old and old["name"] == entry["name"]), "prepared": False,
                                          "phase": "queued", "attempts": 0, "retry_at": 0, "result": None}
@@ -179,7 +190,10 @@ class AutoLookup:
                 job["prepared"] = True
                 self._persist()
             if not row["Manufacturer"] or not row["Model #"]:
-                self._update(wb, revision, row, {"Lookup Status": "Not found", "Lookup Notes": "Manufacturer and Model # are both required. Complete them to start automatic lookup."})
+                # Nothing was searched, so the row stays "Not run" rather than looking like a failure.
+                note = "Add both a manufacturer and model number to search for this product." \
+                    if row["Manufacturer"] or row["Model #"] else ""
+                self._update(wb, revision, row, {"Lookup Status": "Not run", "Lookup Notes": note})
                 self.pending.pop(key)
                 self._persist()
                 return

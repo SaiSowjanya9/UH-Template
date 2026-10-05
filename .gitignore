@@ -5,6 +5,7 @@ image_cache/
 output/
 __pycache__/
 ~$*.xlsx
+tmp*.xlsx
 .venv/
 backups/
 lookup_state/

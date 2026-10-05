@@ -204,6 +204,34 @@ class AutoLookupTests(unittest.TestCase):
         self.assertEqual(displayed["Product Name"], "Different fixture")
         self.assertEqual(displayed["_auto_phase"], "queued")
 
+    def test_unspecified_line_items_are_not_queued_or_marked_failed(self):
+        """Template rows naming something to specify later are not lookup failures."""
+        wb, revision = self.store.snapshot()
+        sheet = common.Sheet(wb["Selections"])
+        row = sheet.ws.max_row + 1
+        project = self.rows()[0]["Project ID"]
+        for header, value in [("Project ID", project), ("Section", "Kitchen"), ("Room / Area", "Kitchen"),
+                              ("Item", "Counter top"), ("Lookup Status", "Not run"), ("Include in Lookbook", "Yes")]:
+            sheet.set(row, header, value)
+        self.store.save(wb, revision)
+        self.engine.tick()
+        self.search.assert_not_called()
+        self.assertFalse(self.engine.pending)
+        added = next(r for r in self.rows() if r["_row"] == row)
+        self.assertEqual((added["Lookup Status"], added["Lookup Notes"]), ("Not run", ""))
+        # a half-filled row is left alone: nothing to search, and no save to fight the next keystroke
+        self.change(row, {"Manufacturer": "Test Brand"})
+        self.engine.tick()
+        self.search.assert_not_called()
+        self.assertFalse(self.engine.pending)
+        added = next(r for r in self.rows() if r["_row"] == row)
+        self.assertEqual((added["Lookup Status"], added["Lookup Notes"]), ("Not run", ""))
+        # completing the pair starts the search
+        self.change(row, {"Model #": "ABC-1"})
+        self.engine.tick()
+        self.search.assert_called_once()
+        self.assertEqual(next(r for r in self.rows() if r["_row"] == row)["Product URL"], "https://example.com/new-product")
+
     def test_stale_excel_lock_file_does_not_block_lookup(self):
         self.change(self.rows()[0]["_row"], {"Model #": "NEW-MODEL"})
         self.store.path.with_name("~$" + self.store.path.name).write_text("")
