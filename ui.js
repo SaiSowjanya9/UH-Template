@@ -169,7 +169,9 @@ function render() {
   $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete${stale ? ` · ${stale} stale` : ""}`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
   $("review-count").textContent = rows.length - verified;
   $("page-title").textContent = names[state.view];
-  $("breadcrumb-name").textContent = project && state.view !== "manufacturers" ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
+  // the spec sheet is the standard specification, so it is not labelled with one project
+  $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
+    ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
   $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", review: "The right product, down to the last detail.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
@@ -498,12 +500,81 @@ async function addFromLink() {
   if (details) openEditor("selection", null, details);
 }
 
-async function exportPresentation(format) {
+function scheduleDetails() {
+  const values = Object.fromEntries(new FormData($("schedule-form")));
+  const defaults = scheduleDefaults();
+  return {
+    details: { client: values.client.trim(), project_lot: values.project_lot.trim(),
+               address: values.address.trim(), date: values.date },
+    title: values.title.trim() || defaults.title || "Selections",
+    prefix: (values.prefix.trim() || defaults.code_prefix || "EX").toUpperCase(),
+  };
+}
+
+function openScheduleDialog(format) {
+  const project = selectedProject();
+  if (!project) { toast("Choose a project first.", true); return; }
+  const defaults = scheduleDefaults();
+  state.scheduleFormat = format;
+  $("schedule-dialog-title").textContent = { pdf: "Download finish schedule", form: "Download fillable schedule" }[format];
+  const form = $("schedule-form");
+  form.client.value = project["Client Name"] || "";
+  form.project_lot.value = [project["Project Name"], project["Plan / Elevation"]].filter(Boolean).join(" / ");
+  form.address.value = project.Address || "";
+  form.date.value = (project["Presentation Date"] || "").slice(0, 10);
+  form.title.value = $("export-title").value.trim() || defaults.title || "";
+  form.prefix.value = $("export-prefix").value.trim() || defaults.code_prefix || "";
+  $("schedule-error").hidden = true;
+  $("schedule-frame").removeAttribute("src");
+  $("schedule-dialog").showModal();
+  refreshSchedulePreview();
+}
+
+let previewUrl = null;
+
+async function refreshSchedulePreview() {
+  const hint = $("schedule-hint");
+  hint.textContent = "Building the preview…";
+  hint.hidden = false;
+  $("schedule-error").hidden = true;
+  try {
+    const response = await api("/api/presentation", {
+      project: state.project, mode: $("export-mode").value, format: state.scheduleFormat,
+      preview: true, ...scheduleDetails() }, true);
+    const blob = await response.blob();
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(blob);
+    $("schedule-frame").src = previewUrl;
+    hint.textContent = "Every page of the document, exactly as it will download.";
+  } catch (error) {
+    $("schedule-frame").removeAttribute("src");
+    hint.hidden = true;
+    $("schedule-error").textContent = error.message;
+    $("schedule-error").hidden = false;
+  }
+}
+
+async function downloadSchedule(event) {
+  event.preventDefault();
+  if (state.busy) return;
+  $("schedule-error").hidden = true;
+  setBusy(true, "Building your finish schedule…");
+  try {
+    await exportPresentation(state.scheduleFormat, { ...scheduleDetails(), save_details: $("schedule-save-details").checked });
+    $("schedule-dialog").close();
+  } catch (error) {
+    $("schedule-error").textContent = error.message;
+    $("schedule-error").hidden = false;
+  } finally { setBusy(false); }
+}
+
+async function exportPresentation(format, extra = {}) {
   const { title, prefix } = scheduleOptions();
   const label = { pdf: "PDF", pptx: "PowerPoint", form: "fillable" }[format];
-  setBusy(true, `Building your ${label} finish schedule…`);
+  const quiet = Object.keys(extra).length > 0;   // the dialog shows its own progress
+  if (!quiet) setBusy(true, `Building your ${label} finish schedule…`);
   try {
-    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix }, true);
+    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix, ...extra }, true);
     const blob = await response.blob(), url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const filename = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/);
@@ -515,7 +586,7 @@ async function exportPresentation(format) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     await refresh();
     toast("Finish schedule downloaded. Review the layout and branding before sharing with your client.");
-  } finally { setBusy(false); }
+  } finally { if (!quiet) setBusy(false); }
 }
 
 async function importScheduleForm(file) {
@@ -676,9 +747,15 @@ $("setup-button").addEventListener("click", () => $("setup-dialog").showModal())
 $("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workbook refreshed."); }));
 $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
-$("export-pdf").addEventListener("click", () => action(() => exportPresentation("pdf")));
+$("export-pdf").addEventListener("click", () => openScheduleDialog("pdf"));
 $("export-pptx").addEventListener("click", () => action(() => exportPresentation("pptx")));
-$("export-form").addEventListener("click", () => action(() => exportPresentation("form")));
+$("export-form").addEventListener("click", () => openScheduleDialog("form"));
+$("schedule-form").addEventListener("submit", downloadSchedule);
+$("schedule-refresh").addEventListener("click", () => action(refreshSchedulePreview));
+$("schedule-dialog").addEventListener("close", () => {
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  $("schedule-frame").removeAttribute("src");
+});
 $("import-form").addEventListener("click", () => { if (state.data && !state.busy) $("form-import-file").click(); });
 $("form-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];

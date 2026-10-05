@@ -85,6 +85,24 @@
   <input type="file" id="import-file" accept=".xlsx" hidden>
   <input type="file" id="spec-import-file" accept=".csv" hidden>
   <input type="file" id="form-import-file" accept=".pdf" hidden>
+  <dialog id="schedule-dialog" class="wide-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">FINISH SCHEDULE</div><h2 id="schedule-dialog-title">Download schedule</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <div class="schedule-dialog-body">
+      <form id="schedule-form" class="schedule-fields">
+        <p class="muted">These details print in the band at the top of the schedule.</p>
+        <label class="field">Client<input name="client" type="text" maxlength="200" autocomplete="off"></label>
+        <label class="field">Project / Lot<input name="project_lot" type="text" maxlength="200" autocomplete="off"></label>
+        <label class="field">Address<input name="address" type="text" maxlength="200" autocomplete="off"></label>
+        <label class="field">Date<input name="date" type="date"></label>
+        <label class="field">Schedule title<input name="title" type="text" maxlength="80" autocomplete="off"></label>
+        <label class="field">Item code prefix<input name="prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label>
+        <label class="checkbox-field"><input id="schedule-save-details" type="checkbox" checked> Also save the client, address and date to this project</label>
+        <p id="schedule-error" class="form-error" role="alert" hidden></p>
+        <div class="schedule-actions"><button type="button" id="schedule-refresh" class="button secondary">Refresh preview</button><button type="submit" id="schedule-download" class="button primary">Download ↓</button></div>
+      </form>
+      <div class="schedule-preview"><iframe id="schedule-frame" title="Finish schedule preview"></iframe><p id="schedule-hint" class="muted">Building the preview…</p></div>
+    </div>
+  </dialog>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>
 </html>

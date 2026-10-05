@@ -43,7 +43,7 @@ def headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Cache-Control"] = "no-store"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http: data:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     return response
 
 
@@ -527,6 +527,43 @@ def import_workbook():
     return jsonify(ok=True)
 
 
+BAND_INPUTS = {"client": "Client Name", "project_lot": "Project / Lot", "address": "Address", "date": "Date"}
+
+
+def band_overrides(data):
+    """Client details typed for this download, replacing the project's own for the band."""
+    details = data.get("details")
+    if details is None:
+        return {}
+    if not isinstance(details, dict) or set(details) - set(BAND_INPUTS):
+        raise ValidationError("Unexpected client detail fields.")
+    out = {}
+    for key, label in BAND_INPUTS.items():
+        value = common.clean(details.get(key))
+        if any(ord(character) < 32 for character in value) or len(value) > 200:
+            raise ValidationError(f"Enter {label} as a single line of up to 200 characters.")
+        if key == "date" and value:
+            value = normalise_date(value)
+        out[key] = value
+    return out
+
+
+def with_details(project, overrides):
+    if not overrides:
+        return project
+    shown = dict(project)
+    if overrides.get("client"):
+        shown["Client Name"] = overrides["client"]
+    if overrides.get("project_lot"):
+        # the band composes name and plan, so a typed value replaces the pair outright
+        shown["Project Name"], shown["Plan / Elevation"] = overrides["project_lot"], ""
+    if overrides.get("address"):
+        shown["Address"] = overrides["address"]
+    if overrides.get("date"):
+        shown["Presentation Date"] = overrides["date"]
+    return shown
+
+
 def schedule_options(data):
     """Per-export schedule title and item code prefix, falling back to the branding defaults."""
     title, prefix = common.clean(data.get("title")), common.clean(data.get("prefix"))
@@ -548,6 +585,7 @@ def presentation():
     if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx", "form"}:
         raise ValidationError("Invalid presentation options.")
     title, prefix = schedule_options(data)
+    overrides = band_overrides(data)
     rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
     if automation:
         with store.lock:
@@ -564,23 +602,38 @@ def presentation():
         raise ValidationError("No selections match these export options.")
     order = common.section_order(wb)
     rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    preview = bool(data.get("preview"))
     note = f"export {project['Project ID']} {kind} {mode}"
     with store.lock:
-        marked = []
-        if mode != "draft":
-            sheet = ensure_selection_columns(wb)
-            marked = [r for r in rows if common.clean(r.get("Client Status")) in {"", "Proposed"}]
-            for r in marked:
-                put(sheet, r["_row"], {"Client Status": "Presented"})
-        if marked:
-            store.save(wb, revision, note)
-        else:
-            store.log(note)
+        marked, saved = [], []
+        if not preview:
+            if data.get("save_details") and overrides:
+                # only the unambiguous columns; the band's project/lot merges two of them
+                changed = {}
+                for key, field in {"client": "Client Name", "address": "Address", "date": "Presentation Date"}.items():
+                    value, stored = overrides.get(key, ""), common.clean(project.get(field, ""))
+                    if field == "Presentation Date":
+                        stored = stored[:10]
+                    if value and value != stored:
+                        changed[field] = value
+                saved = validate_values(changed, PROJECT_FIELDS)
+                if saved:
+                    put(common.Sheet(wb["Projects"]), project["_row"], saved)
+            if mode != "draft":
+                sheet = ensure_selection_columns(wb)
+                marked = [r for r in rows if common.clean(r.get("Client Status")) in {"", "Proposed"}]
+                for r in marked:
+                    put(sheet, r["_row"], {"Client Status": "Presented"})
+            if marked or saved:
+                store.save(wb, revision, note)
+            else:
+                store.log(note)
         rev = store.count_notes(f"export {project['Project ID']} ")
+    shown = with_details(project, overrides)
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
         if kind == "form":
             import build_form
-            output = build_form.build(project["Project ID"], project, rows,
+            output = build_form.build(project["Project ID"], shown, rows,
                                       output_dir=Path(folder), title=title, prefix=prefix)
             mime = "application/pdf"
         else:
@@ -589,10 +642,11 @@ def presentation():
             else:
                 from build_powerpoint import build as build_schedule
                 mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            output = build_schedule(project["Project ID"], project, rows, mode == "draft",
-                                    output_dir=Path(folder), title=title, prefix=prefix, rev=rev)
+            output = build_schedule(project["Project ID"], shown, rows, mode == "draft",
+                                    output_dir=Path(folder), title=title, prefix=prefix,
+                                    rev=None if preview else rev)
         raw = output.read_bytes()
-    return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=mime)
+    return send_file(io.BytesIO(raw), as_attachment=not preview, download_name=output.name, mimetype=mime)
 
 
 if __name__ == "__main__":

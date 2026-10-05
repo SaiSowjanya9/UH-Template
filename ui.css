@@ -196,6 +196,18 @@ code { background:#eef1e6; border-radius:3px; padding:2px 4px; font-size:11px; o
 .toast.error { background:#874c3b; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .page-heading>.heading-actions { flex:none; }
+.wide-dialog { width:min(1180px,96vw); max-width:none; }
+.schedule-dialog-body { display:grid; grid-template-columns:320px minmax(0,1fr); gap:22px; align-items:start; }
+.schedule-fields { display:flex; flex-direction:column; gap:12px; }
+.schedule-fields p { font-size:11px; margin-bottom:0; }
+.checkbox-field { display:flex; gap:9px; align-items:flex-start; font-size:11px; color:var(--muted); line-height:1.5; }
+.checkbox-field input { margin-top:1px; }
+.schedule-actions { display:flex; gap:9px; margin-top:4px; }
+.schedule-actions .button { flex:1; }
+.schedule-preview { border:1px solid var(--line); border-radius:7px; background:var(--cream); overflow:hidden; min-height:64vh; display:flex; flex-direction:column; }
+.schedule-preview iframe { width:100%; flex:1; min-height:64vh; border:0; background:#fff; }
+.schedule-preview p { margin:0; padding:14px; font-size:11px; text-align:center; }
+@media(max-width:900px) { .schedule-dialog-body { grid-template-columns:1fr; } .schedule-preview,.schedule-preview iframe { min-height:50vh; } }
 .details-panel { border:1px solid var(--line); background:white; border-radius:8px; padding:23px; margin-bottom:23px; }
 .details-panel .section-heading h2 { font-size:22px; }
 .detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px 26px; margin:24px 0 0; }

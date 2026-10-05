@@ -537,6 +537,46 @@ class AppTests(unittest.TestCase):
             "project": project, "revision": self.state()["revision"]}, headers=self.headers)
         self.assertEqual(bad.status_code, 400)
 
+    def test_download_asks_for_client_details_and_previews(self):
+        from pypdf import PdfReader
+        project = self.state()["projects"][0]
+        pid = project["Project ID"]
+        details = {"client": "Typed At Download", "project_lot": "Lot 42 scheme", "address": "7 Typed Street", "date": "2027-04-05"}
+
+        # a preview renders the typed details, inline, without touching the workbook
+        before = self.path.read_bytes()
+        preview = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
+                                                  "preview": True, "details": details})
+        self.assertEqual(preview.status_code, 200, preview.json if preview.is_json else "")
+        self.assertNotIn("attachment", preview.headers["Content-Disposition"])
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(preview.data)).pages)
+        for typed in ["Typed At Download", "Lot 42 scheme", "7 Typed Street", "April 5, 2027"]:
+            self.assertIn(typed, text)
+        self.assertNotIn(project["Client Name"], text)
+        self.assertEqual(self.path.read_bytes(), before)   # previews never write
+
+        # downloading without save_details leaves the project's own details alone
+        download = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft", "details": details})
+        self.assertEqual(download.status_code, 200)
+        self.assertIn("attachment", download.headers["Content-Disposition"])
+        unchanged = next(p for p in self.state()["projects"] if p["Project ID"] == pid)
+        self.assertEqual(unchanged["Client Name"], project["Client Name"])
+
+        # with save_details the unambiguous columns are written back
+        saved = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
+                                                "details": details, "save_details": True})
+        self.assertEqual(saved.status_code, 200)
+        stored = next(p for p in self.state()["projects"] if p["Project ID"] == pid)
+        self.assertEqual(stored["Client Name"], "Typed At Download")
+        self.assertEqual(stored["Address"], "7 Typed Street")
+        self.assertEqual(stored["Presentation Date"][:10], "2027-04-05")
+        self.assertEqual(stored["Project Name"], project["Project Name"])   # the merged band field is not guessed at
+
+        for invalid in [{"client": "x" * 201}, {"date": "not a date"}, {"nonsense": "x"}]:
+            response = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
+                                                       "details": {**details, **invalid}})
+            self.assertEqual(response.status_code, 400, invalid)
+
     def test_fillable_schedule_round_trip(self):
         import build_form
         from pypdf import PdfReader, PdfWriter
