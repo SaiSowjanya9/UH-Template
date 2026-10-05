@@ -33,7 +33,7 @@
       <div id="load-error" class="notice error" hidden></div>
       <div id="automation-banner" class="notice automation-notice" role="status" hidden><span id="automation-message"></span><button id="retry-automation" class="text-button" hidden>Retry automatic lookup</button></div>
       <div id="busy-banner" class="notice" role="status" hidden><span id="busy-message"></span><button id="cancel-lookup" class="text-button" hidden>Stop after this item</button></div>
-      <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><div class="heading-actions"><span id="spec-summary" class="spec-summary" hidden></span><button id="import-button" class="button secondary">↑ Import Excel</button><a class="button secondary" href="/api/workbook">↓ Export Excel</a></div></section>
+      <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><div class="heading-actions"><span id="spec-summary" class="spec-summary" hidden></span><button id="files-button" class="button secondary">⇅ Import / Export</button></div></section>
       <section id="project-summary" class="project-summary" hidden>
         <div class="project-emblem" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none"><path d="M13 48 50 17 87 48M23 41v42h54V41M42 83V58h16v25M29 48h7v10h-7M64 48h7v10h-7" stroke="currentColor" stroke-width="1.5"/><path d="M10 87h80M63 27V17h10v19" stroke="currentColor"/></svg></div>
         <div class="project-info"><div class="project-meta"><span id="project-id" class="pill"></span><span id="project-date"></span></div><h2 id="project-name"></h2><p id="project-address"></p><div id="project-client" class="project-client"></div></div>
@@ -58,7 +58,7 @@
         <div class="spec-toolbar">
           <label class="search-field"><span aria-hidden="true">⌕</span><input id="spec-filter" type="search" aria-label="Filter line items" placeholder="Filter items, brands, finishes…"></label>
           <div class="chip-group" role="group" aria-label="Group line items by"><button class="chip" data-group="Section">By category</button><button class="chip" data-group="Room / Area">By room</button></div>
-          <div class="heading-actions"><button id="spec-expand" class="text-button">Expand all</button><button id="spec-collapse" class="text-button">Collapse all</button><button id="spec-export" class="button secondary">Export CSV</button><button id="spec-import" class="button secondary">Import CSV</button><button id="spec-download" class="button secondary">Download schedule ↓</button><button id="spec-add" class="button primary">+ Add line item</button></div>
+          <div class="heading-actions"><button id="spec-expand" class="text-button">Expand all</button><button id="spec-collapse" class="text-button">Collapse all</button><button id="spec-add" class="button primary">+ Add line item</button></div>
         </div>
         <div id="spec-groups" class="spec-groups"></div>
         <div class="spec-total"><span>Estimated total <small>priced line items only</small></span><strong id="spec-total">—</strong></div>
@@ -73,7 +73,7 @@
           <div class="sheet-sign" id="preview-sign"></div>
           <div class="sheet-foot"><span id="preview-contact"></span><span>Page 1</span></div>
         </div>
-        <div class="export-panel"><div class="eyebrow">FROM SCHEDULE TO SIGN-OFF</div><h2>Ready for the reveal.</h2><p>Your project’s Excel selections become the approved UH Homes finish schedule, without copying and pasting.</p><ul class="feature-list"><li>Client, project, address and date band</li><li>Ruled category headings in workbook order</li><li>Coded rows with plain-English descriptions</li><li>Client note and signature block</li><li>The same page, editable, in PowerPoint</li></ul><div class="export-fields"><label class="field">Schedule title<input id="export-title" type="text" maxlength="80" autocomplete="off" spellcheck="false"></label><label class="field">Item code prefix<input id="export-prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label></div><label class="field">Presentation content<select id="export-mode"><option value="draft">Draft — all included selections</option><option value="final">Final — all included selections must be verified</option><option value="verified">Final — verified selections only</option></select></label><p id="export-summary" class="export-summary"></p><button id="export-pdf" class="button primary full">Download PDF ↗</button><button id="export-pptx" class="button secondary full">Download editable PowerPoint ↗</button><button id="export-form" class="button secondary full">Download fillable PDF ↗</button><button id="import-form" class="button secondary full">Import filled PDF ↑</button><small class="muted">The preview shows this project’s first rows. Both files use the same layout; PowerPoint keeps every value in an editable text box. Descriptions come from the workbook’s manufacturer, model, finish, quantity and client notes.</small></div></div>
+        <div class="export-panel"><div class="eyebrow">FROM SCHEDULE TO SIGN-OFF</div><h2>Ready for the reveal.</h2><p>Your project’s Excel selections become the approved UH Homes finish schedule, without copying and pasting.</p><ul class="feature-list"><li>Client, project, address and date band</li><li>Ruled category headings in workbook order</li><li>Coded rows with plain-English descriptions</li><li>Client note and signature block</li><li>The same page, editable, in PowerPoint</li></ul><div class="export-fields"><label class="field">Schedule title<input id="export-title" type="text" maxlength="80" autocomplete="off" spellcheck="false"></label><label class="field">Item code prefix<input id="export-prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label></div><label class="field">Presentation content<select id="export-mode"><option value="draft">Draft — all included selections</option><option value="final">Final — all included selections must be verified</option><option value="verified">Final — verified selections only</option></select></label><p id="export-summary" class="export-summary"></p><button id="export-pdf" class="button primary full">Download PDF ↗</button><button id="export-more" class="button secondary full">Other formats &amp; imports ⇅</button><small class="muted">The preview shows this project’s first rows. Both files use the same layout; PowerPoint keeps every value in an editable text box. Descriptions come from the workbook’s manufacturer, model, finish, quantity and client notes.</small></div></div>
       </section>
       <section id="manufacturers-view" class="view" hidden><div class="section-heading"><div><h2>The brands behind the details.</h2><p>Official domains help the lookup prioritize the manufacturer’s own product pages.</p></div><button id="add-manufacturer" class="button primary">+ Add manufacturer</button></div><div id="manufacturer-grid" class="manufacturer-grid"></div></section>
       <footer class="main-footer"><span class="footer-brand"><img src="/brand/symbol.png" alt="">UH HOMES <span class="footer-separator">/</span> SELECTIONS STUDIO</span><span>Thoughtful details. Beautiful homes.</span></footer>
@@ -84,6 +84,26 @@
   <input type="file" id="import-file" accept=".xlsx" hidden>
   <input type="file" id="spec-import-file" accept=".csv" hidden>
   <input type="file" id="form-import-file" accept=".pdf" hidden>
+  <dialog id="files-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">THIS PROJECT</div><h2>Import &amp; export</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <div class="file-columns">
+      <section>
+        <h3>Send out</h3>
+        <button class="file-choice" data-file="pdf"><strong>Finish schedule · PDF</strong><small>The client document. Asks for the client details and previews every page.</small></button>
+        <button class="file-choice" data-file="form"><strong>Fillable schedule · PDF</strong><small>Same page with form fields and a remove box, to mark up and import back.</small></button>
+        <button class="file-choice" data-file="pptx"><strong>Finish schedule · PowerPoint</strong><small>The editable twin, for wording changes without rebuilding.</small></button>
+        <button class="file-choice" data-file="csv"><strong>Spec sheet · CSV</strong><small>Line items for Excel or Sheets, to price up and bring back.</small></button>
+        <button class="file-choice" data-file="workbook"><strong>Master workbook · Excel</strong><small>Every sheet, including the price schedule.</small></button>
+      </section>
+      <section>
+        <h3>Bring in</h3>
+        <button class="file-choice" data-file="import-csv"><strong>Spec sheet · CSV</strong><small>Updates matching line items and adds new ones. Nothing is removed.</small></button>
+        <button class="file-choice" data-file="import-form"><strong>Filled schedule · PDF</strong><small>Applies client details, reworded descriptions and ticked removals.</small></button>
+        <button class="file-choice danger" data-file="import-workbook"><strong>Master workbook · Excel</strong><small>Replaces every project and selection. A backup is kept.</small></button>
+      </section>
+    </div>
+    <p class="form-note">Downloads and imports apply to the project selected in the sidebar, except the master workbook, which covers everything.</p>
+  </dialog>
   <dialog id="schedule-dialog" class="wide-dialog">
     <div class="dialog-heading"><div><div class="eyebrow">FINISH SCHEDULE</div><h2 id="schedule-dialog-title">Download schedule</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
     <div class="schedule-dialog-body">

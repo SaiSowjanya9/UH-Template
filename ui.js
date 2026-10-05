@@ -196,8 +196,8 @@ function render() {
   const automaticPending = included.some((r) => r._auto_phase);
   if (automaticPending && mode !== "verified") $("export-summary").textContent += " Export waits for automatic lookup so stale product links cannot be included.";
   if (stale) $("export-summary").textContent += ` ${stale} verified link${stale === 1 ? " is" : "s are"} over 6 months old — worth a re-check before presenting.`;
-  $("export-pdf").disabled = $("export-pptx").disabled = $("export-form").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
-  $("import-form").disabled = !project || state.busy;
+  $("export-pdf").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
+  $("export-more").disabled = !project || state.busy;
   $("manufacturer-grid").innerHTML = data.manufacturers.map((m, index) => `<article class="manufacturer-card"><h3>${esc(m.Manufacturer)}</h3><p>${esc(m["Official Domain"])}</p><p>${esc(m.Notes || "Official product source")}</p><button class="text-button" data-manufacturer="${index}">Edit manufacturer ↗</button></article>`).join("") || '<div class="empty-state"><h3>Add your first manufacturer</h3><p>Enter the brand and its official website domain.</p></div>';
   $("workbook-name").textContent = data.workbook;
   $("provider-status").textContent = data.provider.ready ? `${data.provider.name} is configured. Live requests may use paid API quota.` : `Search is not configured. Required: ${data.provider.key_name}. You can still manage selections, enter links manually, and export presentations.`;
@@ -720,12 +720,27 @@ $("edit-project").addEventListener("click", () => openEditor("project", selected
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
-$("spec-export").addEventListener("click", () => {
-  if (!state.project || state.busy) { toast("Choose a project first.", true); return; }
-  window.location.href = `/api/selections/csv?project=${encodeURIComponent(state.project)}`;
+const FILE_ACTIONS = {
+  pdf: () => openScheduleDialog("pdf"),
+  form: () => openScheduleDialog("form"),
+  pptx: () => action(() => exportPresentation("pptx")),
+  csv: () => { window.location.href = `/api/selections/csv?project=${encodeURIComponent(state.project)}`; },
+  workbook: () => { window.location.href = "/api/workbook"; },
+  "import-csv": () => $("spec-import-file").click(),
+  "import-form": () => $("form-import-file").click(),
+  "import-workbook": () => $("import-file").click(),
+};
+const NEEDS_PROJECT = new Set(["pdf", "form", "pptx", "csv", "import-csv", "import-form"]);
+
+$("files-button").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
+$("files-dialog").addEventListener("click", (event) => {
+  const choice = event.target.closest(".file-choice");
+  if (!choice || state.busy) return;
+  const key = choice.dataset.file;
+  if (NEEDS_PROJECT.has(key) && !selectedProject()) { toast("Choose a project first.", true); return; }
+  $("files-dialog").close();
+  FILE_ACTIONS[key]();
 });
-$("spec-import").addEventListener("click", () => { if (state.data && !state.busy) $("spec-import-file").click(); });
-$("spec-download").addEventListener("click", () => openScheduleDialog("pdf"));
 $("spec-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];
   event.target.value = "";
@@ -752,15 +767,14 @@ $("refresh").addEventListener("click", () => action(async () => { await refresh(
 $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
 $("export-pdf").addEventListener("click", () => openScheduleDialog("pdf"));
-$("export-pptx").addEventListener("click", () => action(() => exportPresentation("pptx")));
-$("export-form").addEventListener("click", () => openScheduleDialog("form"));
+$("export-more").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
 $("schedule-form").addEventListener("submit", downloadSchedule);
 $("schedule-refresh").addEventListener("click", () => action(refreshSchedulePreview));
 $("schedule-dialog").addEventListener("close", () => {
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $("schedule-frame").removeAttribute("src");
 });
-$("import-form").addEventListener("click", () => { if (state.data && !state.busy) $("form-import-file").click(); });
+
 $("form-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];
   event.target.value = "";
@@ -769,7 +783,7 @@ $("form-import-file").addEventListener("change", (event) => {
 $("export-mode").addEventListener("change", render);
 $("export-title").addEventListener("input", render);
 $("export-prefix").addEventListener("input", render);
-$("import-button").addEventListener("click", () => { if (state.data && !state.busy) $("import-file").click(); });
+
 $("import-file").addEventListener("change", (event) => { const file = event.target.files[0]; event.target.value = ""; action(() => importWorkbook(file)); });
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
 $("next-page").addEventListener("click", () => { state.page++; renderTable(); });
