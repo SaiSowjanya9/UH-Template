@@ -250,6 +250,7 @@ function renderSpec() {
   $("spec-summary").textContent = all.length
     ? `${groups.length} ${state.specGroup === "Section" ? "categories" : "rooms"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
     : "";
+  $("spec-summary").hidden = state.view !== "spec" || !all.length;
   $("spec-add").disabled = !selectedProject() || state.busy;
   if (!all.length) {
     $("spec-groups").innerHTML = '<div class="empty-state"><div class="empty-icon">▤</div><h3>Nothing specified yet</h3><p>Add your first line item to start building this home’s specification.</p></div>';

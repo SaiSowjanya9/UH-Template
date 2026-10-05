@@ -247,7 +247,7 @@ code { background:#eef1e6; border-radius:3px; padding:2px 4px; font-size:11px; o
 .chip-group { display:inline-flex; background:var(--cream); border:1px solid var(--gold-line); border-radius:999px; padding:3px; }
 .chip { border:0; background:none; border-radius:999px; padding:7px 15px; font-size:11px; font-weight:600; color:var(--gold-ink); }
 .chip.active { background:var(--gold); color:#fff; }
-.spec-summary { font-size:11px; color:var(--muted); margin-left:auto; }
+.spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
 #spec-view .spec-toolbar .heading-actions { gap:4px; }
 .spec-groups { display:flex; flex-direction:column; gap:14px; }
 .spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
