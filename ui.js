@@ -723,6 +723,7 @@ $("spec-export").addEventListener("click", () => {
   window.location.href = `/api/selections/csv?project=${encodeURIComponent(state.project)}`;
 });
 $("spec-import").addEventListener("click", () => { if (state.data && !state.busy) $("spec-import-file").click(); });
+$("spec-download").addEventListener("click", () => openScheduleDialog("pdf"));
 $("spec-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];
   event.target.value = "";
