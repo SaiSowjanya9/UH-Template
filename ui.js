@@ -173,6 +173,8 @@ function render() {
   $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
     ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
   $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", review: "The right product, down to the last detail.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
+  // the spec sheet edits the same rows the schedule prints, so name the home it belongs to
+  if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]} — these line items are what the client schedule prints.`;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
   $("add-selection").disabled = !project || state.busy;
