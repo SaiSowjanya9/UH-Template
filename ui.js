@@ -377,7 +377,8 @@ function openEditor(kind, record, prefill = {}) {
   const r = record || prefill;
   if (kind === "project") {
     fields = field("Project ID", r["Project ID"], { required: true, readonly: !!record, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
-    note = "Use a unique Project ID, such as UH-103. Cover Image accepts a public image URL or a local file path. Each project gets its own presentation.";
+    note = record ? "Cover Image accepts a public image URL or a local file path. Each project gets its own presentation."
+      : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts a public image URL or a local file path.";
   } else if (kind === "selection") {
     fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
     if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
@@ -401,15 +402,17 @@ async function deleteEditorRecord() {
   const { kind, record } = state.editor || {};
   if (!record || state.busy) return;
   const label = { selection: `selection “${record.Item}”`, project: `project “${record["Project Name"]}”`, manufacturer: `manufacturer “${record.Manufacturer}”` }[kind];
-  const extra = { project: " Only empty projects can be deleted — remove their selections first.",
-                  manufacturer: " Selections using this brand lose their official-domain search boost." }[kind] || "";
+  const owned = kind === "project" ? state.data.selections.filter((r) => r["Project ID"] === record["Project ID"]).length : 0;
+  const extra = owned ? ` Its ${owned} line item${owned === 1 ? "" : "s"} will be deleted too.`
+    : kind === "manufacturer" ? " Selections using this brand lose their official-domain search boost." : "";
   if (!confirm(`Delete ${label}? The row is removed from the workbook; a backup is kept.${extra}`)) return;
   $("editor-error").hidden = true;
   setBusy(true, "Deleting…");
   try {
     const values = Object.fromEntries(new FormData($("editor-form")));
     if (kind === "selection") values["Project ID"] = state.project;
-    await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record._row, delete: true, revision: state.editor.revision });
+    await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`,
+              { values, row: record._row, delete: true, cascade: owned > 0, revision: state.editor.revision });
     if (kind === "project") state.project = "";
     $("editor").close();
     await refresh();
@@ -434,7 +437,9 @@ async function saveEditor(event) {
     if (kind === "project") state.project = result.project_id;
     $("editor").close();
     await refresh();
-    toast(result.queued ? "Selection saved. Automatic product lookup is queued; results will appear when ready." : "Project details saved. A backup was preserved.");
+    toast(result.seeded ? `Project created with ${result.seeded} standard line items ready to specify.`
+      : result.queued ? "Selection saved. Automatic product lookup is queued; results will appear when ready."
+      : "Project details saved. A backup was preserved.");
   } catch (error) {
     $("editor-error").textContent = error.message;
     $("editor-error").hidden = false;
@@ -584,19 +589,7 @@ $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
 $("spec-add").addEventListener("click", () => openEditor("selection"));
-$("spec-template").addEventListener("click", () => action(async () => {
-  const project = selectedProject();
-  if (!project) { toast("Choose a project first.", true); return; }
-  if (!confirm(`Add the standard room-by-room line items to “${project["Project Name"]}”?\n\nItems already specified are left alone, so nothing is duplicated or overwritten.`)) return;
-  setBusy(true, "Adding the template line items…");
-  try {
-    const result = await api("/api/selections/template", { project: state.project });
-    await refresh();
-    toast(result.added
-      ? `${result.added} line item${result.added === 1 ? "" : "s"} added${result.skipped ? `, ${result.skipped} already specified` : ""}.`
-      : "Every template line item is already in this project.");
-  } finally { setBusy(false); }
-}));
+
 $("spec-expand").addEventListener("click", () => { state.specCollapsed.clear(); renderSpec(); });
 $("spec-collapse").addEventListener("click", () => {
   specGroups(projectRows()).forEach(([name]) => state.specCollapsed.add(name));

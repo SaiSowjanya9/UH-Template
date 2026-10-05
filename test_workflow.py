@@ -97,19 +97,21 @@ class AppTests(unittest.TestCase):
     def test_excel_edits_flow_into_the_interface_and_the_schedule(self):
         """Excel stays the source of truth: sheet edits appear in state and on the deliverable."""
         wb, revision = self.store.snapshot()
-        wb["Lists"].cell(13, 1, "Outdoor Living")
+        lists = wb["Lists"]
+        used = len([r for r in lists.iter_rows(min_row=2, max_col=1) if common.clean(r[0].value)])
+        lists.cell(used + 2, 1, "Specialty Finishes")     # a new category, last in print order
         project = wb["Projects"].cell(2, 1).value
         sheet = common.Sheet(wb["Selections"])
         row = sheet.ws.max_row + 1
-        for header, value in [("Project ID", project), ("Section", "Outdoor Living"), ("Item", "Pergola"),
+        for header, value in [("Project ID", project), ("Section", "Specialty Finishes"), ("Item", "Pergola"),
                               ("Manufacturer", "Test Brand"), ("Finish / Color", "Matte Black"),
                               ("Include in Lookbook", "Yes"), ("Lookup Status", "Not run")]:
             sheet.set(row, header, value)
         self.store.save(wb, revision)
 
         state = self.state()
-        self.assertEqual(state["sections"][-1], "Outdoor Living")
-        self.assertTrue(any(r["Item"] == "Pergola" and r["Section"] == "Outdoor Living" for r in state["selections"]))
+        self.assertEqual(state["sections"][-1], "Specialty Finishes")
+        self.assertTrue(any(r["Item"] == "Pergola" and r["Section"] == "Specialty Finishes" for r in state["selections"]))
         response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
         self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
         try:
@@ -117,17 +119,21 @@ class AppTests(unittest.TestCase):
         except ImportError:
             return
         text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
-        self.assertIn("O U T D O O R   L I V I N G", text)
+        self.assertIn("S P E C I A L T Y   F I N I S H E S", text)
         self.assertIn("Test Brand Matte Black", text)
-        sections = [line for line in text.splitlines() if line.startswith(("E X", "R O", "W I", "K I", "O U"))]
-        self.assertEqual(sections[-1], "O U T D O O R   L I V I N G")
+        # headings follow the order of the Lists sheet, whatever categories the project uses
+        spaced = {section: "   ".join(" ".join(word) for word in section.upper().split()) for section in state["sections"]}
+        found = [(text.index(heading), section) for section, heading in spaced.items() if heading in text]
+        self.assertEqual([section for _, section in sorted(found)],
+                         [section for section in state["sections"] if spaced[section] in text])
+        self.assertEqual(sorted(found)[-1][1], "Specialty Finishes")
 
     def test_create_project_and_selection_preserve_text_models(self):
         response = self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-1", "Project Name": "Test House"}})
         self.assertEqual(response.status_code, 200, response.json)
         response = self.post("/api/selections", {"values": {"Project ID": "TEST-1", "Item": "Faucet", "Manufacturer": "Brand", "Model #": "00123"}})
         self.assertEqual(response.status_code, 200, response.json)
-        record = next(r for r in self.state()["selections"] if r["Project ID"] == "TEST-1")
+        record = next(r for r in self.state()["selections"] if r["Project ID"] == "TEST-1" and r["Item"] == "Faucet")
         self.assertEqual(record["Model #"], "00123")
         self.assertEqual(record["Lookup Status"], "Not run")
         self.assertEqual(len(list((self.path.parent / "backups").glob("*.xlsx"))), 2)
@@ -344,10 +350,15 @@ class AppTests(unittest.TestCase):
         project = self.state()["projects"][0]
         response = self.post("/api/projects", {"values": {"Project ID": project["Project ID"]}, "delete": True})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("selections", response.json["error"])
+        self.assertIn("line items", response.json["error"])   # never silently discards a project's work
         self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-9", "Project Name": "Temp"}})
-        self.assertEqual(self.post("/api/projects", {"values": {"Project ID": "TEST-9"}, "delete": True}).status_code, 200)
-        self.assertFalse(any(p["Project ID"] == "TEST-9" for p in self.state()["projects"]))
+        seeded = len([r for r in self.state()["selections"] if r["Project ID"] == "TEST-9"])
+        response = self.post("/api/projects", {"values": {"Project ID": "TEST-9"}, "delete": True, "cascade": True})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["removed"], seeded)
+        state = self.state()
+        self.assertFalse(any(p["Project ID"] == "TEST-9" for p in state["projects"]))
+        self.assertFalse(any(r["Project ID"] == "TEST-9" for r in state["selections"]))
         name = self.state()["manufacturers"][0]["Manufacturer"]
         self.assertEqual(self.post("/api/manufacturers", {"values": {"Manufacturer": name}, "delete": True}).status_code, 200)
         self.assertFalse(any(m["Manufacturer"] == name for m in self.state()["manufacturers"]))
@@ -443,33 +454,28 @@ class AppTests(unittest.TestCase):
         for bad in [{"Unit Price": "free"}, {"Markup %": "lots"}, {"Markup %": "5000"}]:
             self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": bad}).status_code, 400, bad)
 
-    def test_spec_template_seeds_rooms_once(self):
+    def test_new_project_starts_from_the_spec_template(self):
         import spec_template
-        name, template = spec_template.load()
+        _, template = spec_template.load()
         expected = spec_template.rows(template)
-        project = self.state()["projects"][0]["Project ID"]
         before = len(self.state()["selections"])
-        response = self.post("/api/selections/template", {"project": project})
+        response = self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-T", "Project Name": "Template home"}})
         self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(response.json["added"], len(expected))
-        self.assertEqual(self.state()["sections"][-5:], [section for section, _ in template])
-        self.assertEqual(len(self.state()["selections"]), before + len(expected))
-        rows = [r for r in self.state()["selections"] if r["Project ID"] == project]
+        self.assertEqual(response.json["seeded"], len(expected))
+        state = self.state()
+        self.assertEqual(state["sections"][-5:], [section for section, _ in template])
+        self.assertEqual(len(state["selections"]), before + len(expected))
+        rows = [r for r in state["selections"] if r["Project ID"] == "TEST-T"]
         for section, room, item in expected[:: max(1, len(expected) // 20)]:
             self.assertTrue(any(r["Section"] == section and r["Room / Area"] == room and r["Item"] == item for r in rows),
                             f"{section} / {room} / {item} missing")
         seeded = next(r for r in rows if r["Room / Area"] == "Master Bathroom")
         self.assertEqual((seeded["Lookup Status"], seeded["Include in Lookbook"], seeded["Client Status"]),
                          ("Not run", "Yes", "Proposed"))
-        # re-running adds nothing and removes nothing
-        again = self.post("/api/selections/template", {"project": project})
-        self.assertEqual((again.json["added"], again.json["skipped"]), (0, len(expected)))
+        # editing the project later must not seed it again
+        edit = self.post("/api/projects", {"values": {"Project ID": "TEST-T", "Client Name": "Someone"}})
+        self.assertEqual(edit.json["seeded"], 0)
         self.assertEqual(len(self.state()["selections"]), before + len(expected))
-        # a second project gets its own copy
-        self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-T", "Project Name": "Template home"}})
-        other = self.post("/api/selections/template", {"project": "TEST-T"})
-        self.assertEqual(other.json["added"], len(expected))
-        self.assertEqual(other.json["sections"], [])   # sections already registered
 
     def test_prices_never_reach_client_documents(self):
         from pypdf import PdfReader

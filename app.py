@@ -152,11 +152,16 @@ def save_project():
         if data.get("delete"):
             if not existing:
                 raise ConflictError("This project no longer exists. Refresh the page.")
-            if any(r["Project ID"] == existing["Project ID"] for r in records(wb, "Selections")):
-                raise ValidationError("This project still has selections. Remove them first, then delete the project.")
+            owned = [r["_row"] for r in records(wb, "Selections") if r["Project ID"] == existing["Project ID"]]
+            if owned and not data.get("cascade"):
+                raise ValidationError(f"This project has {len(owned)} line items. Confirm deleting them with the project.")
+            for row in sorted(owned, reverse=True):     # bottom up so the remaining rows keep their numbers
+                delete_record(wb, "Selections", row)
             delete_record(wb, "Projects", existing["_row"])
-            store.save(wb, revision, f"delete project {existing['Project ID']}")
-            return jsonify(ok=True, deleted=True)
+            store.save(wb, revision, f"delete project {existing['Project ID']} (-{len(owned)} line items)")
+            if automation and owned:
+                automation.observe(wb)
+            return jsonify(ok=True, deleted=True, removed=len(owned))
         if data.get("create") and existing:
             raise ValidationError("That Project ID already exists. Choose a unique ID.")
         row = existing["_row"] if existing else next_row(sheet)
@@ -166,8 +171,19 @@ def save_project():
                 sheet.ws.cell(row, sheet.cols[field], formula.format(row=row))
         if "custom_fields" in data:
             set_custom_fields(wb, "Projects", row, data["custom_fields"])
-        store.save(wb, revision, f"project {values.get('Project ID')}")
-    return jsonify(ok=True, project_id=values.get("Project ID"))
+        seeded = 0
+        if not existing:
+            # A new home starts from the standard room-by-room specification.
+            _, template = spec_template.load()
+            spec_template.register_sections(wb, [section for section, _ in template])
+            seeded, _ = spec_template.apply(wb, values["Project ID"], template)
+            from openpyxl.utils import get_column_letter
+            selections = wb["Selections"]
+            selections.auto_filter.ref = f"A1:{get_column_letter(selections.max_column)}{selections.max_row}"
+        store.save(wb, revision, f"project {values.get('Project ID')}" + (f" (+{seeded} line items)" if seeded else ""))
+        if automation and seeded:
+            automation.observe(wb)
+    return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded)
 
 
 @app.post("/api/selections")
@@ -296,27 +312,6 @@ def lookup_selection(row):
         if automation:
             automation.acknowledge(wb, row)
     return jsonify(ok=True, result=result)
-
-
-@app.post("/api/selections/template")
-def apply_template():
-    data = payload()
-    name, template = spec_template.load()
-    with store.lock:
-        wb, revision = current(data)
-        project = next((p for p in records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
-        if not project:
-            raise ValidationError("Choose a valid project.")
-        sections = spec_template.register_sections(wb, [section for section, _ in template])
-        added, skipped = spec_template.apply(wb, project["Project ID"], template)
-        if added or sections:
-            from openpyxl.utils import get_column_letter
-            sheet = common.Sheet(wb["Selections"])
-            sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
-            store.save(wb, revision, f"spec template {project['Project ID']} (+{added})")
-            if automation:
-                automation.observe(wb)
-    return jsonify(ok=True, added=added, skipped=skipped, sections=sections, template=name)
 
 
 @app.post("/api/selections/parse-link")
