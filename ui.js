@@ -163,21 +163,6 @@ function render() {
     $("project-date").textContent = project["Presentation Date"] ? `Presentation · ${project["Presentation Date"].slice(0, 10)}` : "Presentation date not set";
     $("project-client").textContent = [project["Client Name"] ? `Prepared for ${project["Client Name"]}` : "", project["Plan / Elevation"]].filter(Boolean).join("   /   ");
   }
-  const notice = $("deadline-notice"), presDate = project?.["Presentation Date"]?.slice(0, 10);
-  notice.hidden = true;
-  if (project && presDate && state.view !== "manufacturers" && !bare) {
-    const days = Math.round((new Date(presDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
-    const unverified = rows.length - verified;
-    if (days <= 14 && (unverified || stale)) {
-      const when = days < 0 ? `was ${-days} day${-days === 1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
-      const parts = [`Presentation ${when}`];
-      if (unverified) parts.push(`${unverified} selection${unverified === 1 ? "" : "s"} still need${unverified === 1 ? "s" : ""} review`);
-      if (stale) parts.push(`${stale} verified link${stale === 1 ? "" : "s"} over 6 months old`);
-      notice.textContent = parts.join(" · ") + ".";
-      notice.classList.toggle("error", days < 0 || unverified > 0);
-      notice.hidden = false;
-    }
-  }
   const priced = rows.filter((r) => Number(r["Unit Price"]) > 0);
   const budget = priced.reduce((sum, r) => sum + lineTotal(r), 0);
   $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete${stale ? ` · ${stale} stale` : ""}`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
