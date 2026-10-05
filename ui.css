@@ -273,6 +273,9 @@ code { background:#eef1e6; border-radius:3px; padding:2px 4px; font-size:11px; o
 
 /* Collapsible sidebar */
 .sidebar-toggle { font-size:17px; margin-right:16px; flex:none; }
+.detail-entry .cell { margin-left:-9px; width:calc(100% + 18px); }
+.detail-entry .cell-label { font-size:9px; letter-spacing:1.4px; font-weight:600; color:var(--muted); text-transform:uppercase; padding:4px 9px; }
+.detail-entry dt { display:flex; align-items:center; gap:6px; }
 .brand-symbol { display:none; width:30px; height:auto; }
 .sidebar,.app-shell { transition:width .18s ease,margin-left .18s ease; }
 @media(min-width:801px) {

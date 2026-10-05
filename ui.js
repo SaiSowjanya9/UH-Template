@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, reviewLimit: 24, busy: false, cancel: false, editor: null,
-                specGroup: "Section", specCollapsed: new Set(), focusCell: null };
+                specGroup: "Section", specCollapsed: new Set(), focusSelector: null };
 const names = { selections: "Selection tracker", spec: "Spec sheet", review: "Review matches", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -143,9 +143,17 @@ function render() {
   $("stats").hidden = !project || state.view === "manufacturers" || bare;
   $("project-details-panel").hidden = !project || state.view !== "selections";
   if (project) {
-    const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"].map((name) => ({ name, value: project[name] }));
+    const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"];
     const custom = project.custom_fields || [];
-    $("project-detail-values").innerHTML = [...standard, ...custom].map((field, index) => `<div class="detail-entry ${index >= standard.length ? "custom-detail" : ""}"><dt>${esc(field.name)}${index >= standard.length ? '<span class="custom-tag">CUSTOM</span>' : ""}</dt><dd>${detailValue(field.value)}</dd></div>`).join("");
+    const entry = (label, control, isCustom) => `<div class="detail-entry ${isCustom ? "custom-detail" : ""}">${label}<dd>${control}</dd></div>`;
+    $("project-detail-values").innerHTML = standard.map((name) => {
+      const date = name === "Presentation Date";
+      const value = date ? (project[name] || "").slice(0, 10) : project[name] || "";
+      return entry(`<dt>${esc(name)}</dt>`,
+        `<input class="cell" data-project-field="${esc(name)}" type="${date ? "date" : "text"}" value="${esc(value)}" maxlength="4000" placeholder="Not provided">`);
+    }).join("") + custom.map((field, index) => entry(
+      `<dt><input class="cell cell-label" data-custom-index="${index}" data-custom-key="name" value="${esc(field.name)}" maxlength="80" aria-label="Field name"><span class="custom-tag">CUSTOM</span></dt>`,
+      `<input class="cell" data-custom-index="${index}" data-custom-key="value" value="${esc(field.value)}" maxlength="2000" placeholder="Not provided" aria-label="${esc(field.name)}">`, true)).join("");
     $("project-custom-empty").hidden = custom.length > 0;
   }
   if (project) {
@@ -203,6 +211,7 @@ function render() {
   $("workbook-name").textContent = data.workbook;
   $("provider-status").textContent = data.provider.ready ? `${data.provider.name} is configured. Live requests may use paid API quota.` : `Search is not configured. Required: ${data.provider.key_name}. You can still manage selections, enter links manually, and export presentations.`;
   attachImageErrors();
+  restoreFocus();
 }
 
 function renderTable() {
@@ -260,20 +269,48 @@ function renderSpec() {
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
     const total = items.reduce((sum, r) => sum + lineTotal(r), 0);
     const collapsed = state.specCollapsed.has(name);
-    const body = items.map((r) => `<tr>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td class="num"><span class="spec-line-total">${lineTotal(r) ? money(lineTotal(r)) : "—"}</span></td><td>${badge(r["Lookup Status"], r._auto_phase)}</td><td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
+    const body = items.map((r) => `<tr>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
-      <div class="spec-body"><table class="spec-table"><thead><tr>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th class="num">LINE TOTAL</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
+      <div class="spec-body"><table class="spec-table"><thead><tr>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button><span class="muted">${items.filter((r) => r["Lookup Status"] === "Verified").length} of ${items.length} verified</span></div>
     </article>`;
   }).join("");
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
-  if (state.focusCell) {
-    const cell = document.querySelector(`#spec-groups .cell[data-row="${state.focusCell.row}"][data-field="${CSS.escape(state.focusCell.field)}"]`);
-    if (cell) { cell.focus(); cell.setSelectionRange?.(cell.value.length, cell.value.length); }
-    state.focusCell = null;
-  }
+}
+
+function restoreFocus() {
+  if (!state.focusSelector) return;
+  const cell = document.querySelector(state.focusSelector);
+  state.focusSelector = null;
+  if (!cell) return;
+  cell.focus();
+  if (cell.type !== "date") cell.setSelectionRange?.(cell.value.length, cell.value.length);
+}
+
+async function saveProjectField(input) {
+  const project = selectedProject();
+  if (!project) return;
+  const field = input.dataset.projectField, value = input.value.trim();
+  const before = field === "Presentation Date" ? (project[field] || "").slice(0, 10) : project[field] || "";
+  if (before === value) return;
+  state.focusSelector = `[data-project-field="${CSS.escape(field)}"]`;
+  // the Project ID travels with every edit so the server updates this row instead of adding one
+  await api("/api/projects", { values: { "Project ID": project["Project ID"], [field]: value } });
+  await refresh();
+}
+
+async function saveProjectCustom(input) {
+  const project = selectedProject();
+  if (!project) return;
+  const index = Number(input.dataset.customIndex), key = input.dataset.customKey;
+  const fields = (project.custom_fields || []).map((field) => ({ ...field }));
+  if (!fields[index] || fields[index][key] === input.value.trim()) return;
+  fields[index][key] = input.value.trim();
+  state.focusSelector = `[data-custom-index="${index}"][data-custom-key="${key}"]`;
+  await api("/api/projects", { values: { "Project ID": project["Project ID"] }, custom_fields: fields });
+  await refresh();
 }
 
 async function saveCell(input) {
@@ -282,13 +319,13 @@ async function saveCell(input) {
   if (!record || String(record[field] ?? "") === input.value.trim()) return;
   if (field === "Item" && !input.value.trim()) { toast("An item needs a name.", true); renderSpec(); return; }
   input.classList.add("dirty");
-  state.focusCell = { row, field };
+  state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
   try {
     const result = await api("/api/selections", { row, values: { [field]: input.value.trim() } });
     await refresh();
     if (result.queued) toast("Saved. Automatic product lookup is queued for this change.");
   } catch (error) {
-    state.focusCell = null;
+    state.focusSelector = null;
     toast(error.message, true);
     await refresh().catch(() => {});
   }
@@ -568,6 +605,11 @@ $("spec-collapse").addEventListener("click", () => {
 });
 $("spec-groups").addEventListener("change", (event) => {
   if (event.target.classList.contains("cell")) action(() => saveCell(event.target));
+});
+$("project-detail-values").addEventListener("change", (event) => {
+  const input = event.target;
+  if (!input.classList.contains("cell")) return;
+  action(() => (input.dataset.projectField ? saveProjectField(input) : saveProjectCustom(input)));
 });
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
 $("setup-button").addEventListener("click", () => $("setup-dialog").showModal());
