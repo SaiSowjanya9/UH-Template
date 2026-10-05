@@ -505,12 +505,58 @@ def import_spec_csv():
     return jsonify(ok=True, added=added, updated=updated)
 
 
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_\d+\.xlsx$")
+
+
 @app.get("/api/workbook")
 def export_workbook():
     with store.lock:
         raw = store.path.read_bytes()
-    return send_file(io.BytesIO(raw), as_attachment=True, download_name=store.path.name,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    name = store.path.name
+    if request.args.get("backup"):
+        name = f"{store.path.stem}_backup_{dt.date.today().isoformat()}.xlsx"
+    return send_file(io.BytesIO(raw), as_attachment=True, download_name=name, mimetype=XLSX_MIME)
+
+
+def backup_folder():
+    return store.path.parent / "backups"
+
+
+@app.get("/api/backups")
+def list_backups():
+    """Earlier copies kept automatically before each save, newest first."""
+    out = []
+    for path in backup_folder().glob("*.xlsx"):
+        match = BACKUP_PATTERN.match(path.name)
+        if not match:
+            continue
+        try:
+            when = dt.datetime.strptime(match[1] + match[2], "%Y%m%d%H%M%S")
+        except ValueError:
+            continue
+        out.append({"name": path.name, "when": when.isoformat(timespec="seconds"),
+                    "size": path.stat().st_size})
+    out.sort(key=lambda entry: entry["when"], reverse=True)
+    return jsonify(backups=out)
+
+
+@app.post("/api/backups/restore")
+def restore_backup():
+    data = payload()
+    name = common.clean(data.get("name"))
+    if not BACKUP_PATTERN.match(name):
+        raise ValidationError("Choose one of the saved copies listed here.")
+    path = backup_folder() / name
+    if path.parent.resolve() != backup_folder().resolve() or not path.is_file():
+        raise ValidationError("That saved copy is no longer available. Refresh and try again.")
+    with store.lock:
+        current(data)
+        # import_bytes validates the copy and backs up today's workbook before replacing it
+        store.import_bytes(path.read_bytes(), data["revision"])
+        if automation:
+            automation.observe(store.snapshot()[0])
+    return jsonify(ok=True, name=name)
 
 
 @app.post("/api/workbook/import")

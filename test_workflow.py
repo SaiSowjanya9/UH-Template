@@ -658,6 +658,29 @@ class AppTests(unittest.TestCase):
                                  for s in slide.shapes if s.has_text_frame)
             self.assertNotIn("4321", text)
 
+    def test_backups_are_listed_and_restore_earlier_data(self):
+        row = self.state()["selections"][0]
+        original = row["Item"]
+        self.post("/api/selections", {"row": row["_row"], "values": {"Item": "Before the mistake"}})
+        self.post("/api/selections", {"row": row["_row"], "values": {"Item": "The mistake"}})
+        listed = self.client.get("/api/backups").json["backups"]
+        self.assertGreaterEqual(len(listed), 2)
+        self.assertEqual(listed, sorted(listed, key=lambda b: b["when"], reverse=True))   # newest first
+        self.assertTrue(all(b["size"] > 0 and b["name"].endswith(".xlsx") for b in listed))
+
+        # the newest copy was taken just before the latest save, so it still holds the earlier name
+        restored = self.post("/api/backups/restore", {"name": listed[0]["name"]})
+        self.assertEqual(restored.status_code, 200, restored.json)
+        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Item"],
+                         "Before the mistake")
+        # restoring kept a copy of what it replaced, so the mistake is still recoverable
+        self.assertTrue(any(b["name"] not in {entry["name"] for entry in listed}
+                            for b in self.client.get("/api/backups").json["backups"]))
+        self.assertNotEqual(original, "The mistake")
+
+        for bad in ["../UH_Homes_Selections_Tracker.xlsx", "missing_20200101_000000_0.xlsx", "evil.xlsx"]:
+            self.assertEqual(self.post("/api/backups/restore", {"name": bad}).status_code, 400, bad)
+
     def test_backups_are_pruned_and_logged(self):
         with patch("workbook_store.BACKUP_KEEP", 2):
             for index in range(4):

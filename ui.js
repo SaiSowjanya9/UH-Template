@@ -759,7 +759,46 @@ $("project-detail-values").addEventListener("change", (event) => {
   action(() => (input.dataset.projectField ? saveProjectField(input) : saveProjectCustom(input)));
 });
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
-$("setup-button").addEventListener("click", () => $("setup-dialog").showModal());
+function whenText(iso) {
+  const when = new Date(iso);
+  const today = new Date(new Date().toDateString());
+  const day = new Date(new Date(when).toDateString());
+  const days = Math.round((today - day) / 86400000);
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days === 0) return `Today at ${time}`;
+  if (days === 1) return `Yesterday at ${time}`;
+  return `${when.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })} at ${time}`;
+}
+
+async function renderBackups() {
+  const list = $("backup-list");
+  try {
+    const { backups } = await api("/api/backups");
+    list.innerHTML = backups.length
+      ? backups.map((backup) => `<div class="backup-row"><time datetime="${esc(backup.when)}">${esc(whenText(backup.when))}</time><small>${Math.round(backup.size / 1024)} KB</small><button class="text-button" data-restore="${esc(backup.name)}">Restore this</button></div>`).join("")
+      : '<p class="muted">No earlier versions yet. One is saved each time something changes.</p>';
+  } catch (error) {
+    list.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+  }
+}
+
+$("setup-button").addEventListener("click", () => { $("setup-dialog").showModal(); renderBackups(); });
+$("restore-file").addEventListener("click", () => { if (state.data && !state.busy) $("import-file").click(); });
+$("backup-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-restore]");
+  if (!button || state.busy) return;
+  const when = button.closest(".backup-row").querySelector("time").textContent;
+  action(async () => {
+    if (!confirm(`Go back to the version saved ${when}?\n\nEverything in every project returns to how it was then. The current version is saved first, so you can come back.`)) return;
+    setBusy(true, "Restoring that version…");
+    try {
+      await api("/api/backups/restore", { name: button.dataset.restore });
+      await refresh();
+      await renderBackups();
+      toast(`Restored the version from ${when}. The version you replaced was saved too.`);
+    } finally { setBusy(false); }
+  });
+});
 $("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workbook refreshed."); }));
 $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
