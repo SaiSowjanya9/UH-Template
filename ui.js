@@ -370,7 +370,6 @@ function addCustomField(field = { name: "", value: "" }, focus = true) {
   row.className = "custom-field-row";
   row.innerHTML = `<label class="field">Field name<input class="custom-name" type="text" maxlength="80" required value="${esc(field.name)}" placeholder="e.g. Lot number"></label><label class="field">Field value<textarea class="custom-value" aria-label="Field value" maxlength="2000" placeholder="Enter a value">${esc(field.value)}</textarea></label><button type="button" class="remove-custom-field icon-button" aria-label="Remove field">×</button>`;
   container.append(row);
-  $("custom-fields-empty").hidden = true;
   if (focus) row.querySelector("input").focus();
 }
 
@@ -389,7 +388,6 @@ function openEditor(kind, record, prefill = {}) {
   } else if (kind === "selection") {
     fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
     if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
-    note = "Changing the item/product name, manufacturer, model, or finish clears old links and verification, then automatically searches after saving. A newly typed Product Name is retained as search context. API charges may apply. Changed links need a fresh review; hidden selections remain in Excel.";
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
@@ -397,9 +395,9 @@ function openEditor(kind, record, prefill = {}) {
   $("editor-fields").innerHTML = fields;
   $("custom-fields-editor").hidden = kind === "manufacturer";
   $("custom-field-rows").replaceChildren();
-  $("custom-fields-empty").hidden = false;
   if (kind !== "manufacturer") (r.custom_fields || []).forEach((field) => addCustomField(field, false));
   $("editor-note").textContent = note;
+  $("editor-note").hidden = !note;
   $("editor-delete").hidden = !record;
   if (record) $("editor-delete").textContent = `Delete ${kind}`;
   $("editor").showModal();
@@ -711,7 +709,6 @@ $("custom-field-rows").addEventListener("click", (event) => {
   const name = row.querySelector(".custom-name").value;
   if (name && !confirm(`Remove the field “${name}”? This takes effect when you save changes.`)) return;
   row.remove();
-  $("custom-fields-empty").hidden = $("custom-field-rows").children.length > 0;
 });
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
