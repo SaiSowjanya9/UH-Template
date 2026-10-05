@@ -134,12 +134,13 @@ function render() {
   const included = rows.filter((r) => r["Include in Lookbook"].toLowerCase() !== "no");
   const auto = data.automation || { enabled: false, pending: [], message: "" };
   const projectJobs = auto.pending.filter((job) => job.project === state.project);
-  $("automation-banner").hidden = !auto.enabled;
+  const bare = state.view === "spec";   // the spec sheet stands on its own
+  $("automation-banner").hidden = !auto.enabled || bare;
   $("automation-message").textContent = auto.message || (auto.pending.length ? `${projectJobs.length} automatic lookup(s) pending in this project; ${auto.pending.length} across the workbook. Saved Excel edits are detected automatically. Close Excel to allow link updates.` : `Automatic lookup is watching saved app and Excel edits.${data.provider.ready ? "" : " Configure your search API key in Setup & workbook to enable searches."}`);
   $("retry-automation").hidden = !auto.pending.some((job) => ["failed", "retry", "waiting_key"].includes(job.phase));
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
-  $("project-summary").hidden = !project || state.view === "manufacturers";
-  $("stats").hidden = !project || state.view === "manufacturers";
+  $("project-summary").hidden = !project || state.view === "manufacturers" || bare;
+  $("stats").hidden = !project || state.view === "manufacturers" || bare;
   $("project-details-panel").hidden = !project || state.view !== "selections";
   if (project) {
     const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"].map((name) => ({ name, value: project[name] }));
@@ -156,7 +157,7 @@ function render() {
   }
   const notice = $("deadline-notice"), presDate = project?.["Presentation Date"]?.slice(0, 10);
   notice.hidden = true;
-  if (project && presDate && state.view !== "manufacturers") {
+  if (project && presDate && state.view !== "manufacturers" && !bare) {
     const days = Math.round((new Date(presDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
     const unverified = rows.length - verified;
     if (days <= 14 && (unverified || stale)) {
