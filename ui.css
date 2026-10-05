@@ -229,3 +229,43 @@ code { background:#eef1e6; border-radius:3px; padding:2px 4px; font-size:11px; o
 @media(max-width:800px) { .sidebar { position:relative; width:auto; padding:18px; border-right:0; border-bottom:1px solid var(--line); } .brand { margin:0 0 15px; padding:19px; flex-direction:row; justify-content:space-between; gap:20px; } .brand-wordmark { width:170px; max-width:60%; } .brand small { font-size:6px; letter-spacing:1.5px; } .sidebar nav { display:flex; overflow-x:auto; } .nav-item { min-width:max-content; font-size:11px; padding:10px; } .workspace-label,.sidebar-bottom .local-note { display:none; } .project-label { margin:0; padding:5px 8px; border:0; } .project-list { display:flex; overflow-x:auto; gap:7px; margin-top:10px; } .project-choice { width:auto; min-width:180px; padding:8px 10px; } .sidebar-bottom { padding:0; display:flex; } .sidebar-bottom .nav-item { width:auto; } .sidebar-bottom .nav-symbol { display:none; } .app-shell { margin-left:0; } .topbar { height:56px; padding:0 20px; } main { padding:24px 20px 0; } .page-heading { flex-wrap:wrap; margin-bottom:24px; } .page-heading .heading-actions { padding-top:0; } .page-heading .heading-actions::after { content:""; } .project-summary { gap:15px; padding:17px; flex-wrap:wrap; } .project-emblem { width:65px; height:75px; } .project-info h2 { font-size:23px; } .project-summary>.text-button { margin-left:auto; } .stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; } .stat { padding:14px; } .stat-value strong { font-size:25px; } .section-heading h2 { font-size:22px; } .filters { flex-wrap:wrap; gap:9px; } .search-field { flex-basis:100%; } .filters select { flex:1; max-width:none; } .review-grid,.manufacturer-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .main-footer { gap:20px; } }
 @media(max-width:480px) { .review-grid,.manufacturer-grid { grid-template-columns:1fr; } .form-grid { grid-template-columns:1fr; } dialog { padding:20px; } .export-fields { grid-template-columns:1fr; } .sheet-band { grid-template-columns:repeat(2,minmax(0,1fr)); } .sheet-row { grid-template-columns:30px 1fr; } .sheet-row em { grid-column:2; } .project-client { line-height:1.7; } .stat-value span { font-size:9px; } .main-footer>span:last-child { display:none; } .heading-actions { width:100%; } .heading-actions .button { flex:1; padding:10px 11px; } }
 @media(prefers-reduced-motion:reduce) { * { transition:none !important; } }
+
+/* Spec sheet - cream and gold */
+:root { --cream:#fbf8f1; --cream-deep:#f4eee1; --gold-line:#e3d7bf; --gold-ink:#8d7342; }
+.spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+.spec-toolbar .search-field { flex:1; min-width:220px; }
+.chip-group { display:inline-flex; background:var(--cream); border:1px solid var(--gold-line); border-radius:999px; padding:3px; }
+.chip { border:0; background:none; border-radius:999px; padding:7px 15px; font-size:11px; font-weight:600; color:var(--gold-ink); }
+.chip.active { background:var(--gold); color:#fff; }
+.spec-summary { font-size:11px; color:var(--muted); margin-left:auto; }
+.spec-groups { display:flex; flex-direction:column; gap:14px; }
+.spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
+.spec-card-head { display:flex; align-items:center; gap:12px; width:100%; border:0; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }
+.spec-card.collapsed .spec-card-head { border-bottom:0; }
+.spec-card-head .twist { color:var(--gold-ink); font-size:11px; width:14px; transition:transform .15s; }
+.spec-card.collapsed .spec-card-head .twist { transform:rotate(-90deg); }
+.spec-card-head h3 { margin:0; font-size:13px; letter-spacing:.4px; color:#43381f; text-transform:uppercase; }
+.spec-card-head .count { font-size:10px; color:var(--gold-ink); background:#fff; border:1px solid var(--gold-line); border-radius:999px; padding:3px 9px; }
+.spec-card-head .group-total { margin-left:auto; font-size:12px; font-weight:600; color:#43381f; }
+.spec-card.collapsed .spec-body { display:none; }
+.spec-body { overflow-x:auto; }
+.spec-table { width:100%; border-collapse:collapse; min-width:860px; }
+.spec-table th { text-align:left; font-size:9px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
+.spec-table td { padding:4px 6px; border-bottom:1px solid #f4f1e8; vertical-align:middle; }
+.spec-table tr:last-child td { border-bottom:0; }
+.spec-table tr:hover td { background:#fdfcf8; }
+.spec-table th.num,.spec-table td.num { text-align:right; }
+.cell { width:100%; border:1px solid transparent; background:none; border-radius:4px; padding:8px 9px; font-size:12px; color:var(--ink); }
+.cell:hover { border-color:#eee6d6; background:#fffdf8; }
+.cell:focus { border-color:var(--gold); background:#fff; outline:none; }
+.cell.num { text-align:right; }
+.cell::placeholder { color:#c3bdaf; }
+.cell.dirty { border-color:var(--gold); }
+.spec-line-total { font-size:12px; font-weight:600; color:#43381f; padding-right:9px; white-space:nowrap; }
+.spec-actions { display:flex; gap:2px; justify-content:flex-end; white-space:nowrap; }
+.spec-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 15px; background:#fdfbf6; border-top:1px solid #f0e9da; }
+.spec-total { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:18px 0 30px; padding:18px 22px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border:1px solid var(--gold-line); border-radius:9px; }
+.spec-total span { font-size:11px; letter-spacing:1.4px; font-weight:600; color:var(--gold-ink); text-transform:uppercase; }
+.spec-total small { display:block; font-size:9px; letter-spacing:.6px; color:var(--muted); text-transform:none; font-weight:400; margin-top:3px; }
+.spec-total strong { font-family:Georgia,"Times New Roman",serif; font-size:27px; color:#3c3320; }
+@media(max-width:800px) { .spec-summary { margin-left:0; } .spec-total strong { font-size:22px; } }
