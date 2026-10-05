@@ -143,8 +143,11 @@ def numbered(rows, prefix):
     return [dict(row, _code=f"{prefix}-{index:0{digits}d}") for index, row in enumerate(rows, start=1)]
 
 
-def description(row):
-    """One plain-English line per selection, assembled from the workbook columns."""
+def description(row, include_quantity=True):
+    """One plain-English line per selection, assembled from the workbook columns.
+
+    Tables that show quantity in their own column pass include_quantity=False.
+    """
     product = clean(row.get("Product Name")) or clean(row.get("Model #"))
     finish = clean(row.get("Finish / Color"))
     identity = " ".join(filter(None, [clean(row.get("Manufacturer")), product]))
@@ -153,7 +156,7 @@ def description(row):
     model = clean(row.get("Model #"))
     if model and product != model and model.lower() not in identity.lower():
         identity = f"{identity} (Model {model})".strip()
-    segments = [identity, finish, quantity(row), clean(row.get("Client Notes"))]
+    segments = [identity, finish, quantity(row) if include_quantity else "", clean(row.get("Client Notes"))]
     return " \u2013 ".join(segment for segment in segments if segment)
 
 

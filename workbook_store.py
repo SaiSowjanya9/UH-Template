@@ -27,7 +27,11 @@ STALE_DAYS = 180
 
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price"]
+# Numeric input columns: (maximum, message)
+NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
+                  "Unit Price": (100_000_000, "Unit Price must be a number between 0 and 100,000,000.")}
+PRICE_SHEET = "Price Schedule"
 
 # Computed Projects columns (H/I/J/K in the template); backfilled for Excel-added rows.
 PROJECT_FORMULAS = {
@@ -79,13 +83,13 @@ def validate_values(data, fields):
             raise ValidationError(f"{key} contains invalid or overly long text.")
         if key == "Product URL" and value and not http_url(value):
             raise ValidationError("Product URL must be a full HTTP or HTTPS link.")
-        if key == "Qty" and value:
+        if key in NUMERIC_FIELDS and value:
+            limit, message = NUMERIC_FIELDS[key]
             try:
-                qty = float(value)
-                if not 0 <= qty <= 1_000_000:
+                if not 0 <= float(value) <= limit:
                     raise ValueError()
             except ValueError:
-                raise ValidationError("Quantity must be a number between 0 and 1,000,000.") from None
+                raise ValidationError(message) from None
         result[key] = value
     return result
 
@@ -93,6 +97,13 @@ def validate_values(data, fields):
 def put(sheet, row, data):
     for key, value in data.items():
         cell = sheet.ws.cell(row, sheet.cols[key])
+        if key in NUMERIC_FIELDS and clean(value):
+            # Stored as a real number so Excel's SUM and ISNUMBER work on the Price Schedule.
+            number = float(value)
+            cell.value = int(number) if number.is_integer() else number
+            if key == "Unit Price":
+                cell.number_format = '#,##0.00'
+            continue
         cell.value = value or None
         if isinstance(value, str) and value:
             cell.data_type = "s"
@@ -268,19 +279,26 @@ def stale_check(row, today=None):
 
 
 def ensure_selection_columns(wb):
-    """Add the optional Client Status column when the workbook predates it. Returns a fresh Sheet."""
+    """Add the optional Selections columns when the workbook predates them. Returns a fresh Sheet."""
     ws = wb["Selections"]
     sheet = Sheet(ws)
-    if "Client Status" in sheet.cols:
-        return sheet
-    column = ws.max_column + 1
-    if column > 50:
-        raise ValidationError("This worksheet has no space for the Client Status column.")
-    cell = ws.cell(1, column, "Client Status")
-    cell._style = copy(ws.cell(1, 1)._style)
-    ws.column_dimensions[get_column_letter(column)].width = 16
-    ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
-    return Sheet(ws)
+    added = False
+    for header in OPTIONAL_SELECTION_FIELDS:
+        if header in sheet.cols:
+            continue
+        column = ws.max_column + 1
+        if column > 50:
+            raise ValidationError(f"This worksheet has no space for the {header} column.")
+        cell = ws.cell(1, column, header)
+        cell._style = copy(ws.cell(1, 1)._style)
+        ws.column_dimensions[get_column_letter(column)].width = 16
+        if header == "Unit Price":
+            for row in range(2, max(ws.max_row, 2) + 1):
+                ws.cell(row, column).number_format = '#,##0.00'
+        sheet, added = Sheet(ws), True
+    if added:
+        ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    return sheet
 
 
 def ensure_list_values(wb):
@@ -384,6 +402,8 @@ class WorkbookStore:
             ensure_list_values(wb)
             ensure_validations(wb)
             ensure_project_formulas(wb)
+            from price_schedule import rebuild   # local import: price_schedule reads build_lookbook
+            rebuild(wb)
             handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
             os.close(handle)
             try:

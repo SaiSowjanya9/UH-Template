@@ -413,6 +413,48 @@ class AppTests(unittest.TestCase):
         self.assertEqual(details["Lookup Status"], "Found - verify")
         self.assertEqual(self.post("/api/selections/parse-link", {"url": "file:///etc/passwd"}).status_code, 400)
 
+    def test_price_schedule_groups_every_selection_and_totals(self):
+        from price_schedule import SHEET
+        row = self.state()["selections"][0]
+        response = self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "3", "Unit Price": "125.50"}})
+        self.assertEqual(response.status_code, 200, response.json)
+        wb, _ = self.store.snapshot()
+        ws = wb[SHEET]
+        self.assertEqual([ws.cell(4, c).value for c in range(1, 7)],
+                         ["S.No", "Code", "Description", "Qty", "Unit Price", "Price"])
+        text = [[ws.cell(r, c).value for c in range(1, 7)] for r in range(5, ws.max_row + 1)]
+        flat = "\n".join(str(cell) for line in text for cell in line if cell)
+        # every project, category and selection appears
+        for project in {r["Project ID"] for r in self.state()["selections"]}:
+            self.assertIn(project, flat)
+        for selection in self.state()["selections"]:
+            self.assertIn(selection["Section"].upper(), flat)
+        self.assertIn("subtotal", flat)
+        self.assertIn("Grand total", flat)
+        # the priced row points at its Selections cells and multiplies them out
+        priced = next(line for line in text if line[2] and "Pure White" not in str(line[2])
+                      and str(line[1] or "").startswith("EX") and f"Selections!H{row['_row']}" in str(line[3]))
+        self.assertIn(f"Selections!R{row['_row']}", priced[4])
+        self.assertTrue(priced[5].startswith("=IF(ISNUMBER("))
+        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Unit Price"], "125.5")
+        self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": {"Unit Price": "free"}}).status_code, 400)
+
+    def test_prices_never_reach_client_documents(self):
+        from pypdf import PdfReader
+        from pptx import Presentation
+        row = self.state()["selections"][0]
+        self.post("/api/selections", {"row": row["_row"], "values": {"Unit Price": "4321.99"}})
+        for kind in ["pdf", "pptx"]:
+            response = self.post("/api/presentation", {"project": row["Project ID"], "format": kind, "mode": "draft"})
+            self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
+            self.assertNotIn(b"4321.99", response.data)
+            if kind == "pdf":
+                text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+            else:
+                text = "\n".join(s.text for slide in Presentation(io.BytesIO(response.data)).slides
+                                 for s in slide.shapes if s.has_text_frame)
+            self.assertNotIn("4321", text)
+
     def test_backups_are_pruned_and_logged(self):
         with patch("workbook_store.BACKUP_KEEP", 2):
             for index in range(4):
