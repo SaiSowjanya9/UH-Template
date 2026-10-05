@@ -46,7 +46,7 @@ function setBusy(value, message = "") {
   state.busy = value;
   $("busy-banner").hidden = !value;
   $("busy-message").textContent = message;
-  document.querySelectorAll("button:not(.close-dialog)").forEach((button) => { button.disabled = value; });
+  document.querySelectorAll("button:not(.close-dialog):not(.sidebar-toggle)").forEach((button) => { button.disabled = value; });
   $("cancel-lookup").disabled = false;
   if (!value && state.data) render();
 }
@@ -518,6 +518,19 @@ setInterval(async () => {
     $("load-error").hidden = false;
   } finally { polling = false; }
 }, 2500);
+
+function setSidebar(collapsed) {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  const button = $("sidebar-toggle");
+  button.setAttribute("aria-expanded", String(!collapsed));
+  const label = collapsed ? "Expand navigation" : "Collapse navigation";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  try { localStorage.setItem("uh-sidebar", collapsed ? "collapsed" : "open"); } catch {}
+}
+
+try { if (localStorage.getItem("uh-sidebar") === "collapsed") setSidebar(true); } catch {}
+$("sidebar-toggle").addEventListener("click", () => setSidebar(!document.body.classList.contains("sidebar-collapsed")));
 
 $("retry-automation").addEventListener("click", () => action(async () => {
   await api("/api/automation/retry", {});

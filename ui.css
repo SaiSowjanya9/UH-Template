@@ -270,3 +270,22 @@ code { background:#eef1e6; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-total small { display:block; font-size:9px; letter-spacing:.6px; color:var(--muted); text-transform:none; font-weight:400; margin-top:3px; }
 .spec-total strong { font-family:Georgia,"Times New Roman",serif; font-size:27px; color:#3c3320; }
 @media(max-width:800px) { .spec-summary { margin-left:0; } .spec-total strong { font-size:22px; } }
+
+/* Collapsible sidebar */
+.sidebar-toggle { font-size:17px; margin-right:16px; flex:none; }
+.brand-symbol { display:none; width:30px; height:auto; }
+.sidebar,.app-shell { transition:width .18s ease,margin-left .18s ease; }
+@media(min-width:801px) {
+  body.sidebar-collapsed .sidebar { width:74px; padding:24px 11px 18px; align-items:center; }
+  body.sidebar-collapsed .app-shell { margin-left:74px; }
+  body.sidebar-collapsed .brand { width:100%; margin-bottom:22px; padding:14px 6px; gap:0; }
+  body.sidebar-collapsed .brand-wordmark,body.sidebar-collapsed .brand small { display:none; }
+  body.sidebar-collapsed .brand-symbol { display:block; }
+  body.sidebar-collapsed .workspace-label,body.sidebar-collapsed .project-label,
+  body.sidebar-collapsed .project-list,body.sidebar-collapsed .local-note { display:none; }
+  body.sidebar-collapsed nav { width:100%; }
+  body.sidebar-collapsed .nav-item { font-size:0; gap:0; justify-content:center; padding:12px 0; }
+  body.sidebar-collapsed .nav-symbol { font-size:19px; width:auto; }
+  body.sidebar-collapsed .nav-count { display:none; }
+  body.sidebar-collapsed .sidebar-bottom { width:100%; margin-top:auto; }
+}
