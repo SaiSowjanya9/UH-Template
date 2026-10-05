@@ -20,9 +20,11 @@ from workbook_store import (CLIENT_STATUSES, SELECTION_FIELDS, STATUSES, Workboo
 
 # Columns the user fills in by hand versus those the lookup maintains.
 ENTRY_COLUMNS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #",
-                 "Finish / Color", "Qty", "Unit Price", "Client Notes", "Include in Lookbook", "Client Status"]
+                 "Finish / Color", "Qty", "Unit Price", "Markup %", "Client Notes",
+                 "Include in Lookbook", "Client Status"]
 WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Lookup Notes": 34, "Client Notes": 28,
-                         "Include in Lookbook": 17, "Client Status": 15, "Checked On": 12, "Unit Price": 12},
+                         "Include in Lookbook": 17, "Client Status": 15, "Checked On": 12, "Unit Price": 12,
+                         "Markup %": 11},
           "Projects": {"Cover Image": 30, "Presentation Date": 18}}
 
 INSTRUCTIONS = [
@@ -51,14 +53,16 @@ INSTRUCTIONS = [
     ("Model #          Manufacturer model or SKU. Needed for automatic product lookup.", ""),
     ("Finish / Color   For example Matte Black or SW 7010.", ""),
     ("Qty              Leave blank or 1 to hide the quantity from the client schedule.", ""),
-    ("Unit Price       Cost per unit. The Price Schedule sheet multiplies it by Qty and totals it.", ""),
+    ("Unit Price       Cost per unit. The Price Schedule multiplies it by Qty and adds the markup.", ""),
+    ("Markup %         Percentage added to the line, for example 15. Leave blank for none.", ""),
     ("Client Notes     Short note printed with the item on the client schedule.", ""),
     ("Include in Lookbook   No hides the row from client exports without deleting it. Dropdown.", ""),
     ("Client Status    Proposed / Presented / Approved / Rejected / Changed. Dropdown.", ""),
     ("", ""),
     ("Price Schedule sheet", "heading"),
-    ("Every selection grouped by project and category with S.No, Code, Description, Qty, Unit Price "
-     "and Price, plus a subtotal per category, a total per project and a grand total.", ""),
+    ("Every selection grouped by project and category with S.No, Code, Description, Qty, Unit Price, "
+     "Markup % and Price, plus a subtotal per category, a total per project and a grand total.", ""),
+    ("Price = Qty x Unit Price x (1 + Markup %).", ""),
     ("It is rebuilt automatically each time the workbook is saved, so do not type into it. "
      "Enter costs in the Unit Price column on Selections and they flow through.", ""),
     ("Prices stay internal: they never appear on the client PDF or PowerPoint.", ""),

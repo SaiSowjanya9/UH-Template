@@ -416,13 +416,13 @@ class AppTests(unittest.TestCase):
     def test_price_schedule_groups_every_selection_and_totals(self):
         from price_schedule import SHEET
         row = self.state()["selections"][0]
-        response = self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "3", "Unit Price": "125.50"}})
+        response = self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "3", "Unit Price": "125.50", "Markup %": "15"}})
         self.assertEqual(response.status_code, 200, response.json)
         wb, _ = self.store.snapshot()
         ws = wb[SHEET]
-        self.assertEqual([ws.cell(4, c).value for c in range(1, 7)],
-                         ["S.No", "Code", "Description", "Qty", "Unit Price", "Price"])
-        text = [[ws.cell(r, c).value for c in range(1, 7)] for r in range(5, ws.max_row + 1)]
+        self.assertEqual([ws.cell(4, c).value for c in range(1, 8)],
+                         ["S.No", "Code", "Description", "Qty", "Unit Price", "Markup %", "Price"])
+        text = [[ws.cell(r, c).value for c in range(1, 8)] for r in range(5, ws.max_row + 1)]
         flat = "\n".join(str(cell) for line in text for cell in line if cell)
         # every project, category and selection appears
         for project in {r["Project ID"] for r in self.state()["selections"]}:
@@ -434,10 +434,14 @@ class AppTests(unittest.TestCase):
         # the priced row points at its Selections cells and multiplies them out
         priced = next(line for line in text if line[2] and "Pure White" not in str(line[2])
                       and str(line[1] or "").startswith("EX") and f"Selections!H{row['_row']}" in str(line[3]))
-        self.assertIn(f"Selections!R{row['_row']}", priced[4])
-        self.assertTrue(priced[5].startswith("=IF(ISNUMBER("))
-        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Unit Price"], "125.5")
-        self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": {"Unit Price": "free"}}).status_code, 400)
+        columns = {c.value: c.column_letter for c in wb["Selections"][1] if c.value}
+        self.assertIn(f"Selections!{columns['Unit Price']}{row['_row']}", priced[4])
+        self.assertIn(f"Selections!{columns['Markup %']}{row['_row']}", priced[5])
+        self.assertIn("(1+IF(ISNUMBER(F", priced[6])   # the line total applies the markup
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual((current["Unit Price"], current["Markup %"]), ("125.5", "15"))
+        for bad in [{"Unit Price": "free"}, {"Markup %": "lots"}, {"Markup %": "5000"}]:
+            self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": bad}).status_code, 400, bad)
 
     def test_prices_never_reach_client_documents(self):
         from pypdf import PdfReader

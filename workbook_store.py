@@ -27,10 +27,11 @@ STALE_DAYS = 180
 
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %"]
 # Numeric input columns: (maximum, message)
 NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
-                  "Unit Price": (100_000_000, "Unit Price must be a number between 0 and 100,000,000.")}
+                  "Unit Price": (100_000_000, "Unit Price must be a number between 0 and 100,000,000."),
+                  "Markup %": (1_000, "Markup % must be a number between 0 and 1,000.")}
 PRICE_SHEET = "Price Schedule"
 
 # Computed Projects columns (H/I/J/K in the template); backfilled for Excel-added rows.
@@ -101,8 +102,8 @@ def put(sheet, row, data):
             # Stored as a real number so Excel's SUM and ISNUMBER work on the Price Schedule.
             number = float(value)
             cell.value = int(number) if number.is_integer() else number
-            if key == "Unit Price":
-                cell.number_format = '#,##0.00'
+            if key in {"Unit Price", "Markup %"}:
+                cell.number_format = '#,##0.00' if key == "Unit Price" else '0.##'
             continue
         cell.value = value or None
         if isinstance(value, str) and value:
@@ -292,9 +293,10 @@ def ensure_selection_columns(wb):
         cell = ws.cell(1, column, header)
         cell._style = copy(ws.cell(1, 1)._style)
         ws.column_dimensions[get_column_letter(column)].width = 16
-        if header == "Unit Price":
+        if header in {"Unit Price", "Markup %"}:
+            fmt = '#,##0.00' if header == "Unit Price" else '0.##'
             for row in range(2, max(ws.max_row, 2) + 1):
-                ws.cell(row, column).number_format = '#,##0.00'
+                ws.cell(row, column).number_format = fmt
         sheet, added = Sheet(ws), True
     if added:
         ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"

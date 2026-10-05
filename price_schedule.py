@@ -14,9 +14,11 @@ from openpyxl.utils import get_column_letter
 from common import Sheet, clean, section_order
 
 SHEET = "Price Schedule"
-HEADERS = ["S.No", "Code", "Description", "Qty", "Unit Price", "Price"]
-WIDTHS = [7, 10, 86, 7, 13, 15]
+HEADERS = ["S.No", "Code", "Description", "Qty", "Unit Price", "Markup %", "Price"]
+WIDTHS = [7, 10, 78, 7, 13, 11, 15]
 MONEY = '#,##0.00'
+TOTAL_COLUMN = len(HEADERS)          # the Price column carries every total
+TOTAL_LETTER = get_column_letter(TOTAL_COLUMN)
 
 DARK, ACCENT, MUTED = "FF2F3337", "FFC9A24A", "FF7A7E82"
 BAND, HAIRLINE = "FFF5F5F3", "FFE3E3E1"
@@ -80,8 +82,8 @@ def rebuild(wb):
     for index, width in enumerate(WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(index)].width = width
     ws["A1"], ws["A1"].font = "Price Schedule", TITLE_FONT
-    ws["A2"] = ("Rebuilt automatically from the Selections sheet - do not edit here. "
-                "Enter prices in the Unit Price column on Selections; Price = Qty x Unit Price.")
+    ws["A2"] = ("Rebuilt automatically from the Selections sheet - do not edit here. Enter costs in the "
+                "Unit Price and Markup % columns on Selections; Price = Qty x Unit Price x (1 + Markup %).")
     ws["A2"].font = NOTE_FONT
     ws.merge_cells("A2:F2")
     for index, header in enumerate(HEADERS, start=1):
@@ -129,13 +131,20 @@ def rebuild(wb):
             qty = f"Selections!{columns['Qty']}{source_row}"
             ws.cell(line, 4, f'=IF({qty}="",1,{qty})').font = BODY_FONT
             ws.cell(line, 4).alignment = Alignment(horizontal="right")
+            markup = ws.cell(line, 6)
+            markup.font, markup.alignment = BODY_FONT, Alignment(horizontal="right")
+            markup.number_format = '0.##'
+            if "Markup %" in columns:
+                cell_ref = f"Selections!{columns['Markup %']}{source_row}"
+                markup.value = f'=IF({cell_ref}="","",{cell_ref})'
             if "Unit Price" in columns:
                 unit = f"Selections!{columns['Unit Price']}{source_row}"
                 money(ws.cell(line, 5, f'=IF({unit}="","",{unit})'))
-                money(ws.cell(line, 6, f'=IF(ISNUMBER(E{line}),D{line}*E{line},"")'))
+                money(ws.cell(line, TOTAL_COLUMN,
+                              f'=IF(ISNUMBER(E{line}),D{line}*E{line}*(1+IF(ISNUMBER(F{line}),F{line},0)/100),"")'))
             else:
                 money(ws.cell(line, 5))
-                money(ws.cell(line, 6))
+                money(ws.cell(line, TOTAL_COLUMN))
             for column in range(1, len(HEADERS) + 1):
                 ws.cell(line, column).border = UNDERLINE
             line += 1
@@ -144,16 +153,16 @@ def rebuild(wb):
             line += 1
         cell = ws.cell(line, 3, f"{pid} total")
         cell.font, cell.alignment = TOTAL_FONT, Alignment(horizontal="right")
-        total = ws.cell(line, 6, f"={'+'.join(section_totals)}" if section_totals else "")
+        total = ws.cell(line, TOTAL_COLUMN, f"={'+'.join(section_totals)}" if section_totals else "")
         money(total, bold=True)
         for column in range(1, len(HEADERS) + 1):
             ws.cell(line, column).border = TOP_RULE
-        project_totals.append(f"F{line}")
+        project_totals.append(f"{TOTAL_LETTER}{line}")
         line += 2
 
     cell = ws.cell(line, 3, "Grand total")
     cell.font, cell.alignment = GRAND_FONT, Alignment(horizontal="right")
-    grand = ws.cell(line, 6, f"={'+'.join(project_totals)}" if project_totals else "")
+    grand = ws.cell(line, TOTAL_COLUMN, f"={'+'.join(project_totals)}" if project_totals else "")
     money(grand, bold=True)
     grand.font = GRAND_FONT
     for column in range(1, len(HEADERS) + 1):
@@ -164,7 +173,8 @@ def rebuild(wb):
 def subtotal(ws, line, start, end, section):
     cell = ws.cell(line, 3, f"{section} subtotal")
     cell.font, cell.alignment = TOTAL_FONT, Alignment(horizontal="right")
-    total = ws.cell(line, 6, f"=SUM(F{start}:F{end})" if end >= start else "")
+    total = ws.cell(line, TOTAL_COLUMN,
+                    f"=SUM({TOTAL_LETTER}{start}:{TOTAL_LETTER}{end})" if end >= start else "")
     total.number_format, total.font = MONEY, TOTAL_FONT
     total.alignment = Alignment(horizontal="right")
-    return f"F{line}"
+    return f"{TOTAL_LETTER}{line}"
