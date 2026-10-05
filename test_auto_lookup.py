@@ -232,6 +232,19 @@ class AutoLookupTests(unittest.TestCase):
         self.search.assert_called_once()
         self.assertEqual(next(r for r in self.rows() if r["_row"] == row)["Product URL"], "https://example.com/new-product")
 
+    def test_saved_jobs_for_unspecifiable_rows_are_dropped(self):
+        """A job restored from history is abandoned once its row cannot be searched."""
+        row = self.rows()[0]
+        self.change(row["_row"], {"Model #": "NEW-MODEL"})
+        self.engine.observe(self.store.snapshot()[0])
+        self.assertIn(str(row["_row"]), self.engine.pending)
+        self.change(row["_row"], {"Manufacturer": "", "Model #": "", "Product URL": "", "Product Name": "",
+                                  "Image URL": "", "Checked On": ""})
+        restarted = AutoLookup(self.store, lambda: self.info, search=self.search)
+        restarted.tick()
+        self.assertFalse(restarted.pending)
+        self.search.assert_not_called()
+
     def test_stale_excel_lock_file_does_not_block_lookup(self):
         self.change(self.rows()[0]["_row"], {"Model #": "NEW-MODEL"})
         self.store.path.with_name("~$" + self.store.path.name).write_text("")

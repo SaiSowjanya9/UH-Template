@@ -107,7 +107,10 @@ class AutoLookup:
                     self.pending.pop(key)
                 self.entries[key] = entry
             self.entries = {key: value for key, value in self.entries.items() if key in current}
-            self.pending = {key: value for key, value in self.pending.items() if key in current}
+            # Drop jobs for rows that can no longer be searched, including any queued by an
+            # earlier version and restored from the saved history.
+            self.pending = {key: value for key, value in self.pending.items()
+                            if key in current and worth_looking_up(current[key])}
             self.initialized = True
             self._persist()
 

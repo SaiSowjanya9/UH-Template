@@ -515,6 +515,24 @@ async function exportPresentation(format) {
   } finally { setBusy(false); }
 }
 
+async function importSpecCsv(file) {
+  if (!file) return;
+  const project = selectedProject();
+  if (!project) { toast("Choose a project first.", true); return; }
+  if (file.size > 8 * 1024 * 1024) throw new Error("Choose a file smaller than 8 MB.");
+  if (!confirm(`Import “${file.name}” into “${project["Project Name"]}”?\n\nLines are matched by category, room and item: matches are updated, new lines are added, and nothing else is removed. A backup is kept.`)) return;
+  const data = new FormData();
+  data.append("file", file);
+  data.append("project", state.project);
+  data.append("revision", state.data.revision);
+  setBusy(true, "Importing the spec sheet…");
+  try {
+    const result = await api("/api/selections/csv", data);
+    await refresh();
+    toast(`${result.added} line item${result.added === 1 ? "" : "s"} added, ${result.updated} updated.`);
+  } finally { setBusy(false); }
+}
+
 async function importWorkbook(file) {
   if (!file) return;
   if (file.size > 8 * 1024 * 1024) throw new Error("Choose a workbook smaller than 8 MB.");
@@ -588,6 +606,16 @@ $("edit-project").addEventListener("click", () => openEditor("project", selected
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
+$("spec-export").addEventListener("click", () => {
+  if (!state.project || state.busy) { toast("Choose a project first.", true); return; }
+  window.location.href = `/api/selections/csv?project=${encodeURIComponent(state.project)}`;
+});
+$("spec-import").addEventListener("click", () => { if (state.data && !state.busy) $("spec-import-file").click(); });
+$("spec-import-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  action(() => importSpecCsv(file));
+});
 $("spec-add").addEventListener("click", () => openEditor("selection"));
 
 $("spec-expand").addEventListener("click", () => { state.specCollapsed.clear(); renderSpec(); });

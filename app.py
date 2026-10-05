@@ -1,3 +1,4 @@
+import csv
 import datetime as dt
 import io
 import json
@@ -325,6 +326,106 @@ def parse_link():
     if not details or not details.get("Product Name"):
         raise ValidationError("That page could not be read as a product page. Enter the details manually.")
     return jsonify(ok=True, details=details)
+
+
+SPEC_CSV_FIELDS = ["Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
+                   "Qty", "Unit Price", "Markup %", "Client Notes", "Client Status", "Include in Lookbook"]
+CSV_ROW_LIMIT = 5000
+
+
+def spec_key(row):
+    return (common.clean(row.get("Section")), common.clean(row.get("Room / Area")), common.clean(row.get("Item")))
+
+
+@app.get("/api/selections/csv")
+def export_spec_csv():
+    project_id = common.clean(request.args.get("project"))
+    with store.lock:
+        wb, _ = store.snapshot()
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        order = common.section_order(wb)
+        rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
+    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=SPEC_CSV_FIELDS, extrasaction="ignore", lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows({field: row.get(field, "") for field in SPEC_CSV_FIELDS} for row in rows)
+    name = re.sub(r"[^A-Za-z0-9_-]", "_", project_id)[:50]
+    return send_file(io.BytesIO(buffer.getvalue().encode("utf-8-sig")), as_attachment=True,
+                     download_name=f"{name}_spec_sheet.csv", mimetype="text/csv")
+
+
+@app.post("/api/selections/csv")
+def import_spec_csv():
+    project_id = common.clean(request.form.get("project"))
+    upload = request.files.get("file")
+    if not upload or not upload.filename.lower().endswith(".csv"):
+        raise ValidationError("Choose a .csv file exported from this spec sheet.")
+    try:
+        text = upload.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValidationError("Save the file as UTF-8 CSV and try again.") from None
+    reader = csv.DictReader(io.StringIO(text))
+    headers = [common.clean(name) for name in (reader.fieldnames or [])]
+    if "Item" not in headers:
+        raise ValidationError("The file needs at least an Item column. Export the spec sheet first to see the format.")
+    unknown = [name for name in headers if name and name not in SPEC_CSV_FIELDS]
+    if unknown:
+        raise ValidationError(f"Unexpected column(s): {', '.join(unknown[:4])}. Export the spec sheet to see the format.")
+    incoming = []
+    for entry in reader:
+        values = {field: common.clean(entry.get(field)) for field in SPEC_CSV_FIELDS if field in headers}
+        if any(values.values()):
+            incoming.append(values)
+        if len(incoming) > CSV_ROW_LIMIT:
+            raise ValidationError(f"This import is limited to {CSV_ROW_LIMIT} rows.")
+    if not incoming:
+        raise ValidationError("That file has no line items.")
+
+    with store.lock:
+        wb, revision = current({"revision": request.form.get("revision", "")})
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        sheet = ensure_selection_columns(wb)
+        existing = {}
+        for record in records(wb, "Selections"):
+            if record["Project ID"] == project_id:
+                existing.setdefault(spec_key(record), []).append(record)
+        added = updated = 0
+        for values in incoming:
+            if not values.get("Item"):
+                raise ValidationError("Every imported line needs an item name.")
+            values = validate_values(values, SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
+            if values.get("Client Status") and values["Client Status"] not in CLIENT_STATUSES:
+                raise ValidationError(f"Unknown client status '{values['Client Status']}'.")
+            matches = existing.get(spec_key(values))
+            old = matches.pop(0) if matches else None
+            if old:
+                merged = {**{k: old.get(k, "") for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values}
+                if any(merged[key] != old[key] for key in IDENTITY_FIELDS):
+                    # the product itself changed, so its old link and verification no longer apply
+                    merged.update({key: "" for key in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
+                    merged["Lookup Status"] = "Not run"
+                    if merged["Client Status"] in {"Presented", "Approved"}:
+                        merged["Client Status"] = "Changed"
+                put(sheet, old["_row"], merged)
+                updated += 1
+            else:
+                row = next_row(sheet)
+                put(sheet, row, {**{k: "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values,
+                                 "Project ID": project_id, "Lookup Status": "Not run",
+                                 "Include in Lookbook": values.get("Include in Lookbook") or "Yes",
+                                 "Client Status": values.get("Client Status") or "Proposed"})
+                added += 1
+        from openpyxl.utils import get_column_letter
+        sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+        store.save(wb, revision, f"spec csv import {project_id} (+{added}/~{updated})")
+        if automation:
+            automation.observe(wb)
+    return jsonify(ok=True, added=added, updated=updated)
 
 
 @app.get("/api/workbook")

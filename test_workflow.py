@@ -477,6 +477,66 @@ class AppTests(unittest.TestCase):
         self.assertEqual(edit.json["seeded"], 0)
         self.assertEqual(len(self.state()["selections"]), before + len(expected))
 
+    def test_spec_csv_round_trip_updates_without_losing_data(self):
+        import csv as csvlib
+        project = self.state()["projects"][0]["Project ID"]
+        row = next(r for r in self.state()["selections"] if r["Project ID"] == project)
+        self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/p"}})
+        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
+
+        export = self.client.get(f"/api/selections/csv?project={project}")
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("attachment", export.headers["Content-Disposition"])
+        lines = list(csvlib.DictReader(io.StringIO(export.data.decode("utf-8-sig"))))
+        self.assertEqual(len(lines), len([r for r in self.state()["selections"] if r["Project ID"] == project]))
+
+        # re-importing the untouched export changes nothing and keeps the verified link
+        def send(rows):
+            buffer = io.StringIO()
+            writer = csvlib.DictWriter(buffer, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+            return self.client.post("/api/selections/csv", data={
+                "file": (io.BytesIO(buffer.getvalue().encode("utf-8")), "spec.csv"),
+                "project": project, "revision": self.state()["revision"]}, headers=self.headers)
+
+        response = send(lines)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual((response.json["added"], response.json["updated"]), (0, len(lines)))
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual(current["Lookup Status"], "Verified")
+        self.assertEqual(current["Product URL"], "https://example.com/p")
+
+        # the exported file is sorted by category, so find the verified line by its identity
+        def index_of(record):
+            return next(i for i, line in enumerate(lines)
+                        if (line["Section"], line["Room / Area"], line["Item"]) == (record["Section"], record["Room / Area"], record["Item"]))
+        target = index_of(row)
+
+        # a price edit plus a brand-new line
+        edited = [dict(line) for line in lines]
+        edited[target]["Unit Price"] = "99.5"
+        edited.append({**{field: "" for field in lines[0]}, "Section": "Garage", "Room / Area": "3-car", "Item": "Imported shelving", "Qty": "2"})
+        response = send(edited)
+        self.assertEqual((response.json["added"], response.json["updated"]), (1, len(lines)))
+        state = self.state()
+        self.assertTrue(any(r["Item"] == "Imported shelving" and r["Qty"] == "2" for r in state["selections"]))
+        self.assertEqual(next(r for r in state["selections"] if r["_row"] == row["_row"])["Unit Price"], "99.5")
+
+        # changing the product identity clears its stale link and verification
+        changed = [dict(line) for line in lines]
+        changed[target]["Model #"] = "DIFFERENT-MODEL"
+        response = send(changed)
+        self.assertEqual(response.status_code, 200, response.json)
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual((current["Lookup Status"], current["Product URL"]), ("Not run", ""))
+
+        # malformed input is refused outright
+        bad = self.client.post("/api/selections/csv", data={
+            "file": (io.BytesIO(b"Nonsense,Columns\n1,2\n"), "spec.csv"),
+            "project": project, "revision": self.state()["revision"]}, headers=self.headers)
+        self.assertEqual(bad.status_code, 400)
+
     def test_prices_never_reach_client_documents(self):
         from pypdf import PdfReader
         from pptx import Presentation
