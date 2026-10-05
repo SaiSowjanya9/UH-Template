@@ -443,6 +443,34 @@ class AppTests(unittest.TestCase):
         for bad in [{"Unit Price": "free"}, {"Markup %": "lots"}, {"Markup %": "5000"}]:
             self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": bad}).status_code, 400, bad)
 
+    def test_spec_template_seeds_rooms_once(self):
+        import spec_template
+        name, template = spec_template.load()
+        expected = spec_template.rows(template)
+        project = self.state()["projects"][0]["Project ID"]
+        before = len(self.state()["selections"])
+        response = self.post("/api/selections/template", {"project": project})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["added"], len(expected))
+        self.assertEqual(self.state()["sections"][-5:], [section for section, _ in template])
+        self.assertEqual(len(self.state()["selections"]), before + len(expected))
+        rows = [r for r in self.state()["selections"] if r["Project ID"] == project]
+        for section, room, item in expected[:: max(1, len(expected) // 20)]:
+            self.assertTrue(any(r["Section"] == section and r["Room / Area"] == room and r["Item"] == item for r in rows),
+                            f"{section} / {room} / {item} missing")
+        seeded = next(r for r in rows if r["Room / Area"] == "Master Bathroom")
+        self.assertEqual((seeded["Lookup Status"], seeded["Include in Lookbook"], seeded["Client Status"]),
+                         ("Not run", "Yes", "Proposed"))
+        # re-running adds nothing and removes nothing
+        again = self.post("/api/selections/template", {"project": project})
+        self.assertEqual((again.json["added"], again.json["skipped"]), (0, len(expected)))
+        self.assertEqual(len(self.state()["selections"]), before + len(expected))
+        # a second project gets its own copy
+        self.post("/api/projects", {"create": True, "values": {"Project ID": "TEST-T", "Project Name": "Template home"}})
+        other = self.post("/api/selections/template", {"project": "TEST-T"})
+        self.assertEqual(other.json["added"], len(expected))
+        self.assertEqual(other.json["sections"], [])   # sections already registered
+
     def test_prices_never_reach_client_documents(self):
         from pypdf import PdfReader
         from pptx import Presentation

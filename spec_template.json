@@ -1,0 +1,68 @@
+{
+  "name": "Two-storey home",
+  "description": "Standard UH Homes line items by floor and room. Edit freely: each section becomes a Selections category, each room becomes a Room / Area, and each item becomes one selection. Rooms with an empty name produce items that sit directly under the section.",
+  "sections": [
+    {
+      "section": "1st Floor",
+      "rooms": [
+        {"room": "Family Room", "items": ["Flooring", "Fire place", "Fire place - surround", "Doors", "Light Fixture - Fan", "Wine Cellar/ Dry Bar"]},
+        {"room": "Kitchen", "items": ["Flooring", "Counter top", "Backsplash", "Coffee bar", "Backsplash - Coffee bar", "Venthood", "Cooktop/range", "Microwave", "Dishwasher", "Wall oven", "Trash Pullout", "Kitchen Sink", "Kitchen Faucet", "Kitchen Pendants"]},
+        {"room": "Breakfast Room", "items": ["Flooring", "Breakfast Chandelier", "Exterior Door", "Door Stopper"]},
+        {"room": "2nd Living / Formal Dining", "items": ["Flooring", "Light Fixture - Fan", "Exterior Door", "Door Stopper"]},
+        {"room": "Study/ Office Room", "items": ["Flooring", "Light Fixture - Fan", "Doors - Interior", "Door Stopper", "Bookcase"]},
+        {"room": "Prayer/Flex Room", "items": ["Flooring", "Light Fixture - Prayer", "Interior Door", "Door Stopper"]},
+        {"room": "Foyer", "items": ["Flooring", "Staircase", "Light Fixture - Foyer", "Front Door - Exterior"]},
+        {"room": "Powder Room", "items": ["Flooring", "Counter top", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Vanity Mirror", "Light Fixture - Bath", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Doors - Interior", "Door Stopper", "Exhaust Fan"]},
+        {"room": "2nd Kitchen", "items": ["Flooring", "Counter top", "Backsplash", "Venthood", "Cooktop/range", "Dishwasher", "Kitchen Sink", "Kitchen Faucet", "Doors - Interior", "Doors - Exterior"]},
+        {"room": "Corridor (walkway)", "items": ["Flooring - walkway", "Interior Door", "Door Stopper"]},
+        {"room": "Elevator", "items": ["Flooring"]},
+        {"room": "Master Bedroom", "items": ["Flooring", "Light Fixture - Fan", "Light Fixture - Bedroom", "Interior Door", "Door Stopper"]},
+        {"room": "Master Bathroom", "items": ["Flooring - Bath", "Flooring - Shower Floor", "Backsplash - Shower", "Flooring - WIC", "Counter top", "Shower Glass", "Shower Head & Valve", "Shower Drain", "Free Standing Bath Tub", "Tub Filler Faucet", "Vanity Mirror", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Exhaust Fan", "Light Fixture", "Interior Door", "Door Stopper"]},
+        {"room": "Laundry Room", "items": ["Flooring", "Mud Bench", "Counter top", "Laundry Sink", "Laundry Faucet", "Exhaust Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Guest Bedroom", "items": ["Flooring", "Light Fixture - Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Guest Bathroom", "items": ["Flooring - Bath", "Flooring - Shower Floor", "Backsplash - Shower", "Counter top", "Shower Glass", "Shower Head & Valve", "Shower Drain", "Vanity Mirror", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Exhaust Fan", "Light Fixture", "Interior Door", "Door Stopper"]},
+        {"room": "", "items": ["Walls"]}
+      ]
+    },
+    {
+      "section": "2nd Floor",
+      "rooms": [
+        {"room": "Bedroom 1", "items": ["Flooring", "Light Fixture - Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Bathroom 1", "items": ["Flooring - Bath", "Flooring - Shower Floor", "Backsplash - Shower", "Counter top", "Shower Glass", "Shower Head & Valve", "Shower Drain", "Vanity Mirror", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Exhaust Fan", "Light Fixture", "Interior Door", "Door Stopper"]},
+        {"room": "Bedroom 2", "items": ["Flooring", "Light Fixture - Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Bathroom 2", "items": ["Flooring - Bath", "Flooring - Shower Floor", "Backsplash - Shower", "Counter top", "Shower Glass", "Shower Head & Valve", "Shower Drain", "Vanity Mirror", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Exhaust Fan", "Light Fixture", "Interior Door", "Door Stopper"]},
+        {"room": "Bedroom 3", "items": ["Flooring", "Light Fixture - Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Bathroom 3", "items": ["Flooring - Bath", "Flooring - Shower Floor", "Backsplash - Shower", "Flooring - WIC", "Counter top", "Shower Glass", "Shower Head & Valve", "Shower Drain", "Vanity Mirror", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Exhaust Fan", "Light Fixture", "Interior Door", "Door Stopper"]},
+        {"room": "Corridor (walkway)", "items": ["Flooring", "Doors - Interior", "Door Stopper", "Balcony - Handrail", "Balcony - Baluster", "Balcony - Post"]},
+        {"room": "Game Room", "items": ["Flooring", "Light Fixture - Fan", "Interior Door", "Door Stopper"]},
+        {"room": "Powder Room", "items": ["Flooring", "Counter top", "Bathroom Sink", "Sink Faucet", "Towel Ring", "Towel Bar 24\"", "Vanity Mirror", "Light Fixture - Bath", "Flush Toilet", "Toilet Paper Holder", "Toilet Lever", "Doors - Interior", "Door Stopper", "Exhaust Fan"]},
+        {"room": "Media Room", "items": ["Flooring", "Light Fixture - Fan", "Light Fixture - Sconce", "Interior Door", "Door Stopper"]},
+        {"room": "", "items": ["Walls"]}
+      ]
+    },
+    {
+      "section": "Outdoor Living",
+      "rooms": [
+        {"room": "1st Floor - Porch (Front)", "items": ["Flooring"]},
+        {"room": "1st Floor - Patio (Study)", "items": ["Flooring"]},
+        {"room": "1st Floor - Patio (Family Room)", "items": ["Flooring", "Light Fixture - Fan"]},
+        {"room": "1st Floor - Patio (2nd Living)", "items": ["Flooring"]},
+        {"room": "1st Floor - Patio (2nd Kitchen)", "items": ["Flooring"]},
+        {"room": "2nd Floor - Terrace (Bedroom 2)", "items": ["Flooring", "Light Fixture - Fan"]},
+        {"room": "2nd Floor - Terrace (Media Room)", "items": ["Flooring"]}
+      ]
+    },
+    {
+      "section": "Garage",
+      "rooms": [
+        {"room": "3-car", "items": ["Garage doors", "Flooring - car ports", "Flooring - storage"]}
+      ]
+    },
+    {
+      "section": "Bulk Items",
+      "rooms": [
+        {"room": "", "items": ["Cabinets", "Roof", "Paint - Interior", "Paint - Exterior", "Baseboards", "Hardware - Knobs", "Foundation", "Framing", "Insulation/Drywall", "Masonry", "Doors", "Windows", "Plumbing", "Electrical", "HVAC", "Water Heater", "Water Purification System", "Landscaping", "Multi Media System", "Smart Home Technology"]}
+      ]
+    }
+  ]
+}

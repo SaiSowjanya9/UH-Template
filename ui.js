@@ -584,6 +584,19 @@ $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
 $("spec-add").addEventListener("click", () => openEditor("selection"));
+$("spec-template").addEventListener("click", () => action(async () => {
+  const project = selectedProject();
+  if (!project) { toast("Choose a project first.", true); return; }
+  if (!confirm(`Add the standard room-by-room line items to “${project["Project Name"]}”?\n\nItems already specified are left alone, so nothing is duplicated or overwritten.`)) return;
+  setBusy(true, "Adding the template line items…");
+  try {
+    const result = await api("/api/selections/template", { project: state.project });
+    await refresh();
+    toast(result.added
+      ? `${result.added} line item${result.added === 1 ? "" : "s"} added${result.skipped ? `, ${result.skipped} already specified` : ""}.`
+      : "Every template line item is already in this project.");
+  } finally { setBusy(false); }
+}));
 $("spec-expand").addEventListener("click", () => { state.specCollapsed.clear(); renderSpec(); });
 $("spec-collapse").addEventListener("click", () => {
   specGroups(projectRows()).forEach(([name]) => state.specCollapsed.add(name));

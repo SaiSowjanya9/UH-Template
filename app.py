@@ -14,6 +14,7 @@ from werkzeug.exceptions import HTTPException
 import build_lookbook
 import common
 import find_urls
+import spec_template
 from auto_lookup import AutoLookup
 from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
                             PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES, ValidationError,
@@ -295,6 +296,27 @@ def lookup_selection(row):
         if automation:
             automation.acknowledge(wb, row)
     return jsonify(ok=True, result=result)
+
+
+@app.post("/api/selections/template")
+def apply_template():
+    data = payload()
+    name, template = spec_template.load()
+    with store.lock:
+        wb, revision = current(data)
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        sections = spec_template.register_sections(wb, [section for section, _ in template])
+        added, skipped = spec_template.apply(wb, project["Project ID"], template)
+        if added or sections:
+            from openpyxl.utils import get_column_letter
+            sheet = common.Sheet(wb["Selections"])
+            sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+            store.save(wb, revision, f"spec template {project['Project ID']} (+{added})")
+            if automation:
+                automation.observe(wb)
+    return jsonify(ok=True, added=added, skipped=skipped, sections=sections, template=name)
 
 
 @app.post("/api/selections/parse-link")
