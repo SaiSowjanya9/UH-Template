@@ -368,7 +368,7 @@ def detail_flowables(project, rows):
 
 
 # --------------------------------------------------------------------------
-def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None):
+def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None):
     title, rows = schedule_title(title), numbered(rows, code_prefix(prefix))
     story = [Band(band_values(project)), Spacer(0, BAND_GAP)]
     for index, (section, items) in enumerate(group_sections(rows).items()):
@@ -384,12 +384,14 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
     destination.mkdir(exist_ok=True)
     parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
              re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
-             re.sub(r"[^A-Za-z0-9]+", "_", title).strip("_")[:60]]
+             re.sub(r"[^A-Za-z0-9]+", "_", title).strip("_")[:60],
+             f"R{rev}" if rev else ""]
     out = destination / ("_".join(part for part in parts if part) + ("_DRAFT" if draft else "") + ".pdf")
     doc = BaseDocTemplate(str(out), pagesize=(PAGE_W, PAGE_H), leftMargin=M, rightMargin=M,
                           topMargin=PAGE_H - BODY_TOP, bottomMargin=BODY_BOTTOM,
                           title=f"{clean(project.get('Project Name')) or pid} - {title}",
-                          author=CFG["company_name"])
+                          author=CFG["company_name"],
+                          subject=f"Revision {rev} - exported {dt.date.today().isoformat()}" if rev else "")
     frame = Frame(M, BODY_BOTTOM, CONTENT_W, BODY_TOP - BODY_BOTTOM, 0, 0, 0, 0, id="schedule")
     doc.addPageTemplates([PageTemplate("schedule", [frame],
                                        onPage=lambda canvas, document: furniture(canvas, document, title, draft))])

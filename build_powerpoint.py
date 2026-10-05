@@ -14,6 +14,7 @@ breaks can differ by a block at the very end). Every value is a plain text box, 
 schedule can be edited in PowerPoint without rebuilding it from the workbook.
 """
 import argparse
+import datetime as dt
 import io
 import re
 from pathlib import Path
@@ -223,20 +224,23 @@ class Deck:
             x += width
         self.y -= SIGN_H
 
-    def save(self, pid, project, output_dir):
+    def save(self, pid, project, output_dir, rev=None):
         self.prs.core_properties.title = f"{clean(project.get('Project Name')) or pid} - {self.title}"
         self.prs.core_properties.author = CFG["company_name"]
+        if rev:
+            self.prs.core_properties.subject = f"Revision {rev} - exported {dt.date.today().isoformat()}"
         destination = Path(output_dir or OUT)
         destination.mkdir(exist_ok=True)
         parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
                  re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
-                 re.sub(r"[^A-Za-z0-9]+", "_", self.title).strip("_")[:60]]
+                 re.sub(r"[^A-Za-z0-9]+", "_", self.title).strip("_")[:60],
+                 f"R{rev}" if rev else ""]
         output = destination / ("_".join(part for part in parts if part) + ("_DRAFT" if self.draft else "") + ".pptx")
         self.prs.save(output)
         return output
 
 
-def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None):
+def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None):
     deck = Deck(schedule_title(title), draft)
     rows = numbered(rows, code_prefix(prefix))
     deck.page()
@@ -257,7 +261,7 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
                       cell(CODE_W + ITEM_W, DESC_W, value, DESC, COLORS["body"])],
                      index < len(details) - 1)
     deck.note_and_signatures()
-    return deck.save(pid, project, output_dir)
+    return deck.save(pid, project, output_dir, rev)
 
 
 def main():

@@ -125,6 +125,34 @@ def products(value):
                 yield from products(value[key])
 
 
+def meta_value(soup, *names):
+    for n in names:
+        tag = soup.find("meta", attrs={"property": n}) or soup.find("meta", attrs={"name": n})
+        if tag and tag.get("content"):
+            return tag["content"].strip()
+    return ""
+
+
+def product_cards(soup):
+    out = []
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(tag.get_text())
+        except (ValueError, TypeError):
+            continue
+        out.extend(products(data))
+    return out
+
+
+def product_image(product, fallback):
+    img = product.get("image") or fallback
+    if isinstance(img, list):
+        img = img[0] if img else ""
+    if isinstance(img, dict):
+        img = img.get("url", "")
+    return img if isinstance(img, str) else ""
+
+
 def inspect_page(url, model_n):
     """Download the page; return (model_found, product_name, image_url)."""
     try:
@@ -135,41 +163,54 @@ def inspect_page(url, model_n):
         return False, "", ""
     soup = BeautifulSoup(html, "html.parser")
 
-    def meta(*names):
-        for n in names:
-            tag = soup.find("meta", attrs={"property": n}) or soup.find("meta", attrs={"name": n})
-            if tag and tag.get("content"):
-                return tag["content"].strip()
-        return ""
-
-    name = meta("og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "")
-    image = meta("og:image", "og:image:secure_url", "twitter:image")
-    page_products = []
-    for tag in soup.find_all("script", type="application/ld+json"):
-        try:
-            data = json.loads(tag.get_text())
-        except (ValueError, TypeError):
-            continue
-        page_products.extend(products(data))
+    name = meta_value(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "")
+    image = meta_value(soup, "og:image", "og:image:secure_url", "twitter:image")
+    page_products = product_cards(soup)
     if len(page_products) > 1:
         return False, "", ""
     for product in page_products:
         ids = [product.get(k) for k in ("sku", "mpn", "model", "productID")]
         if any(norm_model(v) == model_n for v in ids if isinstance(v, (str, int))):
-            img = product.get("image") or image
-            if isinstance(img, list):
-                img = img[0] if img else ""
-            if isinstance(img, dict):
-                img = img.get("url", "")
-            return True, clean(product.get("name") or name)[:200], urljoin(final_url, img) if isinstance(img, str) and img else ""
+            img = product_image(product, image)
+            return True, clean(product.get("name") or name)[:200], urljoin(final_url, img) if img else ""
         if any(ids):
             return False, "", ""
     heading = soup.find("h1")
-    product_type = meta("og:type").lower()
+    product_type = meta_value(soup, "og:type").lower()
     prominent = exact_model(name, model_n) or (heading is not None and exact_model(heading.get_text(" "), model_n))
     if prominent and (product_type in {"product", "og:product"} or soup.select_one('[itemtype*="schema.org/Product"]')):
         return True, name[:200], urljoin(final_url, image) if image else ""
     return False, "", ""
+
+
+def describe_page(url):
+    """Best-effort selection fields from a product link, for the add-from-link flow."""
+    try:
+        html, final_url = fetch_html(url)
+    except (requests.RequestException, OSError, ValueError):
+        return {}
+    if not html:
+        return {}
+    soup = BeautifulSoup(html, "html.parser")
+    name = meta_value(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "")
+    image = meta_value(soup, "og:image", "og:image:secure_url", "twitter:image")
+    model, brand = "", ""
+    cards = product_cards(soup)
+    if cards:
+        product = cards[0]
+        name = clean(product.get("name")) or name
+        image = product_image(product, image)
+        for key in ("sku", "mpn", "model", "productID"):
+            if isinstance(product.get(key), (str, int)) and clean(product[key]):
+                model = clean(product[key])
+                break
+        maker = product.get("brand") or product.get("manufacturer")
+        if isinstance(maker, dict):
+            maker = maker.get("name")
+        brand = clean(maker) if isinstance(maker, (str, int)) else ""
+    image = urljoin(final_url, image) if image else ""
+    return {"Product URL": final_url, "Item": clean(name)[:200], "Product Name": clean(name)[:200],
+            "Image URL": image, "Model #": model, "Manufacturer": brand, "Lookup Status": "Found - verify"}
 
 
 def score(c, domain, model_n):

@@ -15,10 +15,10 @@ import build_lookbook
 import common
 import find_urls
 from auto_lookup import AutoLookup
-from workbook_store import (ConflictError, IDENTITY_FIELDS, PROJECT_FIELDS, PROJECT_FORMULAS,
-                            SELECTION_FIELDS, STATUSES, ValidationError, WorkbookStore,
-                            delete_record, next_row, put,
-                            records, validate_values, detailed_records, set_custom_fields)
+from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
+                            PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES, ValidationError,
+                            WorkbookStore, delete_record, ensure_selection_columns, http_url, next_row,
+                            put, records, stale_check, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
 app = Flask(__name__, template_folder=str(BASE), static_folder=None)
@@ -107,9 +107,11 @@ def state():
         if automation:
             automation.observe(wb)
             rows = automation.display_rows(rows)
+        rows = [{**row, "_stale": stale_check(row)} for row in rows]
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
-                       statuses=STATUSES, revision=revision, provider=provider_info(),
+                       statuses=STATUSES, client_statuses=CLIENT_STATUSES, stale_days=180,
+                       revision=revision, provider=provider_info(),
                        automation=automation.status() if automation else {"enabled": False, "pending": [], "message": ""},
                        workbook=store.path.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
@@ -170,7 +172,7 @@ def save_project():
 @app.post("/api/selections")
 def save_selection():
     data = payload()
-    values = validate_values(data.get("values"), SELECTION_FIELDS)
+    values = validate_values(data.get("values"), SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
     with store.lock:
         wb, revision = current(data)
         sheet = common.Sheet(wb["Selections"])
@@ -189,13 +191,18 @@ def save_selection():
             if not old:
                 raise ConflictError("This selection no longer exists. Refresh the page.")
         row = old["_row"] if old else next_row(sheet)
-        merged = {k: old.get(k, "") if old else "" for k in SELECTION_FIELDS}
+        merged = {k: old.get(k, "") if old else "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}
         merged.update(values)
         if not merged["Project ID"] or not merged["Item"]:
             raise ValidationError("Project and item name are required.")
         if automation and str(row) in automation.pending and values.get("Lookup Status") == "Verified":
             raise ValidationError("Automatic lookup is pending for this changed product. Wait for the result or save a new manual link before verifying.")
+        merged["Client Status"] = merged.get("Client Status") or "Proposed"
         if old and any(merged[k] != old[k] for k in IDENTITY_FIELDS):
+            if merged["Client Status"] in {"Presented", "Approved"}:
+                merged["Client Status"] = "Changed"
+            elif merged["Client Status"] == "Rejected":
+                merged["Client Status"] = "Proposed"
             new_url = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
             merged.update({k: "" for k in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
             if merged["Product Name"] == old["Product Name"]:
@@ -206,7 +213,7 @@ def save_selection():
             merged["Lookup Status"] = "Found - verify" if merged["Product URL"] else "Not run"
             merged["Checked On"] = ""
             merged["Lookup Notes"] = "Manually updated link. Review before verifying."
-        elif not old and merged["Lookup Status"] == "Verified":
+        elif not old and (merged["Lookup Status"] == "Verified" or merged["Product URL"]):
             merged["Lookup Status"] = "Found - verify"
         merged["Lookup Status"] = merged["Lookup Status"] or "Not run"
         merged["Include in Lookbook"] = merged["Include in Lookbook"] or "Yes"
@@ -214,6 +221,7 @@ def save_selection():
             if not data.get("confirm_verified"):
                 raise ValidationError("Confirm that you checked the manufacturer, model, and finish on the product page.")
             merged["Checked On"] = dt.date.today().isoformat()
+        sheet = ensure_selection_columns(wb)
         put(sheet, row, merged)
         from openpyxl.utils import get_column_letter
         sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{max(sheet.ws.max_row, row)}"
@@ -289,6 +297,19 @@ def lookup_selection(row):
     return jsonify(ok=True, result=result)
 
 
+@app.post("/api/selections/parse-link")
+def parse_link():
+    data = payload()
+    current(data)
+    url = common.clean(data.get("url"))
+    if not http_url(url) or len(url) > 4000:
+        raise ValidationError("Enter a full HTTP or HTTPS product link.")
+    details = find_urls.describe_page(url)
+    if not details or not details.get("Product Name"):
+        raise ValidationError("That page could not be read as a product page. Enter the details manually.")
+    return jsonify(ok=True, details=details)
+
+
 @app.get("/api/workbook")
 def export_workbook():
     with store.lock:
@@ -324,7 +345,7 @@ def schedule_options(data):
 @app.post("/api/presentation")
 def presentation():
     data = payload()
-    wb, _ = current(data)
+    wb, revision = current(data)
     project = next((p for p in detailed_records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
     if not project:
         raise ValidationError("Choose a valid project.")
@@ -348,6 +369,19 @@ def presentation():
         raise ValidationError("No selections match these export options.")
     order = common.section_order(wb)
     rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    note = f"export {project['Project ID']} {kind} {mode}"
+    with store.lock:
+        marked = []
+        if mode != "draft":
+            sheet = ensure_selection_columns(wb)
+            marked = [r for r in rows if common.clean(r.get("Client Status")) in {"", "Proposed"}]
+            for r in marked:
+                put(sheet, r["_row"], {"Client Status": "Presented"})
+        if marked:
+            store.save(wb, revision, note)
+        else:
+            store.log(note)
+        rev = store.count_notes(f"export {project['Project ID']} ")
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
         if kind == "pdf":
             build_schedule, mime = build_lookbook.build, "application/pdf"
@@ -355,7 +389,7 @@ def presentation():
             from build_powerpoint import build as build_schedule
             mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         output = build_schedule(project["Project ID"], project, rows, mode == "draft",
-                                output_dir=Path(folder), title=title, prefix=prefix)
+                                output_dir=Path(folder), title=title, prefix=prefix, rev=rev)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=mime)
 

@@ -23,6 +23,11 @@ SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacture
 STATUSES = ["Not run", "Found - verify", "Found - retailer", "Multiple matches", "Not found", "Search error", "Verified"]
 IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
 BACKUP_KEEP = 30
+STALE_DAYS = 180
+
+# Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
+CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status"]
 
 # Computed Projects columns (H/I/J/K in the template); backfilled for Excel-added rows.
 PROJECT_FORMULAS = {
@@ -33,11 +38,13 @@ PROJECT_FORMULAS = {
 }
 
 # Selections dropdowns Excel silently drops when it re-saves the workbook.
+# Client Status uses a literal list so the values stay in sync with CLIENT_STATUSES.
 LIST_VALIDATIONS = {
     "Project ID": "Projects!$A$2:$A$51",
     "Section": "Lists!$A$2:$A$31",
     "Lookup Status": "Lists!$B$2:$B$7",
     "Include in Lookbook": "Lists!$C$2:$C$3",
+    "Client Status": '"Proposed,Presented,Approved,Rejected,Changed"',
 }
 
 
@@ -131,7 +138,7 @@ def read_custom_fields(value, reserved=()):
 
 
 def detailed_records(wb, name):
-    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS
     return [{**row, "custom_fields": read_custom_fields(row.get("Custom Fields"), reserved)} for row in records(wb, name)]
 
 
@@ -221,6 +228,8 @@ def validate_workbook(wb):
         validate_values({key: row[key] for key in SELECTION_FIELDS}, SELECTION_FIELDS)
         if row["Lookup Status"] and row["Lookup Status"] not in STATUSES:
             raise ValidationError(f"Unknown lookup status in row {row['_row']}.")
+        if clean(row.get("Client Status")) and row["Client Status"] not in CLIENT_STATUSES:
+            raise ValidationError(f"Unknown client status in row {row['_row']}.")
         if row["Lookup Status"] == "Verified" and not http_url(row["Product URL"]):
             raise ValidationError(f"Verified row {row['_row']} needs a product URL.")
         if row["Include in Lookbook"].lower() not in {"", "yes", "no"}:
@@ -240,6 +249,35 @@ def workbook_open_elsewhere(path):
         return True
     except FileNotFoundError:
         return False
+
+
+def stale_check(row, today=None):
+    """A Verified link stops being trustworthy once the product page may have moved on."""
+    if clean(row.get("Lookup Status")) != "Verified":
+        return False
+    checked = clean(row.get("Checked On"))
+    if not checked:
+        return True
+    try:
+        return (today or dt.date.today()) - dt.date.fromisoformat(checked[:10]) > dt.timedelta(days=STALE_DAYS)
+    except ValueError:
+        return False
+
+
+def ensure_selection_columns(wb):
+    """Add the optional Client Status column when the workbook predates it. Returns a fresh Sheet."""
+    ws = wb["Selections"]
+    sheet = Sheet(ws)
+    if "Client Status" in sheet.cols:
+        return sheet
+    column = ws.max_column + 1
+    if column > 50:
+        raise ValidationError("This worksheet has no space for the Client Status column.")
+    cell = ws.cell(1, column, "Client Status")
+    cell._style = copy(ws.cell(1, 1)._style)
+    ws.column_dimensions[get_column_letter(column)].width = 16
+    ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    return Sheet(ws)
 
 
 def ensure_validations(wb):
@@ -308,6 +346,7 @@ class WorkbookStore:
             backup_dir.mkdir(exist_ok=True)
             stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(self.path, backup_dir / f"{self.path.stem}_{stamp}.xlsx")
+            ensure_selection_columns(wb)
             ensure_validations(wb)
             ensure_project_formulas(wb)
             handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
@@ -321,6 +360,27 @@ class WorkbookStore:
                 Path(temp).unlink(missing_ok=True)
             self._prune_backups(backup_dir)
             self._history(backup_dir, note)
+
+    def log(self, note):
+        """Append a history entry without touching the workbook (e.g. an export with no row changes)."""
+        with self.lock:
+            backup_dir = self.path.parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            self._history(backup_dir, note)
+
+    def count_notes(self, prefix):
+        """How many history entries start with prefix - used to number export revisions."""
+        path = self.path.parent / "backups" / "history.jsonl"
+        if not path.exists():
+            return 0
+        count = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                if json.loads(line).get("note", "").startswith(prefix):
+                    count += 1
+            except ValueError:
+                continue
+        return count
 
     def import_bytes(self, raw, revision):
         try:

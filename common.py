@@ -56,7 +56,7 @@ class Sheet:
 
 # Columns ignored when deciding whether a row is "empty"
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
-                   "Lookup Status", "Include in Lookbook"}
+                   "Lookup Status", "Include in Lookbook", "Client Status"}
 
 
 def open_workbook(data_only=False):

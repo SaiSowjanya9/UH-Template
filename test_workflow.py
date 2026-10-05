@@ -308,7 +308,8 @@ class AppTests(unittest.TestCase):
         self.store.save(wb, revision)
         restored, _ = self.store.snapshot()
         formulas = {dv.formula1 for dv in restored["Selections"].data_validations.dataValidation if dv.type == "list"}
-        self.assertEqual({"Lists!$A$2:$A$31", "Lists!$B$2:$B$7", "Lists!$C$2:$C$3", "Projects!$A$2:$A$51"}, formulas)
+        self.assertEqual({"Lists!$A$2:$A$31", "Lists!$B$2:$B$7", "Lists!$C$2:$C$3", "Projects!$A$2:$A$51",
+                          '"Proposed,Presented,Approved,Rejected,Changed"'}, formulas)
 
     def test_excel_added_project_gets_count_formulas(self):
         wb, revision = self.store.snapshot()
@@ -339,6 +340,67 @@ class AppTests(unittest.TestCase):
         name = self.state()["manufacturers"][0]["Manufacturer"]
         self.assertEqual(self.post("/api/manufacturers", {"values": {"Manufacturer": name}, "delete": True}).status_code, 200)
         self.assertFalse(any(m["Manufacturer"] == name for m in self.state()["manufacturers"]))
+
+    def test_client_status_lifecycle(self):
+        row = self.state()["selections"][0]
+        response = self.post("/api/selections", {"row": row["_row"], "values": {"Client Status": "Approved"}})
+        self.assertEqual(response.status_code, 200, response.json)
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual(current["Client Status"], "Approved")
+        # editing the product's identity returns an approved selection to the client
+        self.post("/api/selections", {"row": row["_row"], "values": {"Model #": "NEW-MODEL"}})
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual(current["Client Status"], "Changed")
+        self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": {"Client Status": "Bogus"}}).status_code, 400)
+        # a non-draft export marks proposed selections as presented
+        self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/p", "Client Status": "Proposed"}})
+        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
+        response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pdf", "mode": "verified"})
+        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual(current["Client Status"], "Presented")
+        self.assertIn("_R", response.headers["Content-Disposition"])
+
+    def test_export_revisions_increment_per_project(self):
+        project = self.state()["projects"][0]["Project ID"]
+        first = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
+        second = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
+        self.assertIn("_R1_", first.headers["Content-Disposition"])
+        self.assertIn("_R2_", second.headers["Content-Disposition"])
+        other = self.state()["projects"][1]["Project ID"]
+        fresh = self.post("/api/presentation", {"project": other, "format": "pptx", "mode": "draft"})
+        self.assertIn("_R1_", fresh.headers["Content-Disposition"])
+
+    def test_stale_verified_links_are_flagged(self):
+        from workbook_store import put
+        row = self.state()["selections"][0]
+        wb, revision = self.store.snapshot()
+        put(common.Sheet(wb["Selections"]), row["_row"],
+            {"Product URL": "https://example.com/p", "Lookup Status": "Verified", "Checked On": "2020-01-01"})
+        self.store.save(wb, revision)
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertTrue(current["_stale"])
+        wb, revision = self.store.snapshot()
+        put(common.Sheet(wb["Selections"]), row["_row"], {"Checked On": "2099-01-01"})
+        self.store.save(wb, revision)
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertFalse(current["_stale"])
+
+    def test_parse_link_prefills_a_selection(self):
+        html = ('<html><head><meta property="og:title" content="Trinsic Faucet">'
+                '<meta property="og:image" content="/faucet.jpg">'
+                '<script type="application/ld+json">{"@type":"Product","sku":"559LF-PP","brand":{"name":"Delta"}}</script>'
+                '</head></html>')
+        with patch("find_urls.fetch_html", return_value=(html, "https://delta.example/faucet")):
+            response = self.post("/api/selections/parse-link", {"url": "https://delta.example/faucet"})
+        self.assertEqual(response.status_code, 200, response.json)
+        details = response.json["details"]
+        self.assertEqual(details["Model #"], "559LF-PP")
+        self.assertEqual(details["Manufacturer"], "Delta")
+        self.assertEqual(details["Product Name"], "Trinsic Faucet")
+        self.assertEqual(details["Image URL"], "https://delta.example/faucet.jpg")
+        self.assertEqual(details["Lookup Status"], "Found - verify")
+        self.assertEqual(self.post("/api/selections/parse-link", {"url": "file:///etc/passwd"}).status_code, 400)
 
     def test_backups_are_pruned_and_logged(self):
         with patch("workbook_store.BACKUP_KEEP", 2):

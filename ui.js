@@ -128,6 +128,7 @@ function render() {
   if (!data) return;
   const project = selectedProject(), rows = projectRows();
   const verified = rows.filter((r) => r["Lookup Status"] === "Verified").length;
+  const stale = rows.filter((r) => r._stale).length;
   const linked = rows.filter((r) => isUrl(r["Product URL"])).length;
   const included = rows.filter((r) => r["Include in Lookbook"].toLowerCase() !== "no");
   const auto = data.automation || { enabled: false, pending: [], message: "" };
@@ -152,7 +153,19 @@ function render() {
     $("project-date").textContent = project["Presentation Date"] ? `Presentation · ${project["Presentation Date"].slice(0, 10)}` : "Presentation date not set";
     $("project-client").textContent = [project["Client Name"] ? `Prepared for ${project["Client Name"]}` : "", project["Plan / Elevation"]].filter(Boolean).join("   /   ");
   }
-  $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
+  const notice = $("deadline-notice"), presDate = project?.["Presentation Date"]?.slice(0, 10);
+  notice.hidden = true;
+  if (project && presDate && state.view !== "manufacturers") {
+    const days = Math.round((new Date(presDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
+    const unverified = rows.length - verified;
+    if (days <= 14 && (unverified || stale || days < 0)) {
+      const when = days < 0 ? `was ${-days} day${-days === 1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
+      notice.textContent = `Presentation ${when} · ${unverified} selection${unverified === 1 ? "" : "s"} still need review` + (stale ? ` · ${stale} verified link${stale === 1 ? "" : "s"} over 6 months old` : "") + ".";
+      notice.classList.toggle("error", days < 0 || unverified > 0);
+      notice.hidden = false;
+    }
+  }
+  $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete${stale ? ` · ${stale} stale` : ""}`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
   $("review-count").textContent = rows.length - verified;
   $("page-title").textContent = names[state.view];
   $("breadcrumb-name").textContent = project && state.view !== "manufacturers" ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
@@ -176,6 +189,7 @@ function render() {
   $("export-summary").textContent = `${count} selections will be included. ${rows.length - included.length} hidden from presentations.` + (mode === "verified" ? ` ${pending} unverified selections will be omitted.` : pending ? ` ${pending} still need review${mode === "final" ? " — final export is blocked until verified" : "; draft labels will be shown"}.` : " All included links are verified.");
   const automaticPending = included.some((r) => r._auto_phase);
   if (automaticPending && mode !== "verified") $("export-summary").textContent += " Export waits for automatic lookup so stale product links cannot be included.";
+  if (stale) $("export-summary").textContent += ` ${stale} verified link${stale === 1 ? " is" : "s are"} over 6 months old — worth a re-check before presenting.`;
   $("export-pdf").disabled = $("export-pptx").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
   $("manufacturer-grid").innerHTML = data.manufacturers.map((m, index) => `<article class="manufacturer-card"><h3>${esc(m.Manufacturer)}</h3><p>${esc(m["Official Domain"])}</p><p>${esc(m.Notes || "Official product source")}</p><button class="text-button" data-manufacturer="${index}">Edit manufacturer ↗</button></article>`).join("") || '<div class="empty-state"><h3>Add your first manufacturer</h3><p>Enter the brand and its official website domain.</p></div>';
   $("workbook-name").textContent = data.workbook;
@@ -188,7 +202,7 @@ function renderTable() {
   const rows = projectRows().filter((r) => (!category || r.Section === category) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">View product ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">View product ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -197,8 +211,8 @@ function renderTable() {
 }
 
 function renderReview() {
-  const rows = projectRows().filter((r) => r["Lookup Status"] !== "Verified");
-  $("review-grid").innerHTML = rows.slice(0, state.reviewLimit).map((r) => `<article class="review-card"><div class="review-image">${thumb(r, true)}</div><div class="review-body">${badge(r["Lookup Status"], r._auto_phase)}<h3>${esc(r.Item)}</h3><p>${esc(r.Manufacturer)} · <strong>${esc(r["Model #"] || "Model pending")}</strong></p><p>${esc(r["Finish / Color"] || "Finish not specified")} / ${esc(r["Room / Area"] || r.Section)}</p>${r["Lookup Notes"] ? `<div class="review-notes">${esc(r["Lookup Notes"])}</div>` : ""}${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">Open product page ↗</a>` : '<p class="muted">No candidate link yet.</p>'}<div class="review-actions">${isUrl(r["Product URL"]) ? `<button class="button primary" data-verify="${r._row}">Mark verified</button>` : `<button class="button primary" data-lookup="${r._row}" ${r._auto_phase || !r.Manufacturer || !r["Model #"] ? "disabled" : ""}>Find product</button>`}<button class="button secondary" data-edit="${r._row}">Edit details</button>${isUrl(r["Product URL"]) ? `<button class="text-button" data-lookup="${r._row}">Search again</button>` : ""}</div></div></article>`).join("") || `<div class="empty-state"><div class="empty-icon">◇</div><h3>${projectRows().length ? "Everything checked. Beautifully done." : "Nothing to review yet."}</h3><p>${projectRows().length ? "All selections in this project are verified." : "Add selections to begin finding and reviewing product links."}</p></div>`;
+  const rows = projectRows().filter((r) => r["Lookup Status"] !== "Verified" || r._stale);
+  $("review-grid").innerHTML = rows.slice(0, state.reviewLimit).map((r) => `<article class="review-card"><div class="review-image">${thumb(r, true)}</div><div class="review-body">${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <span class="status">${esc(r["Client Status"])}</span>` : ""}<h3>${esc(r.Item)}</h3><p>${esc(r.Manufacturer)} · <strong>${esc(r["Model #"] || "Model pending")}</strong></p><p>${esc(r["Finish / Color"] || "Finish not specified")} / ${esc(r["Room / Area"] || r.Section)}</p>${r["Lookup Notes"] ? `<div class="review-notes">${esc(r["Lookup Notes"])}</div>` : ""}${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">Open product page ↗</a>` : '<p class="muted">No candidate link yet.</p>'}<div class="review-actions">${isUrl(r["Product URL"]) ? `<button class="button primary" data-verify="${r._row}">Mark verified</button>` : `<button class="button primary" data-lookup="${r._row}" ${r._auto_phase || !r.Manufacturer || !r["Model #"] ? "disabled" : ""}>Find product</button>`}<button class="button secondary" data-edit="${r._row}">Edit details</button>${isUrl(r["Product URL"]) ? `<button class="text-button" data-lookup="${r._row}">Search again</button>` : ""}</div></div></article>`).join("") || `<div class="empty-state"><div class="empty-icon">◇</div><h3>${projectRows().length ? "Everything checked. Beautifully done." : "Nothing to review yet."}</h3><p>${projectRows().length ? "All selections in this project are verified." : "Add selections to begin finding and reviewing product links."}</p></div>`;
   $("more-reviews").hidden = rows.length <= state.reviewLimit;
 }
 
@@ -235,19 +249,19 @@ function addCustomField(field = { name: "", value: "" }, focus = true) {
   if (focus) row.querySelector("input").focus();
 }
 
-function openEditor(kind, record) {
+function openEditor(kind, record, prefill = {}) {
   if (state.busy || !state.data) return;
   state.editor = { kind, record, revision: state.data.revision };
   $("editor-error").hidden = true;
   $("editor-title").textContent = `${record ? "Edit" : "New"} ${kind}`;
   $("editor-eyebrow").textContent = kind === "selection" ? "MATERIALS & FINISHES" : "WORKSPACE DETAILS";
   let fields = "", note = "";
-  const r = record || {};
+  const r = record || prefill;
   if (kind === "project") {
     fields = field("Project ID", r["Project ID"], { required: true, readonly: !!record, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
     note = "Use a unique Project ID, such as UH-103. Cover Image accepts a public image URL or a local file path. Each project gets its own presentation.";
   } else if (kind === "selection") {
-    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
+    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] }) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
     if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
     note = "Changing the item/product name, manufacturer, model, or finish clears old links and verification, then automatically searches after saving. A newly typed Product Name is retained as search context. API charges may apply. Changed links need a fresh review; hidden selections remain in Excel.";
   } else {
@@ -346,6 +360,19 @@ async function lookup(row) {
   }
 }
 
+async function addFromLink() {
+  const url = prompt("Paste a product page link to prefill a new selection:");
+  if (!url || !url.trim()) return;
+  setBusy(true, "Reading the product page…");
+  let details;
+  try {
+    details = (await api("/api/selections/parse-link", { url: url.trim() })).details;
+  } finally {
+    setBusy(false);
+  }
+  if (details) openEditor("selection", null, details);
+}
+
 async function exportPresentation(format) {
   const { title, prefix } = scheduleOptions();
   setBusy(true, `Building your ${format === "pdf" ? "PDF" : "PowerPoint"} finish schedule…`);
@@ -353,12 +380,14 @@ async function exportPresentation(format) {
     const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix }, true);
     const blob = await response.blob(), url = URL.createObjectURL(blob);
     const link = document.createElement("a");
+    const filename = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/);
     link.href = url;
-    link.download = `${[state.project, title.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")].filter(Boolean).join("_")}${$("export-mode").value === "draft" ? "_DRAFT" : ""}.${format}`;
+    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${format}`;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
+    await refresh();
     toast("Finish schedule downloaded. Review the layout and branding before sharing with your client.");
   } finally { setBusy(false); }
 }
@@ -420,6 +449,7 @@ $("editor-delete").addEventListener("click", deleteEditorRecord);
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
+$("add-from-link").addEventListener("click", () => action(addFromLink));
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
 $("setup-button").addEventListener("click", () => $("setup-dialog").showModal());
 $("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workbook refreshed."); }));
