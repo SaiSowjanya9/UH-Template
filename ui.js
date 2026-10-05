@@ -91,6 +91,7 @@ function scheduleOptions() {
 }
 
 function rowDescription(row) {
+  if (row["Description Override"]) return row["Description Override"];
   const product = row["Product Name"] || row["Model #"];
   let identity = [row.Manufacturer, product].filter(Boolean).join(" ");
   let finish = row["Finish / Color"] || "";
@@ -191,7 +192,8 @@ function render() {
   const automaticPending = included.some((r) => r._auto_phase);
   if (automaticPending && mode !== "verified") $("export-summary").textContent += " Export waits for automatic lookup so stale product links cannot be included.";
   if (stale) $("export-summary").textContent += ` ${stale} verified link${stale === 1 ? " is" : "s are"} over 6 months old — worth a re-check before presenting.`;
-  $("export-pdf").disabled = $("export-pptx").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
+  $("export-pdf").disabled = $("export-pptx").disabled = $("export-form").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
+  $("import-form").disabled = !project || state.busy;
   $("manufacturer-grid").innerHTML = data.manufacturers.map((m, index) => `<article class="manufacturer-card"><h3>${esc(m.Manufacturer)}</h3><p>${esc(m["Official Domain"])}</p><p>${esc(m.Notes || "Official product source")}</p><button class="text-button" data-manufacturer="${index}">Edit manufacturer ↗</button></article>`).join("") || '<div class="empty-state"><h3>Add your first manufacturer</h3><p>Enter the brand and its official website domain.</p></div>';
   $("workbook-name").textContent = data.workbook;
   $("provider-status").textContent = data.provider.ready ? `${data.provider.name} is configured. Live requests may use paid API quota.` : `Search is not configured. Required: ${data.provider.key_name}. You can still manage selections, enter links manually, and export presentations.`;
@@ -498,20 +500,43 @@ async function addFromLink() {
 
 async function exportPresentation(format) {
   const { title, prefix } = scheduleOptions();
-  setBusy(true, `Building your ${format === "pdf" ? "PDF" : "PowerPoint"} finish schedule…`);
+  const label = { pdf: "PDF", pptx: "PowerPoint", form: "fillable" }[format];
+  setBusy(true, `Building your ${label} finish schedule…`);
   try {
     const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix }, true);
     const blob = await response.blob(), url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const filename = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/);
     link.href = url;
-    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${format}`;
+    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${format === "pptx" ? "pptx" : "pdf"}`;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     await refresh();
     toast("Finish schedule downloaded. Review the layout and branding before sharing with your client.");
+  } finally { setBusy(false); }
+}
+
+async function importScheduleForm(file) {
+  if (!file) return;
+  const project = selectedProject();
+  if (!project) { toast("Choose a project first.", true); return; }
+  if (file.size > 8 * 1024 * 1024) throw new Error("Choose a file smaller than 8 MB.");
+  if (!confirm(`Apply “${file.name}” to “${project["Project Name"]}”?\n\nClient details are updated, edited descriptions are saved for the client schedule, and any line you ticked Remove is deleted. A backup is kept.`)) return;
+  const data = new FormData();
+  data.append("file", file);
+  data.append("project", state.project);
+  data.append("revision", state.data.revision);
+  setBusy(true, "Reading the filled schedule…");
+  try {
+    const result = await api("/api/schedule/form", data);
+    await refresh();
+    const parts = [];
+    if (result.details.length) parts.push(`${result.details.length} client detail${result.details.length === 1 ? "" : "s"} updated`);
+    if (result.described) parts.push(`${result.described} description${result.described === 1 ? "" : "s"} saved`);
+    if (result.removed) parts.push(`${result.removed} line${result.removed === 1 ? "" : "s"} removed`);
+    toast(parts.length ? `${parts.join(", ")}.` : "Nothing had changed in that form.");
   } finally { setBusy(false); }
 }
 
@@ -584,7 +609,22 @@ $("retry-automation").addEventListener("click", () => action(async () => {
   toast("Automatic lookup will retry eligible selections.");
 }));
 $("add-custom-field").addEventListener("click", () => { if (!state.busy) addCustomField(); });
-$("project-edit-details").addEventListener("click", () => openEditor("project", selectedProject()));
+$("project-save-details").addEventListener("click", () => action(async () => {
+  const project = selectedProject();
+  if (!project) return;
+  // Commit anything typed but not yet blurred, then confirm the record is stored.
+  const pending = Array.from(document.querySelectorAll("#project-detail-values .cell"))
+    .filter((input) => input.dataset.projectField
+      && (input.dataset.projectField === "Presentation Date"
+        ? (project[input.dataset.projectField] || "").slice(0, 10) : project[input.dataset.projectField] || "") !== input.value.trim());
+  for (const input of pending) await saveProjectField(input);
+  if (!pending.length) await refresh();
+  toast("Project details saved. A backup was preserved.");
+}));
+$("project-delete").addEventListener("click", () => {
+  const project = selectedProject();
+  if (project) { openEditor("project", project); deleteEditorRecord(); }
+});
 $("project-add-field").addEventListener("click", () => {
   if (state.busy || !selectedProject()) return;
   openEditor("project", selectedProject());
@@ -638,6 +678,13 @@ $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
 $("export-pdf").addEventListener("click", () => action(() => exportPresentation("pdf")));
 $("export-pptx").addEventListener("click", () => action(() => exportPresentation("pptx")));
+$("export-form").addEventListener("click", () => action(() => exportPresentation("form")));
+$("import-form").addEventListener("click", () => { if (state.data && !state.busy) $("form-import-file").click(); });
+$("form-import-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  action(() => importScheduleForm(file));
+});
 $("export-mode").addEventListener("change", render);
 $("export-title").addEventListener("input", render);
 $("export-prefix").addEventListener("input", render);

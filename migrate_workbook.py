@@ -24,7 +24,7 @@ ENTRY_COLUMNS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer",
                  "Include in Lookbook", "Client Status"]
 WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Lookup Notes": 34, "Client Notes": 28,
                          "Include in Lookbook": 17, "Client Status": 15, "Checked On": 12, "Unit Price": 12,
-                         "Markup %": 11},
+                         "Markup %": 11, "Description Override": 40},
           "Projects": {"Cover Image": 30, "Presentation Date": 18}}
 
 INSTRUCTIONS = [
@@ -55,6 +55,8 @@ INSTRUCTIONS = [
     ("Qty              Leave blank or 1 to hide the quantity from the client schedule.", ""),
     ("Unit Price       Cost per unit. The Price Schedule multiplies it by Qty and adds the markup.", ""),
     ("Markup %         Percentage added to the line, for example 15. Leave blank for none.", ""),
+    ("Description Override  Client-facing wording for this line. Leave blank to use the "
+     "description built from manufacturer, product, finish, quantity and client notes.", ""),
     ("Client Notes     Short note printed with the item on the client schedule.", ""),
     ("Include in Lookbook   No hides the row from client exports without deleting it. Dropdown.", ""),
     ("Client Status    Proposed / Presented / Approved / Rejected / Changed. Dropdown.", ""),

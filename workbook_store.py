@@ -27,7 +27,7 @@ STALE_DAYS = 180
 
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override"]
 # Numeric input columns: (maximum, message)
 NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
                   "Unit Price": (100_000_000, "Unit Price must be a number between 0 and 100,000,000."),

@@ -537,6 +537,71 @@ class AppTests(unittest.TestCase):
             "project": project, "revision": self.state()["revision"]}, headers=self.headers)
         self.assertEqual(bad.status_code, 400)
 
+    def test_fillable_schedule_round_trip(self):
+        import build_form
+        from pypdf import PdfReader, PdfWriter
+        project = self.state()["projects"][0]
+        pid = project["Project ID"]
+        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid][:3]
+
+        download = self.post("/api/presentation", {"project": pid, "format": "form", "mode": "draft"})
+        self.assertEqual(download.status_code, 200, download.json if download.is_json else "")
+        self.assertIn("FILLABLE", download.headers["Content-Disposition"])
+        reader = PdfReader(io.BytesIO(download.data))
+        fields = reader.get_fields() or {}
+        # the client band and one pair of fields per line
+        for name in ["client", "project_lot", "address", "date"]:
+            self.assertIn(name, fields)
+        for row in rows:
+            self.assertIn(f"row{row['_row']}_desc", fields)
+            self.assertIn(f"row{row['_row']}_remove", fields)
+        text = "\n".join(page.extract_text() for page in reader.pages)
+        for expected in ["FINISH SCHEDULE", "CLIENT", "Client Signature", "REMOVE"]:
+            self.assertIn(expected, text)
+
+        def send(values):
+            writer = PdfWriter(clone_from=io.BytesIO(download.data))
+            for page in writer.pages:
+                writer.update_page_form_field_values(page, values)
+            buffer = io.BytesIO()
+            writer.write(buffer)
+            return self.client.post("/api/schedule/form", data={
+                "file": (io.BytesIO(buffer.getvalue()), "filled.pdf"),
+                "project": pid, "revision": self.state()["revision"]}, headers=self.headers)
+
+        # an untouched form changes nothing
+        response = send({})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual((response.json["removed"], response.json["described"], response.json["details"]), (0, 0, []))
+
+        # client details, a reworded line, and a removal
+        target, doomed = rows[0], rows[1]
+        response = send({"client": "Mrs. Imported", "address": "9 New Road",
+                         f"row{target['_row']}_desc": "Hand written client wording",
+                         f"row{doomed['_row']}_remove": "/Yes"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["removed"], 1)
+        self.assertEqual(response.json["described"], 1)
+        state = self.state()
+        updated = next(p for p in state["projects"] if p["Project ID"] == pid)
+        self.assertEqual((updated["Client Name"], updated["Address"]), ("Mrs. Imported", "9 New Road"))
+        self.assertFalse(any(r["_row"] == doomed["_row"] and r["Item"] == doomed["Item"] for r in state["selections"]))
+        kept = next(r for r in state["selections"] if r["Item"] == target["Item"] and r["Project ID"] == pid)
+        self.assertEqual(kept["Description Override"], "Hand written client wording")
+        # the override is what the client schedule prints
+        pdf = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft"})
+        self.assertIn("Hand written client wording",
+                      "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages))
+        # the client PDF never gains form fields
+        self.assertFalse(PdfReader(io.BytesIO(pdf.data)).get_fields())
+
+        # a form from another project is refused
+        other = self.state()["projects"][1]["Project ID"]
+        wrong = self.client.post("/api/schedule/form", data={
+            "file": (io.BytesIO(download.data), "filled.pdf"),
+            "project": other, "revision": self.state()["revision"]}, headers=self.headers)
+        self.assertEqual(wrong.status_code, 400)
+
     def test_prices_never_reach_client_documents(self):
         from pypdf import PdfReader
         from pptx import Presentation

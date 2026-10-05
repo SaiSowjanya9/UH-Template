@@ -328,6 +328,83 @@ def parse_link():
     return jsonify(ok=True, details=details)
 
 
+# The band's project/lot field combines two columns, so it is read-only on the form.
+BAND_TO_PROJECT = {"client": "Client Name", "address": "Address", "date": "Presentation Date"}
+
+
+def normalise_date(value):
+    """Accept an ISO date or the printed form, and store ISO."""
+    text = common.clean(value)
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%d", "%B %d, %Y", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return dt.datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValidationError(f"'{text}' is not a date the schedule understands. Use YYYY-MM-DD.")
+
+
+@app.post("/api/schedule/form")
+def import_schedule_form():
+    """Apply a filled fillable schedule: client details, line descriptions and removals."""
+    import build_form
+    upload = request.files.get("file")
+    if not upload or not upload.filename.lower().endswith(".pdf"):
+        raise ValidationError("Choose the fillable schedule PDF you downloaded and filled in.")
+    project_id = common.clean(request.form.get("project"))
+    try:
+        details, lines = build_form.read(io.BytesIO(upload.read()))
+    except Exception:
+        raise ValidationError("That PDF could not be read as a fillable schedule. Download a fresh copy and fill that in.") from None
+    if not lines and not details:
+        raise ValidationError("That PDF has no schedule fields. Use the fillable copy, not the client PDF.")
+
+    with store.lock:
+        wb, revision = current({"revision": request.form.get("revision", "")})
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        sheet = ensure_selection_columns(wb)
+        owned = {r["_row"]: r for r in records(wb, "Selections") if r["Project ID"] == project_id}
+        foreign = [row for row in lines if row not in owned]
+        if foreign:
+            raise ValidationError("That form belongs to a different project or an older version of it. Download a fresh copy.")
+
+        updates = {}
+        for key, field in BAND_TO_PROJECT.items():
+            value, stored = details.get(key, ""), common.clean(project.get(field, ""))
+            if field == "Presentation Date":
+                value, stored = normalise_date(value), stored[:10]
+            if value and value != stored:
+                updates[field] = value
+        if updates:
+            updates = validate_values(updates, PROJECT_FIELDS)
+            put(common.Sheet(wb["Projects"]), project["_row"], updates)
+
+        removed = described = 0
+        for row, entry in lines.items():
+            record = owned[row]
+            if entry.get("remove"):
+                removed += 1
+                continue
+            typed = entry.get("description", "")
+            # Unedited fields still read back transliterated, so compare like for like.
+            generated = build_form.form_text(build_lookbook.description({**record, "Description Override": ""}))
+            override = "" if typed in {"", generated} else typed
+            if override != record.get("Description Override", ""):
+                put(sheet, row, validate_values({"Description Override": override},
+                                                SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS))
+                described += 1
+        for row in sorted((row for row, entry in lines.items() if entry.get("remove")), reverse=True):
+            delete_record(wb, "Selections", row)
+        if removed or described or updates:
+            store.save(wb, revision, f"schedule form {project_id} (-{removed}/~{described})")
+            if automation:
+                automation.observe(wb)
+    return jsonify(ok=True, removed=removed, described=described, details=sorted(updates))
+
+
 SPEC_CSV_FIELDS = ["Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
                    "Qty", "Unit Price", "Markup %", "Client Notes", "Client Status", "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
@@ -468,7 +545,7 @@ def presentation():
     if not project:
         raise ValidationError("Choose a valid project.")
     mode, kind = data.get("mode", "draft"), data.get("format", "pdf")
-    if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx"}:
+    if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx", "form"}:
         raise ValidationError("Invalid presentation options.")
     title, prefix = schedule_options(data)
     rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
@@ -501,13 +578,19 @@ def presentation():
             store.log(note)
         rev = store.count_notes(f"export {project['Project ID']} ")
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
-        if kind == "pdf":
-            build_schedule, mime = build_lookbook.build, "application/pdf"
+        if kind == "form":
+            import build_form
+            output = build_form.build(project["Project ID"], project, rows,
+                                      output_dir=Path(folder), title=title, prefix=prefix)
+            mime = "application/pdf"
         else:
-            from build_powerpoint import build as build_schedule
-            mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        output = build_schedule(project["Project ID"], project, rows, mode == "draft",
-                                output_dir=Path(folder), title=title, prefix=prefix, rev=rev)
+            if kind == "pdf":
+                build_schedule, mime = build_lookbook.build, "application/pdf"
+            else:
+                from build_powerpoint import build as build_schedule
+                mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            output = build_schedule(project["Project ID"], project, rows, mode == "draft",
+                                    output_dir=Path(folder), title=title, prefix=prefix, rev=rev)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=mime)
 

@@ -146,8 +146,11 @@ def numbered(rows, prefix):
 def description(row, include_quantity=True):
     """One plain-English line per selection, assembled from the workbook columns.
 
+    A Description Override, typed on the fillable schedule, replaces the assembled text.
     Tables that show quantity in their own column pass include_quantity=False.
     """
+    if clean(row.get("Description Override")):
+        return clean(row["Description Override"])
     product = clean(row.get("Product Name")) or clean(row.get("Model #"))
     finish = clean(row.get("Finish / Color"))
     identity = " ".join(filter(None, [clean(row.get("Manufacturer")), product]))
