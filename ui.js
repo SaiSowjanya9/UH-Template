@@ -158,9 +158,12 @@ function render() {
   if (project && presDate && state.view !== "manufacturers") {
     const days = Math.round((new Date(presDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
     const unverified = rows.length - verified;
-    if (days <= 14 && (unverified || stale || days < 0)) {
+    if (days <= 14 && (unverified || stale)) {
       const when = days < 0 ? `was ${-days} day${-days === 1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
-      notice.textContent = `Presentation ${when} · ${unverified} selection${unverified === 1 ? "" : "s"} still need review` + (stale ? ` · ${stale} verified link${stale === 1 ? "" : "s"} over 6 months old` : "") + ".";
+      const parts = [`Presentation ${when}`];
+      if (unverified) parts.push(`${unverified} selection${unverified === 1 ? "" : "s"} still need${unverified === 1 ? "s" : ""} review`);
+      if (stale) parts.push(`${stale} verified link${stale === 1 ? "" : "s"} over 6 months old`);
+      notice.textContent = parts.join(" · ") + ".";
       notice.classList.toggle("error", days < 0 || unverified > 0);
       notice.hidden = false;
     }
