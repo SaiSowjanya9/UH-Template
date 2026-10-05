@@ -303,13 +303,24 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_save_restores_dropdowns_excel_dropped(self):
+        from workbook_store import LIST_VALIDATIONS
         wb, revision = self.store.snapshot()
         wb["Selections"].data_validations.dataValidation = []
         self.store.save(wb, revision)
         restored, _ = self.store.snapshot()
-        formulas = {dv.formula1 for dv in restored["Selections"].data_validations.dataValidation if dv.type == "list"}
-        self.assertEqual({"Lists!$A$2:$A$31", "Lists!$B$2:$B$7", "Lists!$C$2:$C$3", "Projects!$A$2:$A$51",
-                          '"Proposed,Presented,Approved,Rejected,Changed"'}, formulas)
+        lists = [dv for dv in restored["Selections"].data_validations.dataValidation if dv.type == "list"]
+        self.assertEqual({dv.formula1 for dv in lists}, set(LIST_VALIDATIONS.values()))
+        self.assertEqual(len(lists), len(LIST_VALIDATIONS))   # one dropdown per column, no duplicates
+
+    def test_excel_dropdowns_offer_every_status(self):
+        from workbook_store import CLIENT_STATUSES, STATUSES
+        wb, revision = self.store.snapshot()
+        wb["Lists"]["B7"] = "Stale value"
+        self.store.save(wb, revision)
+        lists = self.store.snapshot()[0]["Lists"]
+        self.assertEqual([lists.cell(row, 2).value for row in range(2, 2 + len(STATUSES))], STATUSES)
+        self.assertEqual([lists.cell(row, 4).value for row in range(2, 2 + len(CLIENT_STATUSES))], CLIENT_STATUSES)
+        self.assertEqual(lists.cell(1, 4).value, "Client Status")
 
     def test_excel_added_project_gets_count_formulas(self):
         wb, revision = self.store.snapshot()

@@ -38,14 +38,17 @@ PROJECT_FORMULAS = {
 }
 
 # Selections dropdowns Excel silently drops when it re-saves the workbook.
-# Client Status uses a literal list so the values stay in sync with CLIENT_STATUSES.
 LIST_VALIDATIONS = {
     "Project ID": "Projects!$A$2:$A$51",
     "Section": "Lists!$A$2:$A$31",
-    "Lookup Status": "Lists!$B$2:$B$7",
+    "Lookup Status": "Lists!$B$2:$B$8",
     "Include in Lookbook": "Lists!$C$2:$C$3",
-    "Client Status": '"Proposed,Presented,Approved,Rejected,Changed"',
+    "Client Status": "Lists!$D$2:$D$6",
 }
+
+# Lists columns the app owns, so the Excel dropdowns always offer every valid value.
+MANAGED_LISTS = {"B": ("Lookup Status", STATUSES), "C": ("Yes / No", ["Yes", "No"]),
+                 "D": ("Client Status", CLIENT_STATUSES)}
 
 
 class ValidationError(ValueError):
@@ -280,15 +283,46 @@ def ensure_selection_columns(wb):
     return Sheet(ws)
 
 
+def ensure_list_values(wb):
+    """Keep the status columns on Lists complete, so Excel's dropdowns offer every valid value.
+
+    Column A (sections) belongs to the user and is never rewritten.
+    """
+    ws = wb["Lists"]
+    for letter, (header, values) in MANAGED_LISTS.items():
+        column = ws[f"{letter}1"].column
+        if clean(ws.cell(1, column).value) != header:
+            cell = ws.cell(1, column, header)
+            cell._style = copy(ws.cell(1, 1)._style)
+            ws.column_dimensions[letter].width = max(ws.column_dimensions[letter].width or 0, 20)
+        for index, value in enumerate(values, start=2):
+            if clean(ws.cell(index, column).value) != value:
+                ws.cell(index, column, value)
+        for extra in range(len(values) + 2, ws.max_row + 1):
+            if clean(ws.cell(extra, column).value):
+                ws.cell(extra, column, None)
+
+
 def ensure_validations(wb):
-    """Re-add the Selections dropdowns Excel silently drops when it re-saves."""
+    """Re-add the Selections dropdowns Excel silently drops when it re-saves.
+
+    Validations on the managed columns are replaced rather than appended, so a workbook
+    saved by an older version cannot end up with two conflicting lists on one column.
+    """
     ws = wb["Selections"]
     sheet = Sheet(ws)
-    covered = {clean(dv.formula1) for dv in ws.data_validations.dataValidation if dv.type == "list"}
+    managed = {sheet.cols[header] for header in LIST_VALIDATIONS if header in sheet.cols}
+
+    def owns(dv):
+        ranges = list(dv.sqref.ranges) if dv.sqref else []
+        return bool(ranges) and all(r.min_col == r.max_col and r.min_col in managed for r in ranges)
+
+    for dv in [dv for dv in ws.data_validations.dataValidation if dv.type == "list" and owns(dv)]:
+        ws.data_validations.dataValidation.remove(dv)
     last = max(501, ws.max_row)
     for header, formula in LIST_VALIDATIONS.items():
         column = sheet.cols.get(header)
-        if column is None or formula in covered:
+        if column is None:
             continue
         letter = get_column_letter(column)
         dv = DataValidation(type="list", formula1=formula, allow_blank=True, showErrorMessage=True)
@@ -347,6 +381,7 @@ class WorkbookStore:
             stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(self.path, backup_dir / f"{self.path.stem}_{stamp}.xlsx")
             ensure_selection_columns(wb)
+            ensure_list_values(wb)
             ensure_validations(wb)
             ensure_project_formulas(wb)
             handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
