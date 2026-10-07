@@ -9,7 +9,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Request, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -47,7 +47,21 @@ def trusted_hosts():
     return LOCAL_HOSTS + extra
 
 
+class AppRequest(Request):
+    """/healthz must answer whatever Host the platform's internal probe sends."""
+    _trusted_hosts = None
+
+    @property
+    def trusted_hosts(self):
+        return None if self.path == "/healthz" else self._trusted_hosts
+
+    @trusted_hosts.setter
+    def trusted_hosts(self, value):
+        self._trusted_hosts = value
+
+
 app = Flask(__name__, template_folder=str(BASE), static_folder=None)
+app.request_class = AppRequest
 app.config.update(MAX_CONTENT_LENGTH=8 * 1024 * 1024, TRUSTED_HOSTS=trusted_hosts(),
                   SECRET_KEY=os.getenv("UH_SECRET_KEY") or secrets.token_hex(32),
                   SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
@@ -76,6 +90,8 @@ def csrf_token():
 
 @app.before_request
 def guard():
+    if request.routing_exception is not None:
+        return None                 # let Flask raise the stored 400/404 (e.g. an untrusted Host)
     if request.endpoint == "login":
         return None                 # the sign-in form carries its own token as a field
     if REQUIRE_LOGIN and not session.get("user") and request.endpoint not in OPEN_ENDPOINTS:

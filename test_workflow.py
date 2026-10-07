@@ -71,11 +71,16 @@ class AppTests(unittest.TestCase):
         self.store = WorkbookStore(self.path)
         self.patcher = patch.object(app, "store", self.store)
         self.patcher.start()
+        # These tests exercise the local-mode contract (the per-start TOKEN);
+        # REQUIRE_LOGIN depends on the ambient .env, so pin it off.
+        self.login_patcher = patch.object(app, "REQUIRE_LOGIN", False)
+        self.login_patcher.start()
         self.client = app.app.test_client()
         self.headers = {"X-UH-Token": app.TOKEN}
 
     def tearDown(self):
         self.patcher.stop()
+        self.login_patcher.stop()
         self.folder.cleanup()
 
     def state(self):

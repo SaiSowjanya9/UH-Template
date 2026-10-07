@@ -17,7 +17,9 @@ class CustomFieldTests(unittest.TestCase):
         self.path = Path(self.folder.name) / "master.xlsx"
         shutil.copy2(common.WORKBOOK, self.path)
         self.store = WorkbookStore(self.path)
-        self.patches = [patch.object(app, "store", self.store), patch.object(app, "automation", None)]
+        # REQUIRE_LOGIN follows the ambient .env; these tests exercise local mode.
+        self.patches = [patch.object(app, "store", self.store), patch.object(app, "automation", None),
+                        patch.object(app, "REQUIRE_LOGIN", False)]
         for item in self.patches:
             item.start()
         self.client = app.app.test_client()

@@ -565,6 +565,16 @@ class HostedAppTests(unittest.TestCase):
     def test_the_health_check_stays_open(self):
         self.assertEqual(self.client.get("/healthz").status_code, 200)
 
+    def test_the_health_check_answers_the_platforms_internal_hostname(self):
+        # Render's liveness probe arrives on an internal host; TRUSTED_HOSTS must
+        # not reject it or the deploy times out as "unhealthy".
+        response = self.client.get("/healthz", headers={"Host": "srv-abc123.internal"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_other_routes_still_reject_an_unknown_host(self):
+        response = self.client.get("/", headers={"Host": "not-our-site.example"})
+        self.assertEqual(response.status_code, 400)
+
     def test_the_sign_in_page_renders_without_a_session(self):
         response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
@@ -650,7 +660,9 @@ class ExposureTests(unittest.TestCase):
     def test_a_public_bind_refuses_to_serve_a_local_workbook_file(self):
         """A host's filesystem is temporary, so this would silently lose every edit."""
         import app
+        local = type("B", (), {"remote": False})()
         with patch.object(app, "LOCAL_ONLY", False), patch.object(app, "REQUIRE_LOGIN", True), \
+             patch.object(app.store, "backend", local), \
              patch.dict("os.environ", {"UH_SECRET_KEY": "x" * 64, "UH_TRUSTED_HOSTS": "uh.example.com"}):
             with self.assertRaises(SystemExit) as caught:
                 app.check_exposure()

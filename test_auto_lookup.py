@@ -161,7 +161,8 @@ class AutoLookupTests(unittest.TestCase):
         from pptx import Presentation
         from pypdf import PdfReader
         row = self.rows()[0]
-        with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine):
+        with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine), \
+             patch.object(app, "REQUIRE_LOGIN", False):
             client = app.app.test_client()
             headers = {"X-UH-Token": app.TOKEN}
             def post(path, data):
@@ -196,7 +197,8 @@ class AutoLookupTests(unittest.TestCase):
         self.change(row["_row"], {"Product URL": "https://example.com/old-product", "Lookup Status": "Verified"})
         self.engine.observe(self.store.snapshot()[0])
         self.change(row["_row"], {"Product Name": "Different fixture"})
-        with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine):
+        with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine), \
+             patch.object(app, "REQUIRE_LOGIN", False):
             data = app.app.test_client().get("/api/state").json
         displayed = data["selections"][0]
         self.assertEqual(displayed["Product URL"], "")
