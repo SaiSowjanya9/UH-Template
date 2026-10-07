@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 from workbook_store import ConflictError, ValidationError, WorkbookStore, put, records
 
 import auth
+import deploy_render
 import supabase_store
 from supabase_store import HISTORY, LOOKUP_STATE, STATE, VERSIONS, SupabaseBackend
 
@@ -371,6 +372,126 @@ class SignInTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError):
             throttle.check("1.2.3.4")
         throttle.check("5.6.7.8")       # another address is unaffected
+
+
+class RenderDeployTests(unittest.TestCase):
+    """Creating the host without hand-copying settings or guessing the hostname."""
+
+    ENV = {"SUPABASE_URL": "https://p.supabase.co", "SUPABASE_SERVICE_KEY": "service",
+           "SUPABASE_ANON_KEY": "anon", "UH_SECRET_KEY": "x" * 64, "RENDER_API_KEY": "rnd_key",
+           "SEARCH_PROVIDER": "serpapi", "SERPAPI_API_KEY": "serp", "BRAVE_API_KEY": "",
+           "SERPAPI_KEY": "", "ANTHROPIC_API_KEY": "", "UH_TRUSTED_HOSTS": "", "SUPABASE_BUCKET": ""}
+
+    class Session:
+        """Records calls and replays canned Render responses."""
+
+        def __init__(self, existing=None, status=200):
+            self.headers = {}
+            self.calls = []
+            self.existing = existing
+            self.status = status
+
+        def request(self, method, url, timeout=None, json=None, params=None):
+            self.calls.append({"method": method, "url": url, "json": json, "params": params})
+            session = self
+
+            class Response:
+                status_code = session.status
+                content = b"{}"
+
+                def json(self):
+                    if url.endswith("/owners"):
+                        return [{"owner": {"id": "usr-1", "name": "Sai", "email": "s@uh.example",
+                                           "type": "user"}}]
+                    if url.endswith("/services") and method == "GET":
+                        return session.existing or []
+                    if url.endswith("/services") and method == "POST":
+                        return {"service": {"id": "srv-9", "name": "uh-selections", "slug": "uh-selections",
+                                            "serviceDetails": {"url": "https://uh-selections-ab12.onrender.com"}}}
+                    return {}
+            return Response()
+
+    def test_a_new_service_is_created_and_configured(self):
+        session = self.Session()
+        with patch.dict("os.environ", self.ENV):
+            result = deploy_render.deploy(session=session)
+        self.assertTrue(result["created"])
+        created = next(c for c in session.calls if c["method"] == "POST")
+        details = created["json"]["serviceDetails"]
+        self.assertEqual(details["runtime"], "python")
+        self.assertEqual(details["plan"], "free")
+        self.assertEqual(details["healthCheckPath"], "/healthz")
+        self.assertEqual(details["numInstances"], 1)      # one instance, never more
+        self.assertIn("waitress-serve", details["envSpecificDetails"]["startCommand"])
+
+    def test_trusted_hosts_is_taken_from_the_hostname_render_assigned(self):
+        """The hostname is unknown until the service exists, and a wrong value 400s every request."""
+        session = self.Session()
+        with patch.dict("os.environ", self.ENV):
+            result = deploy_render.deploy(session=session)
+        self.assertEqual(result["hostname"], "uh-selections-ab12.onrender.com")
+        sent = next(c for c in session.calls if c["method"] == "PUT")["json"]
+        variables = {entry["key"]: entry["value"] for entry in sent}
+        self.assertEqual(variables["UH_TRUSTED_HOSTS"], "uh-selections-ab12.onrender.com")
+        self.assertEqual(variables["UH_HOST"], "0.0.0.0")
+
+    def test_empty_local_settings_are_not_sent_as_blanks(self):
+        session = self.Session()
+        with patch.dict("os.environ", self.ENV):
+            deploy_render.deploy(session=session)
+        variables = {e["key"]: e["value"] for e in next(c for c in session.calls if c["method"] == "PUT")["json"]}
+        self.assertIn("SERPAPI_API_KEY", variables)
+        for absent in ["BRAVE_API_KEY", "SERPAPI_KEY", "ANTHROPIC_API_KEY", "SUPABASE_BUCKET"]:
+            self.assertNotIn(absent, variables)
+
+    def test_an_existing_service_is_reused_rather_than_duplicated(self):
+        existing = [{"service": {"id": "srv-old", "name": "uh-selections", "slug": "uh-selections",
+                                 "serviceDetails": {"url": "https://uh-selections.onrender.com"}}}]
+        session = self.Session(existing=existing)
+        with patch.dict("os.environ", self.ENV):
+            result = deploy_render.deploy(session=session)
+        self.assertFalse(result["created"])
+        self.assertEqual(result["service_id"], "srv-old")
+        self.assertFalse([c for c in session.calls if c["method"] == "POST"])
+
+    def test_missing_supabase_settings_stop_the_deploy_before_it_configures_anything(self):
+        session = self.Session()
+        with patch.dict("os.environ", {**self.ENV, "SUPABASE_SERVICE_KEY": ""}):
+            with self.assertRaises(deploy_render.DeployError) as caught:
+                deploy_render.deploy(session=session)
+        self.assertIn("SUPABASE_SERVICE_KEY", str(caught.exception))
+        self.assertFalse([c for c in session.calls if c["method"] == "PUT"])
+
+    def test_a_missing_api_key_is_explained(self):
+        with patch.dict("os.environ", {**self.ENV, "RENDER_API_KEY": ""}):
+            with self.assertRaises(deploy_render.DeployError) as caught:
+                deploy_render.deploy(session=self.Session())
+        self.assertIn("RENDER_API_KEY", str(caught.exception))
+
+    def test_a_rejected_key_is_explained(self):
+        with patch.dict("os.environ", self.ENV):
+            with self.assertRaises(deploy_render.DeployError) as caught:
+                deploy_render.deploy(session=self.Session(status=401))
+        self.assertIn("rejected the API key", str(caught.exception))
+
+    def test_several_workspaces_ask_which_one(self):
+        session = self.Session()
+
+        def two(method, url, timeout=None, json=None, params=None):
+            class Response:
+                status_code = 200
+                content = b"{}"
+
+                def json(self):
+                    return [{"owner": {"id": "usr-1", "name": "Personal", "email": "a@x.example", "type": "user"}},
+                            {"owner": {"id": "tea-2", "name": "Studio", "email": "b@x.example", "type": "team"}}]
+            return Response()
+
+        session.request = two
+        with patch.dict("os.environ", self.ENV):
+            with self.assertRaises(deploy_render.DeployError) as caught:
+                deploy_render.deploy(session=session)
+        self.assertIn("--owner-email", str(caught.exception))
 
 
 class HostedAppTests(unittest.TestCase):

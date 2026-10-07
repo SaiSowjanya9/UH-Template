@@ -70,8 +70,13 @@ the app itself needs a host such as Render (`render.yaml` is included).
 5. Confirm everything is in place: `.venv\Scripts\python.exe supabase_store.py check`. It
    verifies the four tables, that the bucket exists and is private, that the workbook is seeded,
    and which environment variables are still missing — without printing any secret.
-6. Deploy with `render.yaml`, setting `UH_TRUSTED_HOSTS` to the service's real hostname and the
-   secrets marked `sync: false` in the dashboard.
+6. Deploy. Either run `.venv\Scripts\python.exe deploy_render.py` after adding `RENDER_API_KEY`
+   to `.env`, which creates the service, copies the hosted settings across and sets
+   `UH_TRUSTED_HOSTS` to the hostname Render assigns; or use `render.yaml` from the dashboard
+   (**New → Blueprint**) and set that hostname and the `sync: false` secrets by hand.
+   `deploy_render.py` is safe to re-run: it reuses an existing service and just pushes the
+   current `.env` values. Use `--plan starter` to avoid the free plan's sleeping, and
+   `--region` to match your Supabase project.
 
 **It must run as exactly one process.** Automatic lookup is a background thread and the workbook
 is saved whole, so a second worker would run a second lookup thread and race the first's saves.
