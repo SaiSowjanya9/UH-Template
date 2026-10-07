@@ -72,6 +72,10 @@ class Supabase:
     def remove(self, path):
         self.session.delete(f"{self.url}/storage/v1/object/{self.bucket}/{path}", timeout=TIMEOUT)
 
+    def bucket_info(self):
+        response = self.session.get(f"{self.url}/storage/v1/bucket/{self.bucket}", timeout=TIMEOUT)
+        return self._check(response, "read the storage bucket").json()
+
     def select(self, table, params, count=False):
         headers = {"Prefer": "count=exact"} if count else {}
         response = self.session.get(f"{self.url}/rest/v1/{table}", params=params, headers=headers, timeout=TIMEOUT)
@@ -256,14 +260,76 @@ def pull(destination):
     return revision
 
 
+def check():
+    """Report exactly what is and is not ready for hosting. Never prints a secret."""
+    results = []
+
+    def note(ok, message):
+        results.append((ok, message))
+
+    try:
+        config = settings()
+    except ConfigError as error:
+        return [(False, str(error))]
+    if not config:
+        return [(False, "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env.")]
+    note(True, f"Configured for {config['url']} (bucket '{config['bucket']}').")
+
+    api = Supabase(config)
+    tables_ok = True
+    for table in (STATE, VERSIONS, HISTORY, LOOKUP_STATE):
+        try:
+            api.select(table, {"select": "*", "limit": 1})
+            note(True, f"Table {table} exists.")
+        except Exception:
+            tables_ok = False
+            note(False, f"Table {table} is missing. Apply supabase/migrations/ (SQL Editor works too).")
+
+    try:
+        info = api.bucket_info()
+        note(not info.get("public", False),
+             f"Bucket '{config['bucket']}' exists and is private." if not info.get("public")
+             else f"Bucket '{config['bucket']}' is PUBLIC. Make it private: anyone could download the workbook.")
+    except Exception:
+        note(False, f"Bucket '{config['bucket']}' is missing. Create it in Storage, private, "
+                    f"or re-run the migration.")
+
+    if tables_ok:
+        try:
+            raw, revision = SupabaseBackend(config, api=api).read()
+            note(True, f"Workbook seeded: revision {revision[:12]}, {len(raw):,} bytes.")
+        except ValidationError as error:
+            note(False, str(error))
+        except Exception:
+            note(False, "The seeded workbook could not be downloaded. Check the bucket contents.")
+
+    import auth
+    if auth.settings():
+        note(True, "Sign-in configured (SUPABASE_ANON_KEY present).")
+    else:
+        note(False, "SUPABASE_ANON_KEY is missing, so the hosted app cannot accept sign-ins.")
+    for name, value in [("UH_SECRET_KEY", os.getenv("UH_SECRET_KEY")),
+                        ("UH_TRUSTED_HOSTS", os.getenv("UH_TRUSTED_HOSTS"))]:
+        note(bool(value), f"{name} is set." if value else
+             f"{name} is not set. Required on the host (not locally).")
+    return results
+
+
 if __name__ == "__main__":
     import argparse
     import common
 
     parser = argparse.ArgumentParser(description="Move the master workbook between this machine and Supabase.")
-    parser.add_argument("action", choices=["push", "pull"])
+    parser.add_argument("action", choices=["push", "pull", "check"])
     parser.add_argument("--file", default=str(common.WORKBOOK))
     args = parser.parse_args()
+    if args.action == "check":
+        failures = 0
+        for ok, message in check():
+            print(f"  {'OK  ' if ok else 'TODO'}  {message}")
+            failures += not ok
+        print("\nReady to host." if not failures else f"\n{failures} item(s) still to do.")
+        raise SystemExit(1 if failures else 0)
     if args.action == "push":
         print(f"Uploaded {args.file} as revision {push(args.file)[:12]}.")
     else:

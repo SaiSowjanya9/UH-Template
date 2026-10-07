@@ -60,10 +60,17 @@ the app itself needs a host such as Render (`render.yaml` is included).
    security: keep it on the server, never in a browser or a commit.
 3. Upload your current workbook once: `.venv\Scripts\python.exe supabase_store.py push`.
    `supabase_store.py pull` brings a copy back down.
-4. Create each team member in **Authentication → Users** with *Auto Confirm User* enabled, and
-   leave public sign-ups disabled. There is no self-service sign-up or password reset by design,
-   so no email delivery is needed.
-5. Deploy with `render.yaml`, setting `UH_TRUSTED_HOSTS` to the service's real hostname and the
+4. Create the team's accounts:
+   `.venv\Scripts\python.exe auth.py alice@uh.example bob@uh.example`.
+   Each account is created already confirmed and prints a generated password once — share it
+   privately and have the holder change it. (The dashboard's **Authentication → Users → Add
+   user** with *Auto Confirm User* does the same thing by hand.) Leave public sign-ups disabled
+   in **Authentication → Sign In / Providers**: there is no self-service sign-up or password
+   reset by design, so no email delivery is needed.
+5. Confirm everything is in place: `.venv\Scripts\python.exe supabase_store.py check`. It
+   verifies the four tables, that the bucket exists and is private, that the workbook is seeded,
+   and which environment variables are still missing — without printing any secret.
+6. Deploy with `render.yaml`, setting `UH_TRUSTED_HOSTS` to the service's real hostname and the
    secrets marked `sync: false` in the dashboard.
 
 **It must run as exactly one process.** Automatic lookup is a background thread and the workbook

@@ -330,6 +330,39 @@ class SignInTests(unittest.TestCase):
         user = auth.sign_in("team@uh.example", "password123", self.CONFIG, self.Client(200, body))
         self.assertEqual(user, {"id": "abc", "email": "team@uh.example"})
 
+    def test_creating_an_account_generates_a_password_and_confirms_it(self):
+        sent = {}
+
+        class Client:
+            def post(self, url, json=None, headers=None, timeout=None):
+                sent.update(url=url, body=json)
+                return type("R", (), {"status_code": 200, "json": lambda self: {"id": "abc"}})()
+
+        with patch.dict("os.environ", {"SUPABASE_URL": "https://p.supabase.co",
+                                       "SUPABASE_SERVICE_KEY": "service"}):
+            created = auth.create_user("team@uh.example", session=Client())
+        self.assertTrue(sent["url"].endswith("/auth/v1/admin/users"))
+        self.assertTrue(sent["body"]["email_confirm"])          # no email delivery needed
+        self.assertGreaterEqual(len(created["password"]), 16)
+        self.assertEqual(created["email"], "team@uh.example")
+
+    def test_creating_an_account_without_configuration_is_refused(self):
+        with patch.dict("os.environ", {"SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": ""}):
+            with self.assertRaises(auth.AuthError):
+                auth.create_user("team@uh.example")
+
+    def test_a_duplicate_account_is_reported_clearly(self):
+        class Client:
+            def post(self, *args, **kwargs):
+                return type("R", (), {"status_code": 422,
+                                      "json": lambda self: {"msg": "User already registered"}})()
+
+        with patch.dict("os.environ", {"SUPABASE_URL": "https://p.supabase.co",
+                                       "SUPABASE_SERVICE_KEY": "service"}):
+            with self.assertRaises(auth.AuthError) as caught:
+                auth.create_user("team@uh.example", session=Client())
+        self.assertIn("already exists", str(caught.exception))
+
     def test_repeated_failures_are_throttled(self):
         throttle = auth.Throttle(limit=3, window=60)
         for _ in range(3):

@@ -80,3 +80,55 @@ def sign_in(email, password, config=None, session=None):
     if not user.get("id"):
         raise AuthError("Sign-in failed. Contact whoever administers this workspace.")
     return {"id": user["id"], "email": user.get("email") or email}
+
+
+def create_user(email, password=None, session=None):
+    """Add a confirmed team account using the service key, as the dashboard would.
+
+    Returns the generated password when one was not supplied; show it to that person
+    once, over a channel you trust, and have them change it after signing in.
+    """
+    import os
+    import secrets as secrets_module
+
+    url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_KEY") or ""
+    if not url or not service_key:
+        raise AuthError("Set SUPABASE_URL and SUPABASE_SERVICE_KEY before creating accounts.")
+    email = (email or "").strip()
+    if not EMAIL.fullmatch(email) or len(email) > 320:
+        raise AuthError(f"'{email}' is not a valid email address.")
+    password = password or secrets_module.token_urlsafe(18)
+    client = session or requests
+    response = client.post(f"{url}/auth/v1/admin/users",
+                           json={"email": email, "password": password, "email_confirm": True},
+                           headers={"apikey": service_key, "Authorization": f"Bearer {service_key}",
+                                    "Content-Type": "application/json"}, timeout=TIMEOUT)
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            body = response.json() or {}
+            detail = body.get("msg") or body.get("error_description") or body.get("message") or ""
+        except ValueError:
+            detail = ""
+        if "already" in detail.lower() or response.status_code == 422:
+            raise AuthError(f"An account for {email} already exists.")
+        raise AuthError(f"Could not create {email} (HTTP {response.status_code}). {detail}".strip())
+    return {"email": email, "password": password}
+
+
+if __name__ == "__main__":
+    import argparse
+
+    import common     # loads .env
+
+    parser = argparse.ArgumentParser(description="Create confirmed team accounts for the hosted app.")
+    parser.add_argument("emails", nargs="+", help="one or more team email addresses")
+    args = parser.parse_args()
+    print("Share each password privately, once. Ask the holder to change it after signing in.\n")
+    for address in args.emails:
+        try:
+            created = create_user(address)
+            print(f"  {created['email']}\n    password: {created['password']}")
+        except AuthError as error:
+            print(f"  {address}\n    skipped: {error}")
