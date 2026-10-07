@@ -784,6 +784,10 @@ def check_exposure():
     if not os.getenv("UH_TRUSTED_HOSTS"):
         raise SystemExit("Refusing to start: set UH_TRUSTED_HOSTS to this deployment's hostname, "
                          "for example uh-selections.onrender.com.")
+    if not store.remote:
+        # A hosted filesystem is temporary, so edits would vanish on the next deploy.
+        raise SystemExit("Refusing to start: UH_HOST is not local but the workbook is a local file, "
+                         "which a redeploy would discard. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.")
 
 
 def start_automation():

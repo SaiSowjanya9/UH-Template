@@ -268,10 +268,12 @@ class SettingsTests(unittest.TestCase):
         with patch.dict("os.environ", {"SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": ""}):
             self.assertIsNone(supabase_store.settings())
 
-    def test_half_configured_is_refused(self):
-        with patch.dict("os.environ", {"SUPABASE_URL": "https://p.supabase.co", "SUPABASE_SERVICE_KEY": ""}):
-            with self.assertRaises(supabase_store.ConfigError):
-                supabase_store.settings()
+    def test_half_configured_counts_as_local_rather_than_breaking_the_app(self):
+        """Either half alone is a setup in progress, not a fatal error."""
+        for half in [{"SUPABASE_URL": "https://p.supabase.co", "SUPABASE_SERVICE_KEY": ""},
+                     {"SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": "sb_secret_x"}]:
+            with patch.dict("os.environ", half):
+                self.assertIsNone(supabase_store.settings())
 
     def test_a_url_with_a_path_is_refused(self):
         with patch.dict("os.environ", {"SUPABASE_URL": "https://p.supabase.co/rest/v1",
@@ -289,6 +291,29 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as caught:
             api._check(Response(), "store the workbook")
         self.assertNotIn(CONFIG["key"], str(caught.exception))
+
+
+class ApiKeyHeaderTests(unittest.TestCase):
+    """Supabase's newer keys are opaque strings, not JWTs, and only belong on `apikey`."""
+
+    def test_a_new_style_secret_key_is_not_sent_as_a_bearer_token(self):
+        headers = auth.key_headers("sb_secret_4TRCaexample")
+        self.assertEqual(headers, {"apikey": "sb_secret_4TRCaexample"})
+
+    def test_a_new_style_publishable_key_is_not_sent_as_a_bearer_token(self):
+        self.assertNotIn("Authorization", auth.key_headers("sb_publishable_J97yXQexample"))
+
+    def test_a_legacy_jwt_key_is_sent_on_both_headers(self):
+        legacy = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
+        self.assertEqual(auth.key_headers(legacy),
+                         {"apikey": legacy, "Authorization": f"Bearer {legacy}"})
+
+    def test_the_client_applies_the_rule_and_looks_nothing_like_a_browser(self):
+        api = supabase_store.Supabase({**CONFIG, "key": "sb_secret_4TRCaexample"})
+        self.assertEqual(api.session.headers["apikey"], "sb_secret_4TRCaexample")
+        self.assertNotIn("Authorization", api.session.headers)
+        # A browser-like User-Agent would have the secret key rejected with 401.
+        self.assertNotIn("Mozilla", api.session.headers["User-Agent"])
 
 
 class SignInTests(unittest.TestCase):
@@ -621,6 +646,23 @@ class ExposureTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 app.check_exposure()
         self.assertIn("UH_TRUSTED_HOSTS", str(caught.exception))
+
+    def test_a_public_bind_refuses_to_serve_a_local_workbook_file(self):
+        """A host's filesystem is temporary, so this would silently lose every edit."""
+        import app
+        with patch.object(app, "LOCAL_ONLY", False), patch.object(app, "REQUIRE_LOGIN", True), \
+             patch.dict("os.environ", {"UH_SECRET_KEY": "x" * 64, "UH_TRUSTED_HOSTS": "uh.example.com"}):
+            with self.assertRaises(SystemExit) as caught:
+                app.check_exposure()
+        self.assertIn("redeploy would discard", str(caught.exception))
+
+    def test_a_half_configured_env_still_runs_locally(self):
+        """Mid-setup, with a URL but no key yet, the local app must keep working."""
+        with patch.dict("os.environ", {"SUPABASE_URL": "https://p.supabase.co",
+                                       "SUPABASE_SERVICE_KEY": ""}):
+            self.assertIsNone(supabase_store.settings())
+            reported = dict((message, ok) for ok, message in supabase_store.check())
+        self.assertTrue(any("SUPABASE_SERVICE_KEY is empty" in m for m in reported))
 
 
 if __name__ == "__main__":

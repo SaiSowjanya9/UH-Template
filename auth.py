@@ -25,6 +25,20 @@ class AuthError(ValueError):
     pass
 
 
+def key_headers(key):
+    """Headers that authenticate a key of either generation.
+
+    The newer publishable/secret keys (`sb_publishable_…`, `sb_secret_…`) are opaque
+    strings, not JWTs, so they belong only on `apikey`; anything expecting a bearer
+    token rejects them. The legacy `anon`/`service_role` keys are JWTs and are sent on
+    both headers, which is how PostgREST resolves their Postgres role.
+    """
+    headers = {"apikey": key}
+    if not key.startswith("sb_"):
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
 def settings():
     """Read the sign-in configuration, or None when the app runs without login."""
     url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
@@ -69,7 +83,7 @@ def sign_in(email, password, config=None, session=None):
     try:
         response = client.post(f"{config['url']}/auth/v1/token", params={"grant_type": "password"},
                                json={"email": email, "password": password},
-                               headers={"apikey": config["key"], "Content-Type": "application/json"},
+                               headers={**key_headers(config["key"]), "Content-Type": "application/json"},
                                timeout=TIMEOUT)
     except requests.RequestException:
         raise AuthError("The sign-in service is unreachable. Try again shortly.") from None
@@ -102,8 +116,8 @@ def create_user(email, password=None, session=None):
     client = session or requests
     response = client.post(f"{url}/auth/v1/admin/users",
                            json={"email": email, "password": password, "email_confirm": True},
-                           headers={"apikey": service_key, "Authorization": f"Bearer {service_key}",
-                                    "Content-Type": "application/json"}, timeout=TIMEOUT)
+                           headers={**key_headers(service_key), "Content-Type": "application/json"},
+                           timeout=TIMEOUT)
     if response.status_code >= 400:
         detail = ""
         try:

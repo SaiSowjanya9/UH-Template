@@ -31,13 +31,17 @@ class ConfigError(RuntimeError):
 
 
 def settings():
-    """Read the Supabase configuration, or None when the app is running on a local file."""
+    """Read the Supabase configuration, or None when the app is running on a local file.
+
+    A half-filled .env counts as "not configured" rather than an error, so the local app
+    keeps working while hosting is still being set up. `check()` reports the gap, the
+    sidebar shows LOCAL rather than HOSTED, and `app.check_exposure()` refuses to serve
+    a non-local bind off a local file, which is the case that would actually lose data.
+    """
     url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
-    key = os.getenv("SUPABASE_SERVICE_KEY") or ""
-    if not url and not key:
-        return None
+    key = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
     if not url or not key:
-        raise ConfigError("Set both SUPABASE_URL and SUPABASE_SERVICE_KEY, or neither.")
+        return None
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+", url):
         raise ConfigError("SUPABASE_URL must look like https://<project>.supabase.co.")
     return {"url": url, "key": key,
@@ -49,9 +53,12 @@ class Supabase:
     """Just enough of the Storage and PostgREST APIs, over the requests already in use."""
 
     def __init__(self, config):
+        import auth     # local import keeps the dependency one-way
         self.url, self.bucket = config["url"], config["bucket"]
         self.session = requests.Session()
-        self.session.headers.update({"apikey": config["key"], "Authorization": f"Bearer {config['key']}",
+        # Keep this User-Agent non-browser-like: secret keys are rejected with 401 when the
+        # request looks like it came from a browser.
+        self.session.headers.update({**auth.key_headers(config["key"]),
                                      "User-Agent": "UH-Homes-Selections/1.0"})
 
     def _check(self, response, action):
@@ -272,7 +279,10 @@ def check():
     except ConfigError as error:
         return [(False, str(error))]
     if not config:
-        return [(False, "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env.")]
+        for key in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY"):
+            note(bool((os.getenv(key) or "").strip()), f"{key} is set." if (os.getenv(key) or "").strip()
+                 else f"{key} is empty in .env. Both are needed before the workbook can be hosted.")
+        return results
     note(True, f"Configured for {config['url']} (bucket '{config['bucket']}').")
 
     api = Supabase(config)
