@@ -1,17 +1,14 @@
 import datetime as dt
 import hashlib
 import json
-import os
-import tempfile
 import threading
 import time
 from collections import defaultdict
-from pathlib import Path
 
 import common
 import find_urls
 from workbook_store import (ConflictError, IDENTITY_FIELDS, ValidationError, http_url, put, records,
-                            validate_values, SELECTION_FIELDS, workbook_open_elsewhere)
+                            validate_values, SELECTION_FIELDS)
 
 
 def digest(value):
@@ -39,39 +36,40 @@ class AutoLookup:
     def __init__(self, store, provider_info, search=None):
         self.store, self.provider_info = store, provider_info
         self.search = search or find_urls.lookup
-        self.state_path = store.path.parent / "lookup_state" / f"{digest(store.path.resolve())[:16]}.json"
+        self.state = store.state()
+        # A hosted workbook is only changed through this app, so there is no Excel edit to catch
+        # promptly and no reason to poll Supabase as often as a local file on disk.
+        self.interval = 10 if store.remote else 2
         self.entries, self.pending = {}, {}
         self.initialized = False
         self.message = ""
         self._saved = ""
         self._stop = threading.Event()
         self._thread = None
-        if self.state_path.exists():
+        saved = self.state.read()
+        if saved is not None:
             try:
-                data = json.loads(self.state_path.read_text(encoding="utf-8"))
+                data = json.loads(saved)
                 self.entries, self.pending = data["entries"], data["pending"]
                 self.initialized = True
                 for job in self.pending.values():
                     if job["phase"] == "searching":
                         job["phase"] = "queued"
             except (ValueError, KeyError, TypeError):
-                stamp_name = f"{self.state_path.name}.corrupt-{dt.datetime.now():%Y%m%d_%H%M%S}"
-                self.state_path.rename(self.state_path.with_name(stamp_name))
-                self.message = "Automatic lookup history was unreadable; the unreadable file was set aside and history rebuilt."
+                self.state.set_aside()
+                self.message = "Automatic lookup history was unreadable; the unreadable copy was set aside and history rebuilt."
+
+    @property
+    def state_path(self):
+        """The lookup history file, for the local backend only (tests, troubleshooting)."""
+        return self.state.path
 
     def _persist(self):
         content = json.dumps({"entries": self.entries, "pending": self.pending}, sort_keys=True)
         if content == self._saved:
             return
-        self.state_path.parent.mkdir(exist_ok=True)
-        handle, name = tempfile.mkstemp(suffix=".json", dir=self.state_path.parent)
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as output:
-                output.write(content)
-            os.replace(name, self.state_path)
-            self._saved = content
-        finally:
-            Path(name).unlink(missing_ok=True)
+        self.state.write(content)
+        self._saved = content
 
     def observe(self, wb):
         with self.store.lock:
@@ -123,7 +121,7 @@ class AutoLookup:
             self._persist()
 
     def excel_open(self):
-        return workbook_open_elsewhere(self.store.path)
+        return self.store.locked_elsewhere()
 
     def status(self):
         with self.store.lock:
@@ -267,7 +265,7 @@ class AutoLookup:
                 self.message = f"Fix the workbook before lookup can continue: {error}"
             except Exception:
                 self.message = "The workbook or lookup history is temporarily unavailable. Automatic lookup will retry."
-            self._stop.wait(2)
+            self._stop.wait(self.interval)
 
     def start(self):
         if self._thread is None:

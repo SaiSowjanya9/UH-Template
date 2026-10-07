@@ -690,6 +690,16 @@ class AppTests(unittest.TestCase):
         history = (self.path.parent / "backups" / "history.jsonl").read_text().strip().splitlines()
         self.assertEqual(len(history), 4)
 
+    def test_copies_saved_in_the_same_second_are_ordered_precisely(self):
+        """Several saves can land in one second, so microseconds must decide the order."""
+        folder = self.path.parent / "backups"
+        folder.mkdir(exist_ok=True)
+        for micro in ["9", "100000", "20000"]:
+            (folder / f"{self.path.stem}_20250101_120000_{micro}.xlsx").write_bytes(b"copy")
+        listed = [entry["name"] for entry in self.client.get("/api/backups").json["backups"]]
+        self.assertEqual(listed, [f"{self.path.stem}_20250101_120000_{micro}.xlsx"
+                                  for micro in ["100000", "20000", "9"]])
+
     def test_csrf_and_host_protection(self):
         self.assertEqual(self.client.post("/api/projects", json={}).status_code, 403)
         self.assertEqual(self.client.get("/", headers={"Host": "attacker.example"}).status_code, 400)

@@ -12,7 +12,7 @@
 <body>
   <aside class="sidebar">
     <a href="/" class="brand" aria-label="UH Homes home"><img class="brand-wordmark" src="/brand/wordmark.png" alt="UH Homes"><img class="brand-symbol" src="/brand/symbol.png" alt="UH Homes"><small>SELECTIONS STUDIO</small></a>
-    <div class="workspace-label">YOUR WORKSPACE <span>LOCAL</span></div>
+    <div class="workspace-label">YOUR WORKSPACE <span>{{ workspace }}</span></div>
     <nav aria-label="Workspace navigation">
       <button class="nav-item active" data-view="selections" title="Selection tracker"><span class="nav-symbol">▦</span> Selection tracker</button>
       <button class="nav-item" data-view="spec" title="Spec sheet"><span class="nav-symbol">▤</span> Spec sheet</button>
@@ -24,7 +24,8 @@
     <div class="sidebar-bottom">
       <button class="nav-item" data-view="manufacturers" title="Manufacturers"><span class="nav-symbol">◫</span> Manufacturers</button>
       <button id="setup-button" class="nav-item" title="Setup &amp; workbook"><span class="nav-symbol">⚙</span> Setup &amp; workbook</button>
-      <div class="local-note"><span class="status-dot"></span><div>Project workspace<small>Local preview · Hosting not configured</small></div></div>
+      <div class="local-note"><span class="status-dot"></span><div>Project workspace<small>{% if workspace == "HOSTED" %}Hosted workspace · Saved to Supabase{% else %}Local preview · Hosting not configured{% endif %}</small>{% if user %}<small>{{ user }}</small>{% endif %}</div></div>
+      {% if can_sign_out %}<button id="sign-out" class="text-button">Sign out</button>{% endif %}
     </div>
   </aside>
   <div class="app-shell">

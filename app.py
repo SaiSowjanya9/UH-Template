@@ -9,13 +9,16 @@ import tempfile
 import threading
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
+import auth
 import build_lookbook
 import common
 import find_urls
 import spec_template
+import supabase_store
 from auto_lookup import AutoLookup
 from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
                             PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES, ValidationError,
@@ -23,18 +26,65 @@ from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPT
                             put, records, stale_check, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
+LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
+HOST = os.getenv("UH_HOST", "127.0.0.1")
+# Anything but a loopback bind is reachable by others, so it must carry sign-in.
+LOCAL_ONLY = HOST in {"127.0.0.1", "localhost", "::1"}
+AUTH = auth.settings()
+REQUIRE_LOGIN = bool(AUTH) and os.getenv("UH_REQUIRE_LOGIN", "1") != "0"
+
+
+def open_store():
+    """The workbook in Supabase Storage when configured, otherwise the local file."""
+    config = supabase_store.settings()
+    if config:
+        return WorkbookStore(supabase_store.SupabaseBackend(config))
+    return WorkbookStore(common.WORKBOOK)
+
+
+def trusted_hosts():
+    extra = [name.strip() for name in (os.getenv("UH_TRUSTED_HOSTS") or "").split(",") if name.strip()]
+    return LOCAL_HOSTS + extra
+
+
 app = Flask(__name__, template_folder=str(BASE), static_folder=None)
-app.config.update(MAX_CONTENT_LENGTH=8 * 1024 * 1024, TRUSTED_HOSTS=["localhost", "127.0.0.1", "[::1]"])
-store = WorkbookStore(common.WORKBOOK)
+app.config.update(MAX_CONTENT_LENGTH=8 * 1024 * 1024, TRUSTED_HOSTS=trusted_hosts(),
+                  SECRET_KEY=os.getenv("UH_SECRET_KEY") or secrets.token_hex(32),
+                  SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=not LOCAL_ONLY,
+                  PERMANENT_SESSION_LIFETIME=dt.timedelta(hours=12))
+if not LOCAL_ONLY:
+    # Behind a hosting proxy, so trust its forwarded scheme and host for secure cookies.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+store = open_store()
 TOKEN = secrets.token_urlsafe(32)
 EXPORT_LOCK = threading.Lock()
+THROTTLE = auth.Throttle()
+# Reachable without a session: the sign-in page and the assets and health check it needs.
+OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz"}
 automation = None
+
+
+def csrf_token():
+    """Per-session when signed in, per-process when running locally without login."""
+    if not REQUIRE_LOGIN:
+        return TOKEN
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_urlsafe(32)
+    return session["csrf"]
 
 
 @app.before_request
 def guard():
+    if request.endpoint == "login":
+        return None                 # the sign-in form carries its own token as a field
+    if REQUIRE_LOGIN and not session.get("user") and request.endpoint not in OPEN_ENDPOINTS:
+        if request.path.startswith("/api/"):
+            return jsonify(error="Your session has ended. Sign in again to continue."), 401
+        return redirect(url_for("login", next=request.full_path if request.method == "GET" else None))
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
-        if not secrets.compare_digest(request.headers.get("X-UH-Token", ""), TOKEN):
+        expected = session.get("csrf") if REQUIRE_LOGIN else TOKEN
+        if not expected or not secrets.compare_digest(request.headers.get("X-UH-Token", ""), expected):
             return jsonify(error="This page has expired. Refresh and try again."), 403
 
 
@@ -65,7 +115,56 @@ def error_response(error):
 
 @app.get("/")
 def index():
-    return render_template("ui.html", token=TOKEN)
+    user = session.get("user") or {}
+    return render_template("ui.html", token=csrf_token(), workspace="HOSTED" if store.remote else "LOCAL",
+                           user=user.get("email", ""), can_sign_out=REQUIRE_LOGIN)
+
+
+@app.get("/healthz")
+def healthz():
+    """A liveness check the host can poll without a session."""
+    return jsonify(ok=True)
+
+
+def safe_next(target):
+    """Only ever redirect back into this app."""
+    if target and target.startswith("/") and not target.startswith("//"):
+        return target
+    return url_for("index")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not REQUIRE_LOGIN:
+        return redirect(url_for("index"))
+    target = safe_next(request.values.get("next"))
+    if session.get("user"):
+        return redirect(target)
+    if request.method == "GET":
+        return render_template("login.html", token=csrf_token(), next=target, error="")
+    expected = session.get("csrf", "")
+    if not expected or not secrets.compare_digest(request.form.get("token", ""), expected):
+        return render_template("login.html", token=csrf_token(), next=target,
+                               error="That sign-in form expired. Try again."), 400
+    source = request.remote_addr or "unknown"
+    try:
+        THROTTLE.check(source)
+        user = auth.sign_in(request.form.get("email"), request.form.get("password"), AUTH)
+    except auth.AuthError as error:
+        THROTTLE.record(source)
+        return render_template("login.html", token=csrf_token(), next=target, error=str(error)), 401
+    THROTTLE.clear(source)
+    session.clear()              # a fresh session id and token, so a pre-login cookie cannot be reused
+    session["user"] = user
+    session.permanent = True
+    csrf_token()
+    return redirect(target)
+
+
+@app.post("/api/logout")
+def logout():
+    session.clear()
+    return jsonify(ok=True)
 
 
 @app.get("/favicon.ico")
@@ -115,7 +214,7 @@ def state():
                        statuses=STATUSES, client_statuses=CLIENT_STATUSES, stale_days=180,
                        revision=revision, provider=provider_info(),
                        automation=automation.status() if automation else {"enabled": False, "pending": [], "message": ""},
-                       workbook=store.path.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
+                       workbook=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
 
 @app.post("/api/automation/retry")
@@ -506,54 +605,31 @@ def import_spec_csv():
 
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_\d+\.xlsx$")
 
 
 @app.get("/api/workbook")
 def export_workbook():
-    with store.lock:
-        raw = store.path.read_bytes()
-    name = store.path.name
+    raw = store.read_bytes()
+    name = store.name
     if request.args.get("backup"):
-        name = f"{store.path.stem}_backup_{dt.date.today().isoformat()}.xlsx"
+        name = f"{Path(name).stem}_backup_{dt.date.today().isoformat()}.xlsx"
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=name, mimetype=XLSX_MIME)
-
-
-def backup_folder():
-    return store.path.parent / "backups"
 
 
 @app.get("/api/backups")
 def list_backups():
     """Earlier copies kept automatically before each save, newest first."""
-    out = []
-    for path in backup_folder().glob("*.xlsx"):
-        match = BACKUP_PATTERN.match(path.name)
-        if not match:
-            continue
-        try:
-            when = dt.datetime.strptime(match[1] + match[2], "%Y%m%d%H%M%S")
-        except ValueError:
-            continue
-        out.append({"name": path.name, "when": when.isoformat(timespec="seconds"),
-                    "size": path.stat().st_size})
-    out.sort(key=lambda entry: entry["when"], reverse=True)
-    return jsonify(backups=out)
+    return jsonify(backups=store.backups())
 
 
 @app.post("/api/backups/restore")
 def restore_backup():
     data = payload()
     name = common.clean(data.get("name"))
-    if not BACKUP_PATTERN.match(name):
-        raise ValidationError("Choose one of the saved copies listed here.")
-    path = backup_folder() / name
-    if path.parent.resolve() != backup_folder().resolve() or not path.is_file():
-        raise ValidationError("That saved copy is no longer available. Refresh and try again.")
     with store.lock:
         current(data)
-        # import_bytes validates the copy and backs up today's workbook before replacing it
-        store.import_bytes(path.read_bytes(), data["revision"])
+        # import_bytes validates the copy and backs up the live workbook before replacing it
+        store.import_bytes(store.read_backup(name), data["revision"])
         if automation:
             automation.observe(store.snapshot()[0])
     return jsonify(ok=True, name=name)
@@ -695,19 +771,45 @@ def presentation():
     return send_file(io.BytesIO(raw), as_attachment=not preview, download_name=output.name, mimetype=mime)
 
 
-if __name__ == "__main__":
-    import argparse
-    import atexit
-    parser = argparse.ArgumentParser(description="Run the local UH Homes selection tracker.")
-    parser.add_argument("--port", type=int, default=5000)
-    args = parser.parse_args()
-    if not 1 <= args.port <= 65535:
-        parser.error("Port must be between 1 and 65535.")
+def check_exposure():
+    """Refuse to serve beyond this machine without sign-in, so a misconfigured host cannot leak client data."""
+    if LOCAL_ONLY:
+        return
+    if not REQUIRE_LOGIN:
+        raise SystemExit("Refusing to start: UH_HOST is not local but sign-in is not configured. "
+                         "Set SUPABASE_URL and SUPABASE_ANON_KEY, and leave UH_REQUIRE_LOGIN unset.")
+    if not os.getenv("UH_SECRET_KEY"):
+        raise SystemExit("Refusing to start: set UH_SECRET_KEY to a long random value so sessions "
+                         "survive restarts and cannot be forged.")
+    if not os.getenv("UH_TRUSTED_HOSTS"):
+        raise SystemExit("Refusing to start: set UH_TRUSTED_HOSTS to this deployment's hostname, "
+                         "for example uh-selections.onrender.com.")
+
+
+def start_automation():
+    """Begin watching for product changes. Call once per process, after the store is ready."""
+    global automation
     automation = AutoLookup(store, provider_info)
     automation.observe(store.snapshot()[0])
     automation.start()
-    atexit.register(automation.stop)
+    return automation
+
+
+check_exposure()
+
+if __name__ == "__main__":
+    import argparse
+    import atexit
+    parser = argparse.ArgumentParser(description="Run the UH Homes selection tracker.")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "5000")))
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("Port must be between 1 and 65535.")
+    atexit.register(start_automation().stop)
     print("Automatic lookup watches saved app and Excel edits while this process is running.")
-    print(f"UH Homes Selections: http://127.0.0.1:{args.port}")
-    print("Local access only. Close the master workbook in Excel before saving changes.")
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    print(f"UH Homes Selections: http://{HOST}:{args.port}")
+    if store.remote:
+        print("Workbook stored in Supabase. Sign-in required." if REQUIRE_LOGIN else "Workbook stored in Supabase.")
+    else:
+        print("Local access only. Close the master workbook in Excel before saving changes.")
+    app.run(host=HOST, port=args.port, debug=False)

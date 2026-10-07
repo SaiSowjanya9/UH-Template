@@ -26,7 +26,12 @@ async function api(path, body, binary = false) {
     options.body = JSON.stringify({ revision: state.data?.revision, ...body });
   }
   let response;
-  try { response = await fetch(path, options); } catch { throw new Error("Cannot reach the local app. Make sure it is running, then retry."); }
+  try { response = await fetch(path, options); } catch { throw new Error("Cannot reach the app. Make sure it is running, then retry."); }
+  if (response.status === 401) {
+    // The session ended on the hosted workspace, so collect a new one rather than losing the edit.
+    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+    throw new Error("Your session has ended. Redirecting you to sign in again.");
+  }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     throw new Error(detail.error || `Request failed (${response.status}).`);
@@ -800,6 +805,11 @@ $("backup-list").addEventListener("click", (event) => {
   });
 });
 $("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workbook refreshed."); }));
+// Only rendered on the hosted workspace, where there is a session to end.
+$("sign-out")?.addEventListener("click", () => action(async () => {
+  await api("/api/logout", {});
+  window.location.assign("/login");
+}));
 $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
 $("export-pdf").addEventListener("click", () => openScheduleDialog("pdf"));

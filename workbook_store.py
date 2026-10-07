@@ -24,6 +24,8 @@ STATUSES = ["Not run", "Found - verify", "Found - retailer", "Multiple matches",
 IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
 BACKUP_KEEP = 30
 STALE_DAYS = 180
+# Saved copies are named <workbook stem>_<date>_<time>_<microseconds>.xlsx
+BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
@@ -366,68 +368,102 @@ def delete_record(wb, name, row):
     ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
 
 
-class WorkbookStore:
+def history_entry(note):
+    return {"ts": dt.datetime.now().isoformat(timespec="seconds"), "note": note or "save"}
+
+
+class FileState:
+    """A small JSON side-file, written atomically (the automatic lookup history)."""
+
     def __init__(self, path):
         self.path = Path(path)
-        self.lock = threading.RLock()
 
-    def snapshot(self):
-        with self.lock:
-            raw = self.path.read_bytes()
-            wb = load_workbook(io.BytesIO(raw), keep_links=False)
-            validate_workbook(wb)
-            return wb, hashlib.sha256(raw).hexdigest()
+    def read(self):
+        return self.path.read_text(encoding="utf-8") if self.path.exists() else None
 
-    def _history(self, backup_dir, note):
-        entry = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "note": note or "save"}
-        with (backup_dir / "history.jsonl").open("a", encoding="utf-8") as log:
-            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    def write(self, content):
+        self.path.parent.mkdir(exist_ok=True)
+        handle, name = tempfile.mkstemp(suffix=".json", dir=self.path.parent)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as output:
+                output.write(content)
+            os.replace(name, self.path)
+        finally:
+            Path(name).unlink(missing_ok=True)
 
-    def _prune_backups(self, backup_dir):
-        copies = sorted(backup_dir.glob(f"{self.path.stem}_*.xlsx"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in copies[BACKUP_KEEP:]:
+    def set_aside(self):
+        self.path.rename(self.path.with_name(f"{self.path.name}.corrupt-{dt.datetime.now():%Y%m%d_%H%M%S}"))
+
+
+class LocalBackend:
+    """The master workbook as a file beside the app: Excel can open it, backups sit in ./backups.
+
+    This is the single-user arrangement the tracker was built for. Concurrency rests on the
+    revision hash alone, so only one process may write at a time.
+    """
+
+    remote = False
+
+    def __init__(self, path):
+        self.path = Path(path)
+
+    @property
+    def name(self):
+        return self.path.name
+
+    @property
+    def backup_dir(self):
+        return self.path.parent / "backups"
+
+    def read(self):
+        raw = self.path.read_bytes()
+        return raw, hashlib.sha256(raw).hexdigest()
+
+    def revision(self):
+        return hashlib.sha256(self.path.read_bytes()).hexdigest()
+
+    def locked_elsewhere(self):
+        return workbook_open_elsewhere(self.path)
+
+    def backup(self):
+        self.backup_dir.mkdir(exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        shutil.copy2(self.path, self.backup_dir / f"{self.path.stem}_{stamp}.xlsx")
+
+    def _copies(self):
+        """Saved copies newest first, ordered by the microseconds in their names.
+
+        Several saves can land in the same second, so neither the second-precision
+        timestamp nor the filesystem's modification time can order them reliably.
+        """
+        found = []
+        for path in self.backup_dir.glob(f"{self.path.stem}_*.xlsx"):
+            match = BACKUP_PATTERN.match(path.name)
+            if match:
+                found.append(((match[1], match[2], int(match[3])), path, match))
+        found.sort(key=lambda entry: entry[0], reverse=True)
+        return found
+
+    def write(self, wb, revision):
+        handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
+        os.close(handle)
+        try:
+            wb.save(temp)
+            if self.revision() != revision:
+                raise ConflictError("The workbook changed during the save. Refresh and retry.")
+            os.replace(temp, self.path)
+        finally:
+            Path(temp).unlink(missing_ok=True)
+        for _, old, _ in self._copies()[BACKUP_KEEP:]:
             old.unlink(missing_ok=True)
 
-    def save(self, wb, revision, note=""):
-        with self.lock:
-            validate_workbook(wb)
-            if hashlib.sha256(self.path.read_bytes()).hexdigest() != revision:
-                raise ConflictError("The workbook changed. Refresh the page before saving again.")
-            if workbook_open_elsewhere(self.path):
-                raise PermissionError("The workbook is open in another program.")
-            backup_dir = self.path.parent / "backups"
-            backup_dir.mkdir(exist_ok=True)
-            stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            shutil.copy2(self.path, backup_dir / f"{self.path.stem}_{stamp}.xlsx")
-            ensure_selection_columns(wb)
-            ensure_list_values(wb)
-            ensure_validations(wb)
-            ensure_project_formulas(wb)
-            from price_schedule import rebuild   # local import: price_schedule reads build_lookbook
-            rebuild(wb)
-            handle, temp = tempfile.mkstemp(suffix=".xlsx", dir=self.path.parent)
-            os.close(handle)
-            try:
-                wb.save(temp)
-                if hashlib.sha256(self.path.read_bytes()).hexdigest() != revision:
-                    raise ConflictError("The workbook changed during the save. Refresh and retry.")
-                os.replace(temp, self.path)
-            finally:
-                Path(temp).unlink(missing_ok=True)
-            self._prune_backups(backup_dir)
-            self._history(backup_dir, note)
-
     def log(self, note):
-        """Append a history entry without touching the workbook (e.g. an export with no row changes)."""
-        with self.lock:
-            backup_dir = self.path.parent / "backups"
-            backup_dir.mkdir(exist_ok=True)
-            self._history(backup_dir, note)
+        self.backup_dir.mkdir(exist_ok=True)
+        with (self.backup_dir / "history.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps(history_entry(note), ensure_ascii=False) + "\n")
 
     def count_notes(self, prefix):
-        """How many history entries start with prefix - used to number export revisions."""
-        path = self.path.parent / "backups" / "history.jsonl"
+        path = self.backup_dir / "history.jsonl"
         if not path.exists():
             return 0
         count = 0
@@ -438,6 +474,99 @@ class WorkbookStore:
             except ValueError:
                 continue
         return count
+
+    def backups(self):
+        out = []
+        for _, path, match in self._copies():
+            try:
+                when = dt.datetime.strptime(match[1] + match[2], "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            out.append({"name": path.name, "when": when.isoformat(timespec="seconds"), "size": path.stat().st_size})
+        return out
+
+    def read_backup(self, name):
+        path = self.backup_dir / name
+        if path.parent.resolve() != self.backup_dir.resolve() or not path.is_file():
+            raise ValidationError("That saved copy is no longer available. Refresh and try again.")
+        return path.read_bytes()
+
+    def state(self):
+        key = hashlib.sha256(str(self.path.resolve()).encode("utf-8")).hexdigest()[:16]
+        return FileState(self.path.parent / "lookup_state" / f"{key}.json")
+
+
+class WorkbookStore:
+    """Validation, repair and compare-and-swap around whichever backend holds the workbook."""
+
+    def __init__(self, backend):
+        self.backend = LocalBackend(backend) if isinstance(backend, (str, os.PathLike)) else backend
+        self.lock = threading.RLock()
+
+    @property
+    def path(self):
+        """The workbook file, for the local backend only (Excel integration, tests)."""
+        return self.backend.path
+
+    @property
+    def name(self):
+        return self.backend.name
+
+    @property
+    def remote(self):
+        return self.backend.remote
+
+    def read_bytes(self):
+        with self.lock:
+            return self.backend.read()[0]
+
+    def locked_elsewhere(self):
+        return self.backend.locked_elsewhere()
+
+    def state(self):
+        return self.backend.state()
+
+    def snapshot(self):
+        with self.lock:
+            raw, revision = self.backend.read()
+            wb = load_workbook(io.BytesIO(raw), keep_links=False)
+            validate_workbook(wb)
+            return wb, revision
+
+    def save(self, wb, revision, note=""):
+        with self.lock:
+            validate_workbook(wb)
+            if self.backend.revision() != revision:
+                raise ConflictError("The workbook changed. Refresh the page before saving again.")
+            if self.backend.locked_elsewhere():
+                raise PermissionError("The workbook is open in another program.")
+            self.backend.backup()
+            ensure_selection_columns(wb)
+            ensure_list_values(wb)
+            ensure_validations(wb)
+            ensure_project_formulas(wb)
+            from price_schedule import rebuild   # local import: price_schedule reads build_lookbook
+            rebuild(wb)
+            self.backend.write(wb, revision)
+            self.backend.log(note)
+
+    def log(self, note):
+        """Append a history entry without touching the workbook (e.g. an export with no row changes)."""
+        with self.lock:
+            self.backend.log(note)
+
+    def count_notes(self, prefix):
+        """How many history entries start with prefix - used to number export revisions."""
+        return self.backend.count_notes(prefix)
+
+    def backups(self):
+        """Earlier copies kept automatically before each save, newest first."""
+        return self.backend.backups()
+
+    def read_backup(self, name):
+        if not BACKUP_PATTERN.match(name):
+            raise ValidationError("Choose one of the saved copies listed here.")
+        return self.backend.read_backup(name)
 
     def import_bytes(self, raw, revision):
         try:

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Sign in · UH Homes Selections Studio</title>
+  <link rel="icon" type="image/png" href="/brand/icon.png">
+  <link rel="stylesheet" href="/assets/ui.css">
+</head>
+<body class="signin-page">
+  <main class="signin-card">
+    <div class="signin-brand"><img class="brand-wordmark" src="/brand/wordmark.png" alt="UH Homes"><small>SELECTIONS STUDIO</small></div>
+    <div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div>
+    <h2>Sign in</h2>
+    <p class="muted">Use your team account to open this workspace.</p>
+    {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('login') }}" class="signin-form">
+      <input type="hidden" name="token" value="{{ token }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="field">Email address
+        <input name="email" type="email" autocomplete="username" required autofocus maxlength="320">
+      </label>
+      <label class="field">Password
+        <input name="password" type="password" autocomplete="current-password" required maxlength="200">
+      </label>
+      <button type="submit" class="button primary full">Sign in</button>
+    </form>
+    <p class="muted">Accounts are created by your workspace administrator in Supabase.</p>
+  </main>
+</body>
+</html>

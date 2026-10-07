@@ -10,7 +10,7 @@ python -m venv .venv
 .venv\Scripts\python.exe app.py
 ```
 
-Open **http://127.0.0.1:5000**. The app runs only on this computer; it does not include shared hosting or user accounts.
+Open **http://127.0.0.1:5000**. By default the app runs only on this computer, with no user accounts. See **Hosting it for your team** below to put it online with Supabase storage and sign-in.
 
 If another service occupies port 5000, run `.venv\Scripts\python.exe app.py --port 5001` and open **http://127.0.0.1:5001** instead. The app remains bound to loopback on either port.
 
@@ -40,7 +40,63 @@ Each record supports up to 30 custom fields, with unique names of up to 80 chara
 
 Excel import/export is now under **Data tools**. Custom data is preserved in an optional `Custom Fields` JSON column on each relevant sheet. Keep this column with the rest of the row when sorting or importing. Use the web forms to edit custom fields rather than manually editing their JSON. Existing workbooks without this column remain compatible.
 
-This is still a local preview backed by Excel. Hosted deployment, shared database storage, and user authentication have not been configured.
+## Hosting it for your team
+
+The app runs in one of two modes, decided entirely by environment variables. With none set it
+behaves exactly as described above: one workbook file on your computer, no accounts, loopback
+only. Set the Supabase variables and it keeps the workbook in Supabase Storage instead, and
+requires every visitor to sign in.
+
+Supabase supplies the database, file storage and accounts; it cannot run the Python process, so
+the app itself needs a host such as Render (`render.yaml` is included).
+
+**One-time setup**
+
+1. Apply the database migration. Push `supabase/migrations/` to the GitHub branch wired to your
+   Supabase project, or run `supabase db push`. This creates the four tables and the private
+   `workbooks` bucket.
+2. Copy `.env.example` to `.env` and fill in `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` and
+   `SUPABASE_ANON_KEY` from **Project settings → API**. The service key bypasses row level
+   security: keep it on the server, never in a browser or a commit.
+3. Upload your current workbook once: `.venv\Scripts\python.exe supabase_store.py push`.
+   `supabase_store.py pull` brings a copy back down.
+4. Create each team member in **Authentication → Users** with *Auto Confirm User* enabled, and
+   leave public sign-ups disabled. There is no self-service sign-up or password reset by design,
+   so no email delivery is needed.
+5. Deploy with `render.yaml`, setting `UH_TRUSTED_HOSTS` to the service's real hostname and the
+   secrets marked `sync: false` in the dashboard.
+
+**It must run as exactly one process.** Automatic lookup is a background thread and the workbook
+is saved whole, so a second worker would run a second lookup thread and race the first's saves.
+`wsgi.py` is the entry point and `waitress-serve --threads=8` is the start command; scale with
+threads, never with instances.
+
+**Running it free.** Both Render's free web service and Supabase's free plan work, with two
+behaviours to know about. Render sleeps the service after 15 minutes idle and takes about a
+minute to wake; nothing is lost, because the workbook *and* the pending-lookup queue live in
+Supabase, but automatic lookup only progresses while someone has the app open. Supabase pauses a
+free project after a week with no database activity — it is restorable from the dashboard, but
+if the team will go quiet for longer than that, open the app (or the Supabase dashboard) once a
+week. Upgrading the Render service to Starter removes the sleeping; upgrading Supabase to Pro
+removes the pausing. Storage is a non-issue either way: 31 kept versions of this workbook are
+about 2 MB against a 1 GB allowance.
+
+**Sign-in is not optional once the app is reachable.** If `UH_HOST` is anything other than
+`127.0.0.1`, the app refuses to start unless sign-in, `UH_SECRET_KEY` and `UH_TRUSTED_HOSTS` are
+all configured — a misconfigured deployment fails loudly instead of publishing client selections
+and pricing.
+
+**How the hosted workbook is stored.** Each save uploads a new immutable `.xlsx` object and then
+advances a single pointer row in Postgres by compare-and-swap, so two processes can never both
+win a save, and earlier objects are the saved copies the app offers to restore. That means no
+disk is attached to the host, and a redeploy cannot lose data. The last 30 versions are kept.
+
+Two limitations worth knowing. Excel cannot open the hosted workbook directly — use
+**Export Excel** / **Import Excel**, or `supabase_store.py pull`, which also means the
+Excel-edit watcher only applies to the local mode. And because the whole workbook is written on
+every save, two people editing the same project at the same time will see
+*"Someone else saved first"*; the app is built for taking turns, and moving selections into
+Postgres rows is what would lift that.
 
 ## Optional command-line workflow
 
@@ -137,4 +193,10 @@ build_powerpoint.py                editable PowerPoint version
 lookbook_config.json               brand settings
 common.py                          shared helpers
 build_tracker.py                   recreates a blank workbook (only if needed)
+workbook_store.py                  validation, backups and the local file backend
+supabase_store.py                  the hosted backend, plus push/pull for the workbook
+auth.py                            team sign-in against Supabase Auth
+wsgi.py                            hosted entry point (single process)
+render.yaml                        Render deployment blueprint
+supabase/migrations/               database schema for the hosted mode
 ```

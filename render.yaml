@@ -1,0 +1,41 @@
+# Render blueprint for the hosted selections workspace.
+#
+# One worker only: automatic lookup runs as a background thread in the process and the
+# workbook is saved whole, so a second worker would race the first. Scaling means more
+# threads, never more instances.
+#
+# The workbook lives in Supabase Storage, so no disk is attached. Secrets marked
+# sync:false must be set in the Render dashboard, never committed.
+services:
+  - type: web
+    name: uh-selections
+    runtime: python
+    # The free plan sleeps after 15 minutes idle and takes ~1 minute to wake. Nothing is lost
+    # (the workbook and the pending-lookup queue both live in Supabase), but automatic lookup
+    # only progresses while someone has the app open. Change to "starter" to keep it awake.
+    plan: free
+    region: oregon           # match your Supabase project's region
+    buildCommand: pip install -r requirements.txt
+    startCommand: waitress-serve --listen=0.0.0.0:$PORT --threads=8 wsgi:application
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: UH_HOST
+        value: "0.0.0.0"     # a non-local bind, so the app requires sign-in to start
+      - key: UH_TRUSTED_HOSTS
+        value: "uh-selections.onrender.com"   # change to this service's real hostname
+      - key: UH_SECRET_KEY
+        generateValue: true  # signs session cookies; rotating it signs everyone out
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # Match whichever provider your .env uses: serpapi -> SERPAPI_API_KEY,
+      # brave -> BRAVE_API_KEY, claude -> ANTHROPIC_API_KEY.
+      - key: SEARCH_PROVIDER
+        value: serpapi
+      - key: SERPAPI_API_KEY
+        sync: false
