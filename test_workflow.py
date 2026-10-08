@@ -705,6 +705,19 @@ class AppTests(unittest.TestCase):
         self.assertEqual(listed, [f"{self.path.stem}_20250101_120000_{micro}.xlsx"
                                   for micro in ["100000", "20000", "9"]])
 
+    def test_stray_lookup_artifacts_do_not_orphan_a_row(self):
+        """A row holding only machine output (e.g. a Product URL left behind by a
+        delete) carries no user data — it must not trip the unknown-project check."""
+        import openpyxl
+        wb = openpyxl.load_workbook(self.path)
+        ws = wb["Selections"]
+        url_col = next(c.column for c in ws[1] if c.value == "Product URL")
+        ws.cell(row=ws.max_row + 2, column=url_col, value="https://example.com/stray")
+        wb.save(self.path)
+        state = self.state()
+        self.assertTrue(all(r["Item"] for r in state["selections"]))
+        self.assertNotIn("example.com/stray", str(state["selections"]))
+
     def test_csrf_and_host_protection(self):
         self.assertEqual(self.client.post("/api/projects", json={}).status_code, 403)
         self.assertEqual(self.client.get("/", headers={"Host": "attacker.example"}).status_code, 400)

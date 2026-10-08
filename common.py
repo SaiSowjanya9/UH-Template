@@ -54,9 +54,12 @@ class Sheet:
         self.ws.cell(row=row, column=self.cols[header], value=value)
 
 
-# Columns ignored when deciding whether a row is "empty"
+# Columns ignored when deciding whether a row is "empty": computed totals and every
+# column AutoLookup fills itself. A row holding only machine output (e.g. an orphan
+# Product URL left behind by a row delete) carries no user data and must not count.
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
-                   "Lookup Status", "Include in Lookbook", "Client Status"}
+                   "Lookup Status", "Include in Lookbook", "Client Status",
+                   "Checked On", "Lookup Notes", "Product URL", "Image URL", "Product Name"}
 
 
 def open_workbook(data_only=False):
