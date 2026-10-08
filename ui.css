@@ -230,7 +230,6 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .detail-entry dt { font-size:10px; color:var(--muted); margin-bottom:8px; overflow-wrap:anywhere; }
 .detail-entry dd { margin:0; font-size:13px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
 .custom-detail { border-top-color:#ddd0ac; }
-.custom-tag { display:inline-block; margin-left:8px; padding:2px 4px; font-size:7px; letter-spacing:.7px; border-radius:3px; color:#8d7342; background:var(--green-soft); }
 .custom-empty { color:var(--muted); font-size:11px; line-height:1.6; padding:15px 0 0; }
 .custom-fields-editor { margin-top:25px; border-top:1px solid var(--line); padding-top:20px; }
 .custom-fields-heading { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:12px; }

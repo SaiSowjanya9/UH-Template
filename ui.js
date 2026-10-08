@@ -158,7 +158,7 @@ function render() {
       return entry(`<dt>${esc(name)}</dt>`,
         `<input class="cell" data-project-field="${esc(name)}" type="${date ? "date" : "text"}" value="${esc(value)}" maxlength="4000" placeholder="Not provided">`);
     }).join("") + custom.map((field, index) => entry(
-      `<dt><input class="cell cell-label" data-custom-index="${index}" data-custom-key="name" value="${esc(field.name)}" maxlength="80" aria-label="Field name"><span class="custom-tag">CUSTOM</span></dt>`,
+      `<dt><input class="cell cell-label" data-custom-index="${index}" data-custom-key="name" value="${esc(field.name)}" maxlength="80" aria-label="Field name"></dt>`,
       `<input class="cell" data-custom-index="${index}" data-custom-key="value" value="${esc(field.value)}" maxlength="2000" placeholder="Not provided" aria-label="${esc(field.name)}">`, true)).join("");
     $("project-custom-empty").hidden = custom.length > 0;
   }
