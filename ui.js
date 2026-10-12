@@ -138,12 +138,7 @@ function render() {
   const stale = rows.filter((r) => r._stale).length;
   const linked = rows.filter((r) => isUrl(r["Product URL"])).length;
   const included = rows.filter((r) => r["Include in Lookbook"].toLowerCase() !== "no");
-  const auto = data.automation || { enabled: false, pending: [], message: "" };
-  const projectJobs = auto.pending.filter((job) => job.project === state.project);
   const bare = state.view === "spec";   // the spec sheet stands on its own
-  $("automation-banner").hidden = !auto.enabled || bare;
-  $("automation-message").textContent = auto.message || (auto.pending.length ? `${projectJobs.length} automatic lookup(s) pending in this project; ${auto.pending.length} across the workbook. Saved Excel edits are detected automatically. Close Excel to allow link updates.` : `Automatic lookup is watching saved app and Excel edits.${data.provider.ready ? "" : " Configure your search API key in Setup & workbook to enable searches."}`);
-  $("retry-automation").hidden = !auto.pending.some((job) => ["failed", "retry", "waiting_key"].includes(job.phase));
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
   $("project-summary").hidden = !project || state.view === "manufacturers" || bare;
   $("stats").hidden = !project || state.view === "manufacturers" || bare;
@@ -680,11 +675,6 @@ function setSidebar(collapsed) {
 try { if (localStorage.getItem("uh-sidebar") === "collapsed") setSidebar(true); } catch {}
 $("sidebar-toggle").addEventListener("click", () => setSidebar(!document.body.classList.contains("sidebar-collapsed")));
 
-$("retry-automation").addEventListener("click", () => action(async () => {
-  await api("/api/automation/retry", {});
-  await refresh();
-  toast("Automatic lookup will retry eligible selections.");
-}));
 $("add-custom-field").addEventListener("click", () => { if (!state.busy) addCustomField(); });
 $("project-save-details").addEventListener("click", () => action(async () => {
   const project = selectedProject();
