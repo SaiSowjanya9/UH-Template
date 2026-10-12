@@ -277,7 +277,9 @@ function restoreFocus() {
   state.focusSelector = null;
   if (!cell) return;
   cell.focus();
-  if (cell.type !== "date") cell.setSelectionRange?.(cell.value.length, cell.value.length);
+  if (["text", "search", "url", "tel", "password", "textarea"].includes(cell.type)) {
+    cell.setSelectionRange(cell.value.length, cell.value.length);
+  }
 }
 
 async function saveProjectField(input) {
