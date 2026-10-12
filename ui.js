@@ -2,9 +2,9 @@
 
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
-const state = { data: null, project: "", view: "selections", page: 0, reviewLimit: 24, busy: false, cancel: false, editor: null,
+const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
                 specGroup: "Section", specCollapsed: new Set(), focusSelector: null };
-const names = { selections: "Selection tracker", spec: "Spec sheet", review: "Review matches", presentation: "Client presentations", manufacturers: "Manufacturers" };
+const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
 const selectedProject = () => state.data?.projects.find((p) => p["Project ID"] === state.project);
@@ -67,9 +67,9 @@ function badge(status, phase) {
   return `<span class="status ${kind}">${esc(status || "Not run")}</span>`;
 }
 
-function thumb(row, review = false) {
-  if (isUrl(row["Image URL"])) return `<img ${review ? "" : 'class="item-thumb"'} src="${esc(row["Image URL"])}" alt="${esc(row["Item"])}" loading="lazy" referrerpolicy="no-referrer">`;
-  return review ? "<span>PRODUCT IMAGE PENDING</span>" : '<span class="item-thumb item-placeholder" aria-hidden="true">◇</span>';
+function thumb(row) {
+  if (isUrl(row["Image URL"])) return `<img class="item-thumb" src="${esc(row["Image URL"])}" alt="${esc(row["Item"])}" loading="lazy" referrerpolicy="no-referrer">`;
+  return '<span class="item-thumb item-placeholder" aria-hidden="true">◇</span>';
 }
 
 function detailValue(value) {
@@ -167,12 +167,11 @@ function render() {
   const priced = rows.filter((r) => Number(r["Unit Price"]) > 0);
   const budget = priced.reduce((sum, r) => sum + lineTotal(r), 0);
   $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete${stale ? ` · ${stale} stale` : ""}`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
-  $("review-count").textContent = rows.length - verified;
   $("page-title").textContent = names[state.view];
   // the spec sheet is the standard specification, so it is not labelled with one project
   $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
     ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
-  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", review: "The right product, down to the last detail.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
+  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
   // the spec sheet edits the same rows the schedule prints, so name the home it belongs to
   if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]} — these line items are what the client schedule prints.`;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
@@ -185,7 +184,6 @@ function render() {
   $("selection-count").textContent = rows.length;
   renderTable();
   renderSpec();
-  renderReview();
   $("export-title").placeholder = scheduleDefaults().title || "Selections";
   $("export-prefix").placeholder = scheduleDefaults().code_prefix || "EX";
   renderPreview(project, included);
@@ -335,12 +333,6 @@ async function removeSpecRow(row) {
   } finally { setBusy(false); }
 }
 
-function renderReview() {
-  const rows = projectRows().filter((r) => r["Lookup Status"] !== "Verified" || r._stale);
-  $("review-grid").innerHTML = rows.slice(0, state.reviewLimit).map((r) => `<article class="review-card"><div class="review-image">${thumb(r, true)}</div><div class="review-body">${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <span class="status">${esc(r["Client Status"])}</span>` : ""}<h3>${esc(r.Item)}</h3><p>${esc(r.Manufacturer)} · <strong>${esc(r["Model #"] || "Model pending")}</strong></p><p>${esc(r["Finish / Color"] || "Finish not specified")} / ${esc(r["Room / Area"] || r.Section)}</p>${r["Lookup Notes"] ? `<div class="review-notes">${esc(r["Lookup Notes"])}</div>` : ""}${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">Open product page ↗</a>` : '<p class="muted">No candidate link yet.</p>'}<div class="review-actions">${isUrl(r["Product URL"]) ? `<button class="button primary" data-verify="${r._row}">Mark verified</button>` : `<button class="button primary" data-lookup="${r._row}" ${r._auto_phase || !r.Manufacturer || !r["Model #"] ? "disabled" : ""}>Find product</button>`}<button class="button secondary" data-edit="${r._row}">Edit details</button>${isUrl(r["Product URL"]) ? `<button class="text-button" data-lookup="${r._row}">Search again</button>` : ""}</div></div></article>`).join("") || `<div class="empty-state"><div class="empty-icon">◇</div><h3>${projectRows().length ? "Everything checked. Beautifully done." : "Nothing to review yet."}</h3><p>${projectRows().length ? "All selections in this project are verified." : "Add selections to begin finding and reviewing product links."}</p></div>`;
-  $("more-reviews").hidden = rows.length <= state.reviewLimit;
-}
-
 function attachImageErrors() {
   document.querySelectorAll("img").forEach((img) => {
     img.onerror = () => {
@@ -400,6 +392,7 @@ function openEditor(kind, record, prefill = {}) {
   $("editor-note").hidden = !note;
   $("editor-delete").hidden = !record;
   if (record) $("editor-delete").textContent = `Delete ${kind}`;
+  $("editor-verify").hidden = !(kind === "selection" && record && isUrl(record["Product URL"]) && record["Lookup Status"] !== "Verified");
   $("editor").showModal();
 }
 
@@ -707,6 +700,7 @@ $("custom-field-rows").addEventListener("click", (event) => {
 });
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
+$("editor-verify").addEventListener("click", () => { const { record } = state.editor || {}; if (record) { $("editor").close(); action(() => verify(record._row)); } });
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
@@ -823,7 +817,6 @@ $("export-prefix").addEventListener("input", render);
 $("import-file").addEventListener("change", (event) => { const file = event.target.files[0]; event.target.value = ""; action(() => importWorkbook(file)); });
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
 $("next-page").addEventListener("click", () => { state.page++; renderTable(); });
-$("more-reviews").addEventListener("click", () => { state.reviewLimit += 24; renderReview(); attachImageErrors(); });
 for (const id of ["search", "section-filter", "status-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -831,7 +824,7 @@ document.addEventListener("click", (event) => {
   if (button.classList.contains("close-dialog")) { button.closest("dialog").close(); return; }
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
-  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.reviewLimit = 24; $("search").value = ""; $("section-filter").value = ""; render(); }
+  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; $("search").value = ""; $("section-filter").value = ""; render(); }
   if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
@@ -846,8 +839,6 @@ document.addEventListener("click", (event) => {
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));
   if (button.dataset.edit) openEditor("selection", projectRows().find((r) => r._row === Number(button.dataset.edit)));
-  if (button.dataset.verify) action(() => verify(Number(button.dataset.verify)));
-  if (button.dataset.lookup) action(() => lookup(Number(button.dataset.lookup)));
   if (button.dataset.manufacturer !== undefined) openEditor("manufacturer", state.data.manufacturers[Number(button.dataset.manufacturer)]);
 });
 
