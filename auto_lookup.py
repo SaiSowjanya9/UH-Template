@@ -129,6 +129,12 @@ class AutoLookup:
                     "pending": [{"row": int(key), "project": job["project"], "phase": job["phase"]}
                                 for key, job in self.pending.items()]}
 
+    def active(self):
+        """Rows whose lookup is still in flight. A failed job is terminal - it keeps its
+        badge via pending but must not block exports, manual searches, or verification."""
+        with self.store.lock:
+            return {key for key, job in self.pending.items() if job["phase"] != "failed"}
+
     def display_rows(self, rows):
         with self.store.lock:
             out = []

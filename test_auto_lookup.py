@@ -155,6 +155,27 @@ class AutoLookupTests(unittest.TestCase):
         self.engine.tick()
         self.assertEqual(self.search.call_count, 4)
 
+    def test_failed_lookup_keeps_its_badge_but_stops_blocking(self):
+        import app
+        row = self.rows()[0]
+        self.change(row["_row"], {"Model #": "NEW-MODEL"})
+        self.search.return_value = {"status": "Search error", "notes": "Unavailable"}
+        for _ in range(3):
+            for job in self.engine.pending.values():
+                job["retry_at"] = 0
+            self.engine.tick()
+        self.assertIn(str(row["_row"]), self.engine.pending)
+        self.assertNotIn(str(row["_row"]), self.engine.active())
+        with patch.object(app, "store", self.store), patch.object(app, "automation", self.engine), \
+             patch.object(app, "REQUIRE_LOGIN", False):
+            client = app.app.test_client()
+            headers = {"X-UH-Token": app.TOKEN}
+            revision = client.get("/api/state").json["revision"]
+            pdf = client.post("/api/presentation", headers=headers,
+                              json={"revision": revision, "project": row["Project ID"],
+                                    "format": "pdf", "mode": "draft"})
+            self.assertEqual(pdf.status_code, 200, pdf.json)
+
     def test_app_save_queues_and_exports_use_new_product(self):
         import io
         import app

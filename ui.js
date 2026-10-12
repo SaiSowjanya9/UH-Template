@@ -668,6 +668,11 @@ function setSidebar(collapsed) {
 try { if (localStorage.getItem("uh-sidebar") === "collapsed") setSidebar(true); } catch {}
 $("sidebar-toggle").addEventListener("click", () => setSidebar(!document.body.classList.contains("sidebar-collapsed")));
 
+$("retry-automation").addEventListener("click", () => action(async () => {
+  await api("/api/automation/retry", {});
+  await refresh();
+  toast("Automatic lookup will retry eligible selections.");
+}));
 $("add-custom-field").addEventListener("click", () => { if (!state.busy) addCustomField(); });
 $("project-save-details").addEventListener("click", () => action(async () => {
   const project = selectedProject();

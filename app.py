@@ -328,7 +328,7 @@ def save_selection():
         merged.update(values)
         if not merged["Project ID"] or not merged["Item"]:
             raise ValidationError("Project and item name are required.")
-        if automation and str(row) in automation.pending and values.get("Lookup Status") == "Verified":
+        if automation and str(row) in automation.active() and values.get("Lookup Status") == "Verified":
             raise ValidationError("Automatic lookup is pending for this changed product. Wait for the result or save a new manual link before verifying.")
         merged["Client Status"] = merged.get("Client Status") or "Proposed"
         if old and any(merged[k] != old[k] for k in IDENTITY_FIELDS):
@@ -363,7 +363,7 @@ def save_selection():
         store.save(wb, revision, f"selection row {row}")
         if automation:
             automation.observe(wb)
-        queued = bool(automation and str(row) in automation.pending)
+        queued = bool(automation and str(row) in automation.active())
     return jsonify(ok=True, row=row, queued=queued)
 
 
@@ -401,7 +401,7 @@ def lookup_selection(row):
     record = next((r for r in records(wb, "Selections") if r["_row"] == row), None)
     if not record:
         raise ValidationError("Selection not found.")
-    if automation and str(row) in automation.pending:
+    if automation and str(row) in automation.active():
         raise ConflictError("Automatic lookup is already queued for this product. Check its progress or use Retry automatic lookup.")
     if record["Lookup Status"] == "Verified":
         return jsonify(ok=True, skipped=True)
@@ -727,7 +727,7 @@ def presentation():
     rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
     if automation:
         with store.lock:
-            pending_rows = set(automation.pending)
+            pending_rows = automation.active()
         if mode == "verified":
             rows = [r for r in rows if str(r["_row"]) not in pending_rows]
         elif any(str(r["_row"]) in pending_rows for r in rows):
