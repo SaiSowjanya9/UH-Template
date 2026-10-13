@@ -245,6 +245,7 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 :root { --cream:#fbf8f1; --cream-deep:#f4eee1; --gold-line:#e3d7bf; --gold-ink:#8d7342; }
 .spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
 .spec-toolbar .search-field { flex:1; min-width:220px; }
+.spec-hint { font-size:10px; letter-spacing:.4px; align-self:center; }
 .chip-group { display:inline-flex; background:var(--cream); border:1px solid var(--gold-line); border-radius:999px; padding:3px; }
 .chip { border:0; background:none; border-radius:999px; padding:7px 15px; font-size:11px; font-weight:600; color:var(--gold-ink); }
 .chip.active { background:var(--gold); color:#fff; }
@@ -273,6 +274,16 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .cell.num { text-align:right; }
 .cell::placeholder { color:#c3bdaf; }
 .cell.dirty { border-color:var(--gold); }
+.spec-table tr[data-row] { cursor:grab; }
+.spec-table tr[data-row]:active { cursor:grabbing; }
+.drag-col { width:26px; padding:4px 0 4px 10px !important; }
+.drag-handle { display:inline-block; color:#b7a87f; font-size:15px; line-height:1; padding:7px 3px; opacity:.5; }
+.spec-table tr:hover .drag-handle { opacity:1; color:var(--gold-ink); }
+tr.dragging { opacity:.45; }
+tr.dragging .cell { pointer-events:none; }
+tr.drop-before td { box-shadow:inset 0 2px 0 var(--gold); }
+tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
+.spec-card.drop-end { box-shadow:0 0 0 2px var(--gold) inset; }
 .spec-line-total { font-size:12px; font-weight:600; color:#43381f; padding-right:9px; white-space:nowrap; }
 .spec-actions { display:flex; gap:2px; justify-content:flex-end; white-space:nowrap; }
 .spec-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 15px; background:#fdfbf6; border-top:1px solid #f0e9da; }

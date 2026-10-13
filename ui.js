@@ -260,7 +260,7 @@ function renderSpec() {
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
     const total = items.reduce((sum, r) => sum + lineTotal(r), 0);
     const collapsed = state.specCollapsed.has(name);
-    const body = items.map((r) => `<tr data-row="${r._row}"><td class="drag-col"><span class="drag-handle" draggable="true" data-drag="${r._row}" title="Drag to reorder" aria-label="Drag to reorder ${esc(r.Item)}">⠿</span></td>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
+    const body = items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
       <div class="spec-body"><table class="spec-table"><thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
@@ -271,7 +271,7 @@ function renderSpec() {
   $("spec-total").textContent = grand ? money(grand) : "—";
 }
 
-let specDrag = null;
+let specDrag = null, specPress = null;
 
 function clearDropMarks() {
   document.querySelectorAll(".drop-before,.drop-after,.drop-end,.dragging").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-end", "dragging"));
@@ -279,11 +279,15 @@ function clearDropMarks() {
 
 function specDragEvents() {
   const zone = $("spec-groups");
+  zone.addEventListener("mousedown", (event) => { specPress = event.target; }, true);
   zone.addEventListener("dragstart", (event) => {
-    const handle = event.target.closest(".drag-handle");
-    if (!handle || state.busy) { event.preventDefault(); return; }
-    const tr = handle.closest("tr");
-    specDrag = { row: Number(handle.dataset.drag), group: tr.closest(".spec-card")?.dataset.specName };
+    const tr = event.target;
+    if (!tr.matches || !tr.matches("tr[data-row]")) return;   // child drag such as selected input text
+    if (state.busy || (specPress && specPress.closest("input,textarea,select,button,a"))) {
+      event.preventDefault();   // presses on cells/buttons keep their normal behavior
+      return;
+    }
+    specDrag = { row: Number(tr.dataset.row), group: tr.closest(".spec-card")?.dataset.specName };
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", String(specDrag.row));
     requestAnimationFrame(() => tr.classList.add("dragging"));
