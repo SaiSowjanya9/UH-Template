@@ -312,9 +312,9 @@ function specDragEvents() {
     const card = event.target.closest(".spec-card");
     if (card) event.preventDefault();
     const tr = event.target.closest("tr[data-row]");
+    if (tr && Number(tr.dataset.row) === specDrag.row) { specDrag = null; clearDropMarks(); return; }
     const after = tr ? event.clientY >= tr.getBoundingClientRect().top + tr.getBoundingClientRect().height / 2 : false;
-    const target = tr && Number(tr.dataset.row) !== specDrag.row ? Number(tr.dataset.row) : null;
-    finishSpecDrop(target, after, card);
+    finishSpecDrop(tr ? Number(tr.dataset.row) : null, after, card);
   });
   zone.addEventListener("dragend", () => { specDrag = null; clearDropMarks(); });
 }
@@ -323,7 +323,8 @@ function finishSpecDrop(target, after, card) {
   const from = specDrag?.row;
   specDrag = null;
   clearDropMarks();
-  if (!from || state.busy) return;
+  if (!from) return;
+  if (state.busy) { toast("Wait for the current save to finish, then drag again.", true); return; }
   const all = projectRows().map((r) => r._row);
   const order = all.filter((r) => r !== from);
   let index;
@@ -721,7 +722,7 @@ async function importWorkbook(file) {
 
 let polling = false;
 setInterval(async () => {
-  if (polling || state.busy || $("editor").open || !state.data?.automation?.enabled || document.hidden) return;
+  if (polling || state.busy || specDrag || $("editor").open || !state.data?.automation?.enabled || document.hidden) return;
   if (document.activeElement?.classList?.contains("cell")) return;   // never redraw a cell being edited
   polling = true;
   try {
