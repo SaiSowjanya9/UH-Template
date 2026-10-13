@@ -260,15 +260,92 @@ function renderSpec() {
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
     const total = items.reduce((sum, r) => sum + lineTotal(r), 0);
     const collapsed = state.specCollapsed.has(name);
-    const body = items.map((r) => `<tr>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
-    return `<article class="spec-card${collapsed ? " collapsed" : ""}">
+    const body = items.map((r) => `<tr data-row="${r._row}"><td class="drag-col"><span class="drag-handle" draggable="true" data-drag="${r._row}" title="Drag to reorder" aria-label="Drag to reorder ${esc(r.Item)}">⠿</span></td>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
+    return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
-      <div class="spec-body"><table class="spec-table"><thead><tr>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
+      <div class="spec-body"><table class="spec-table"><thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button><span class="muted">${items.filter((r) => r["Lookup Status"] === "Verified").length} of ${items.length} verified</span></div>
     </article>`;
   }).join("");
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
+}
+
+let specDrag = null;
+
+function clearDropMarks() {
+  document.querySelectorAll(".drop-before,.drop-after,.drop-end,.dragging").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-end", "dragging"));
+}
+
+function specDragEvents() {
+  const zone = $("spec-groups");
+  zone.addEventListener("dragstart", (event) => {
+    const handle = event.target.closest(".drag-handle");
+    if (!handle || state.busy) { event.preventDefault(); return; }
+    const tr = handle.closest("tr");
+    specDrag = { row: Number(handle.dataset.drag), group: tr.closest(".spec-card")?.dataset.specName };
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(specDrag.row));
+    requestAnimationFrame(() => tr.classList.add("dragging"));
+  });
+  zone.addEventListener("dragover", (event) => {
+    if (!specDrag) return;
+    const card = event.target.closest(".spec-card");
+    if (!card || card.classList.contains("collapsed")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    clearDropMarks();
+    const tr = event.target.closest("tr[data-row]");
+    if (tr && Number(tr.dataset.row) !== specDrag.row) {
+      const rect = tr.getBoundingClientRect();
+      tr.classList.add(event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
+    } else if (!tr) {
+      card.classList.add("drop-end");
+    }
+  });
+  zone.addEventListener("drop", (event) => {
+    if (!specDrag) return;
+    const card = event.target.closest(".spec-card");
+    if (card) event.preventDefault();
+    const tr = event.target.closest("tr[data-row]");
+    const after = tr ? event.clientY >= tr.getBoundingClientRect().top + tr.getBoundingClientRect().height / 2 : false;
+    const target = tr && Number(tr.dataset.row) !== specDrag.row ? Number(tr.dataset.row) : null;
+    finishSpecDrop(target, after, card);
+  });
+  zone.addEventListener("dragend", () => { specDrag = null; clearDropMarks(); });
+}
+
+function finishSpecDrop(target, after, card) {
+  const from = specDrag?.row;
+  specDrag = null;
+  clearDropMarks();
+  if (!from || state.busy) return;
+  const all = projectRows().map((r) => r._row);
+  const order = all.filter((r) => r !== from);
+  let index;
+  if (target === null) {   // dropped on the group card: land after its last visible item
+    const last = card?.querySelector("tbody tr[data-row]:last-of-type");
+    index = last ? order.indexOf(Number(last.dataset.row)) + 1 : order.length;
+  } else {
+    index = order.indexOf(target) + (after ? 1 : 0);
+    if (index < 0) index = order.length;
+  }
+  order.splice(index, 0, from);
+  const updates = {};
+  const targetGroup = card?.dataset.specName;
+  if (targetGroup && state.data) {
+    const dragged = projectRows().find((r) => r._row === from);
+    const current = dragged?.[state.specGroup] || (state.specGroup === "Section" ? "Other" : "Unassigned");
+    if (targetGroup !== current) {
+      updates[from] = { [state.specGroup]: ["Other", "Unassigned"].includes(targetGroup) ? "" : targetGroup };
+    }
+  }
+  if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
+  action(async () => {
+    await api("/api/selections/order", { project: state.project, order, updates });
+    await refresh();
+    toast("Line item moved.");
+  });
 }
 
 function restoreFocus() {
@@ -705,6 +782,7 @@ $("custom-field-rows").addEventListener("click", (event) => {
   if (name && !confirm(`Remove the field “${name}”? This takes effect when you save changes.`)) return;
   row.remove();
 });
+specDragEvents();
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
 $("editor-verify").addEventListener("click", () => { const { record } = state.editor || {}; if (record) { $("editor").close(); action(() => verify(record._row)); } });

@@ -718,6 +718,35 @@ class AppTests(unittest.TestCase):
         self.assertTrue(all(r["Item"] for r in state["selections"]))
         self.assertNotIn("example.com/stray", str(state["selections"]))
 
+    def test_reorder_permutes_rows_without_losing_data(self):
+        state = self.state()
+        project = state["projects"][0]["Project ID"]
+        rows = [r for r in state["selections"] if r["Project ID"] == project]
+        first, last = rows[0], rows[-1]
+        order = [last["_row"], *[r["_row"] for r in rows[1:-1]], first["_row"]]
+        response = self.post("/api/selections/order", {"project": project, "order": order,
+                                                       "updates": {str(last["_row"]): {"Section": "Moved Section"}}})
+        self.assertEqual(response.status_code, 200, response.json)
+        after = [r for r in self.state()["selections"] if r["Project ID"] == project]
+        self.assertEqual([r["Item"] for r in after],
+                         [last["Item"], *[r["Item"] for r in rows[1:-1]], first["Item"]])
+        moved = after[0]
+        self.assertEqual(moved["Item"], last["Item"])
+        self.assertEqual(moved["Section"], "Moved Section")
+        for field in ["Manufacturer", "Model #", "Finish / Color", "Qty", "Product URL",
+                      "Client Status", "Include in Lookbook"]:
+            self.assertEqual(moved[field], last[field], field)
+
+    def test_reorder_rejects_partial_or_foreign_orders(self):
+        state = self.state()
+        project = state["projects"][0]["Project ID"]
+        rows = [r for r in state["selections"] if r["Project ID"] == project]
+        self.assertEqual(self.post("/api/selections/order",
+                                   {"project": project, "order": [r["_row"] for r in rows[1:]]}).status_code, 400)
+        foreign = next(r["_row"] for r in state["selections"] if r["Project ID"] != project)
+        self.assertEqual(self.post("/api/selections/order",
+                                   {"project": project, "order": [r["_row"] for r in rows[:-1]] + [foreign]}).status_code, 400)
+
     def test_csrf_and_host_protection(self):
         self.assertEqual(self.client.post("/api/projects", json={}).status_code, 403)
         self.assertEqual(self.client.get("/", headers={"Host": "attacker.example"}).status_code, 400)

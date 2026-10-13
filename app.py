@@ -302,6 +302,43 @@ def save_project():
     return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded)
 
 
+@app.post("/api/selections/order")
+def reorder_selections():
+    data = payload()
+    project = data.get("project")
+    order, updates = data.get("order"), data.get("updates") or {}
+    with store.lock:
+        wb, revision = current(data)
+        sheet = common.Sheet(wb["Selections"])
+        positions = sorted(r["_row"] for r in records(wb, "Selections") if r["Project ID"] == project)
+        try:
+            order = [int(row) for row in order or []]
+        except (TypeError, ValueError):
+            order = []
+        if sorted(order) != positions:
+            raise ValidationError("The new order must include every line item in this project.")
+        try:
+            updates = {int(row): values for row, values in updates.items()}
+        except (TypeError, ValueError):
+            raise ValidationError("Reordered field edits must name a line item row.")
+        if any(row not in positions for row in updates):
+            raise ValidationError("Reordered field edits must belong to this project.")
+        for row, values in updates.items():
+            put(sheet, row, validate_values(values, SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS))
+        captured = {row: {h: (cell.value, cell.hyperlink.target if cell.hyperlink else None)
+                          for h, col in sheet.cols.items()
+                          for cell in [sheet.ws.cell(row, col)]}
+                    for row in positions}
+        for pos, src in zip(positions, order):
+            for h, (value, link) in captured[src].items():
+                cell = sheet.ws.cell(pos, sheet.cols[h])
+                cell.value, cell.hyperlink = value, link
+        store.save(wb, revision, f"reorder selections in {project}")
+        if automation:
+            automation.observe(wb)
+    return jsonify(ok=True)
+
+
 @app.post("/api/selections")
 def save_selection():
     data = payload()
