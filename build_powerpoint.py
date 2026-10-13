@@ -36,10 +36,11 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W
                             group_sections, load_data, numbered, presentation_details, schedule_title, spaced_caps)
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
-FAMILY = Path(CFG.get("fonts", {}).get("body") or "Lato").stem.split("-")[0] or "Lato"
+FONTS = CFG.get("fonts", {})
+FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
 DESC_W = CONTENT_W - CODE_W - ITEM_W
-CODE, ITEM, ROOM, DESC, STATUS = (8, 12), (9, 11), (7, 9), (9, 11.5), (7, 9)   # (font size, leading)
-NOTE = (7.2, 9.5)
+CODE, ITEM, ROOM, DESC, STATUS = (9, 13), (10, 13), (8, 10.5), (10, 13), (8, 10)   # (font size, leading)
+NOTE = (8, 10.5)
 ASCENT = 0.8          # cap height used to turn a PDF baseline into a text box top
 
 
@@ -193,8 +194,8 @@ class Deck:
             self.y -= SECTION_GAP
         slide = self.room(HEADING_H + 25)
         text = spaced_caps(text)
-        label(slide, M + PAD_X, self.y - HEADING_H + 5, CONTENT_W, text, 8, COLORS["dark"], bold=True)
-        rule(slide, M + PAD_X + pdfmetrics.stringWidth(text, FONT_BB, 8) + HEADING_GAP,
+        label(slide, M + PAD_X, self.y - HEADING_H + 5, CONTENT_W, text, 10, COLORS["dark"], bold=True)
+        rule(slide, M + PAD_X + pdfmetrics.stringWidth(text, FONT_BB, 10) + HEADING_GAP,
              PAGE_W - M + HEADING_OVERHANG, self.y - HEADING_H + 8, COLORS["heading_rule"])
         self.y -= HEADING_H
 

@@ -883,6 +883,33 @@ class ScheduleTests(unittest.TestCase):
         from pypdf import PdfReader
         return "\n".join(page.extract_text() for page in PdfReader(str(path)).pages)
 
+    def test_deliverables_use_arial_for_selection_items(self):
+        import build_lookbook
+        import build_powerpoint
+        from pypdf import PdfReader
+        from pptx import Presentation
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            pdf = build_lookbook.build("SCHED", {"Project Name": "T"}, self.rows(2), False, folder,
+                                       title="Exterior Selections", prefix="EX")
+            resources = PdfReader(str(pdf)).pages[0]["/Resources"].get_object()
+            names = {str(font.get_object()["/BaseFont"]) for font in resources["/Font"].values()}
+            self.assertTrue(any("LiberationSans" in name for name in names))
+            self.assertFalse(any(name.lstrip("/").startswith("Lato") for name in names))
+            deck = build_powerpoint.build("SCHED", {"Project Name": "T"}, self.rows(2), False, folder,
+                                          title="Exterior Selections", prefix="EX")
+            runs = [run for slide in Presentation(str(deck)).slides for shape in slide.shapes
+                    if shape.has_text_frame for para in shape.text_frame.paragraphs
+                    for run in para.runs if run.text.strip()]
+            self.assertTrue(runs)
+            self.assertEqual({run.font.name for run in runs}, {"Arial"})
+            for style_, size in [(build_lookbook.CODE_STYLE, 9), (build_lookbook.ITEM_STYLE, 10),
+                                 (build_lookbook.DESC_STYLE, 10)]:
+                self.assertEqual(style_.fontSize, size)
+            for spec, size in [(build_powerpoint.CODE, 9), (build_powerpoint.ITEM, 10),
+                               (build_powerpoint.DESC, 10)]:
+                self.assertEqual(spec[0], size)
+
     def test_descriptions_are_assembled_from_workbook_columns(self):
         from build_lookbook import description
         cases = [

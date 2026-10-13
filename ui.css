@@ -94,7 +94,7 @@ main { max-width:1650px; margin:auto; padding:36px 42px 0; }
 .table-scroll { overflow-x:auto; position:relative; }
 table { border-collapse:collapse; width:100%; text-align:left; min-width:730px; }
 th { padding:12px 17px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:#faf7ec; font-size:8px; font-weight:600; letter-spacing:1px; color:#948660; white-space:nowrap; }
-td { padding:17px; font-size:11px; border-bottom:1px solid #f1ecdc; vertical-align:middle; max-width:230px; overflow-wrap:anywhere; }
+td { padding:17px; font-family:Arial,Helvetica,sans-serif; font-size:12px; border-bottom:1px solid #f1ecdc; vertical-align:middle; max-width:230px; overflow-wrap:anywhere; }
 tbody tr:last-child td { border-bottom:0; }
 tbody tr:hover { background:#fdfbf2; }
 td strong { display:block; font-size:11px; font-weight:600; color:#4a3f24; line-height:1.5; }
@@ -127,7 +127,7 @@ td small { display:block; margin-top:5px; font-size:10px; color:#988e72; line-he
 .notice.error { background:#fbefe8; border-color:#efd8cc; color:var(--red); }
 #busy-banner { position:sticky; top:12px; z-index:9; box-shadow:0 3px 15px #2e2a1f10; display:flex; align-items:center; justify-content:space-between; }
 .presentation-layout { display:grid; grid-template-columns:1.15fr 1fr; gap:35px; align-items:start; }
-.template-preview { display:flex; flex-direction:column; min-height:530px; background:white; padding:24px 26px 18px; border:1px solid var(--line); border-radius:3px; box-shadow:0 8px 28px #4a3a1812; color:#2f3337; }
+.template-preview { display:flex; flex-direction:column; min-height:530px; background:white; padding:24px 26px 18px; border:1px solid var(--line); border-radius:3px; box-shadow:0 8px 28px #4a3a1812; color:#2f3337; font-family:Arial,Helvetica,sans-serif; }
 .sheet-head { display:flex; align-items:flex-end; gap:18px; justify-content:space-between; padding-bottom:10px; border-bottom:1px solid #2f3337; }
 .sheet-head img { display:block; width:132px; max-width:45%; height:auto; }
 .sheet-title { text-align:right; line-height:1.5; }
@@ -267,7 +267,7 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-table tr:last-child td { border-bottom:0; }
 .spec-table tr:hover td { background:#fdfcf8; }
 .spec-table th.num,.spec-table td.num { text-align:right; }
-.cell { width:100%; border:1px solid transparent; background:none; border-radius:4px; padding:8px 9px; font-size:12px; color:var(--ink); }
+.cell { width:100%; border:1px solid transparent; background:none; border-radius:4px; padding:8px 9px; font-family:Arial,Helvetica,sans-serif; font-size:13px; color:var(--ink); }
 .cell:hover { border-color:#eee6d6; background:#fffdf8; }
 .cell:focus { border-color:var(--gold); background:#fff; outline:none; }
 .cell.num { text-align:right; }

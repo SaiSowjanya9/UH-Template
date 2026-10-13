@@ -76,13 +76,13 @@ def style(name, size, leading, color, font=None, align=None, **kwargs):
                           textColor=color, alignment=align or 0, **kwargs)
 
 
-CODE_STYLE = style("code", 8, 12, C["muted"])
-ITEM_STYLE = style("item", 9, 11, C["dark"])
-ROOM_STYLE = style("room", 7, 9, C["muted"])
-DESC_STYLE = style("description", 9, 11.5, C["body"])
-STATUS_STYLE = style("status", 7, 9, C["muted"], align=TA_RIGHT)
-GROUP_STYLE = style("group", 9, 12, C["dark"], font=FONT_BB, spaceBefore=8, spaceAfter=3, leftIndent=PAD_X)
-NOTE_STYLE = style("note", 7.2, 9.5, C["muted"], leftIndent=PAD_X, rightIndent=PAD_X)
+CODE_STYLE = style("code", 9, 13, C["muted"])
+ITEM_STYLE = style("item", 10, 13, C["dark"])
+ROOM_STYLE = style("room", 8, 10.5, C["muted"])
+DESC_STYLE = style("description", 10, 13, C["body"])
+STATUS_STYLE = style("status", 8, 10, C["muted"], align=TA_RIGHT)
+GROUP_STYLE = style("group", 10, 13, C["dark"], font=FONT_BB, spaceBefore=8, spaceAfter=3, leftIndent=PAD_X)
+NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PAD_X)
 
 
 # --------------------------------------------------------------------------
@@ -301,10 +301,10 @@ class Heading(Flowable):
 
     def draw(self):
         canvas = self.canv
-        place(canvas, PAD_X, 5, self.text, FONT_BB, 8, C["dark"])
+        place(canvas, PAD_X, 5, self.text, FONT_BB, 10, C["dark"])
         canvas.setStrokeColor(C["heading_rule"])
         canvas.setLineWidth(0.5)
-        canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 8) + HEADING_GAP, 8,
+        canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 10) + HEADING_GAP, 8,
                     CONTENT_W + HEADING_OVERHANG, 8)
 
 

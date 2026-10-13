@@ -18,9 +18,10 @@
     "paper": "#FFFFFF"
   },
   "fonts": {
-    "heading": "brand_assets/fonts/Lato-Regular.ttf",
-    "body": "brand_assets/fonts/Lato-Regular.ttf",
-    "body_bold": "brand_assets/fonts/Lato-Bold.ttf"
+    "family": "Arial",
+    "heading": "brand_assets/fonts/LiberationSans-Regular.ttf",
+    "body": "brand_assets/fonts/LiberationSans-Regular.ttf",
+    "body_bold": "brand_assets/fonts/LiberationSans-Bold.ttf"
   },
   "schedule": {
     "title": "Exterior Selections",
