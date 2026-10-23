@@ -131,6 +131,7 @@ function renderPreview(project, included) {
 }
 
 function render() {
+  if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
   const data = state.data;
   if (!data) return;
   const project = selectedProject(), rows = projectRows();
@@ -242,6 +243,7 @@ function specGroups(rows) {
 }
 
 function renderSpec() {
+  if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
   document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
@@ -271,7 +273,7 @@ function renderSpec() {
   $("spec-total").textContent = grand ? money(grand) : "—";
 }
 
-let specDrag = null, specPress = null;
+let specDrag = null, specPress = null, specRenderPending = false;
 
 function clearDropMarks() {
   document.querySelectorAll(".drop-before,.drop-after,.drop-end,.dragging").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-end", "dragging"));
@@ -295,7 +297,7 @@ function specDragEvents() {
   zone.addEventListener("dragover", (event) => {
     if (!specDrag) return;
     const card = event.target.closest(".spec-card");
-    if (!card || card.classList.contains("collapsed")) return;
+    if (!card) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     clearDropMarks();
@@ -316,7 +318,12 @@ function specDragEvents() {
     const after = tr ? event.clientY >= tr.getBoundingClientRect().top + tr.getBoundingClientRect().height / 2 : false;
     finishSpecDrop(tr ? Number(tr.dataset.row) : null, after, card);
   });
-  zone.addEventListener("dragend", () => { specDrag = null; clearDropMarks(); });
+  zone.addEventListener("dragend", () => {
+    specDrag = null;
+    specPress = null;
+    clearDropMarks();
+    if (specRenderPending) { specRenderPending = false; render(); }
+  });
 }
 
 function finishSpecDrop(target, after, card) {
