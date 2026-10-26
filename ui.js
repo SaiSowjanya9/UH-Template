@@ -3,7 +3,8 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
-                specGroup: "Section", specCollapsed: new Set(), focusSelector: null };
+                specGroup: "Section", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
+                specAutosave: localStorage.getItem("uh-spec-autosave") !== "off", specPending: new Map() };
 const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -43,6 +44,10 @@ async function refresh() {
   const data = await api("/api/state");
   state.data = data;
   if (!data.projects.some((p) => p["Project ID"] === state.project)) state.project = data.projects[0]?.["Project ID"] || "";
+  if (state.specPending.size) {   // never hold an edit for a line item that no longer exists
+    const live = new Set(data.selections.map((r) => r._row));
+    for (const row of [...state.specPending.keys()]) if (!live.has(row)) state.specPending.delete(row);
+  }
   $("load-error").hidden = true;
   render();
 }
@@ -92,19 +97,45 @@ function scheduleDefaults() {
 function scheduleOptions() {
   const defaults = scheduleDefaults();
   return { title: $("export-title").value.trim() || defaults.title || "Selections",
-           prefix: ($("export-prefix").value.trim() || defaults.code_prefix || "EX").toUpperCase() };
+           prefix: ($("export-prefix").value.trim() || defaults.code_prefix || "EX").toUpperCase(),
+           hidden: [...state.hidden] };
+}
+
+const isHidden = (column) => state.hidden.has(column);
+// Hiding one of these leaves a spec sheet that cannot be matched back to its lines on import.
+const CSV_KEY_COLUMNS = ["Section", "Room / Area", "Item"];
+
+function renderHideGrid(id, scope) {
+  const grid = $(id);
+  const columns = (state.data?.hideable || []).filter((column) => !scope || column.documents.includes(scope));
+  if (grid.childElementCount !== columns.length) {
+    // built once, so clicking a box never pulls the focus out from under the pointer
+    grid.innerHTML = columns.map((column) => `<label><input type="checkbox" data-hide="${esc(column.key)}">${esc(column.label)}${column.documents.includes("schedule") ? "" : " <small>· spec sheet</small>"}</label>`).join("");
+  }
+  grid.querySelectorAll("[data-hide]").forEach((box) => { box.checked = isHidden(box.dataset.hide); });
+  const count = columns.filter((column) => isHidden(column.key)).length;
+  $(`${id.replace("-grid", "")}-count`).textContent = count ? `${count} hidden` : "Showing everything";
+  const keys = CSV_KEY_COLUMNS.filter(isHidden);
+  $(`${id.replace("-grid", "")}-note`).textContent = "Hidden columns are left out of the PDF, the Word and PowerPoint copies, the fillable copies and the spec sheet."
+    + (keys.length ? ` A spec sheet without ${keys.join(" or ")} cannot be matched back to these line items when you import it again.` : "");
+}
+
+function toggleHidden(key, off) {
+  if (off) state.hidden.delete(key); else state.hidden.add(key);
+  render();
 }
 
 function rowDescription(row) {
   if (row["Description Override"]) return row["Description Override"];
-  const product = row["Product Name"] || row["Model #"];
-  let identity = [row.Manufacturer, product].filter(Boolean).join(" ");
-  let finish = row["Finish / Color"] || "";
+  const shown = (column) => (isHidden(column) ? "" : row[column] || "");
+  const product = shown("Product Name") || shown("Model #");
+  let identity = [shown("Manufacturer"), product].filter(Boolean).join(" ");
+  let finish = shown("Finish / Color");
   if (!product && finish) { identity = [identity, finish].filter(Boolean).join(" "); finish = ""; }
-  const model = row["Model #"];
+  const model = shown("Model #");
   if (model && product !== model && !identity.toLowerCase().includes(model.toLowerCase())) identity = `${identity} (Model ${model})`.trim();
-  const qty = Number(row.Qty) === 1 || !row.Qty ? "" : `Qty ${row.Qty}`;
-  return [identity, finish, qty, row["Client Notes"]].filter(Boolean).join(" \u2013 ");
+  const qty = isHidden("Qty") || Number(row.Qty) === 1 || !row.Qty ? "" : `Qty ${row.Qty}`;
+  return [identity, finish, qty, shown("Client Notes")].filter(Boolean).join(" \u2013 ");
 }
 
 function renderPreview(project, included) {
@@ -121,10 +152,15 @@ function renderPreview(project, included) {
     .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "")}</dd></div>`).join("");
   const mode = $("export-mode").value;
   const rows = (mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified") : included);
+  const itemColumn = !(isHidden("Item") && isHidden("Room / Area"));
+  const columns = `${isHidden("code") ? " no-code" : ""}${itemColumn ? "" : " no-item"}`;
   let markup = "", section = "";
   rows.slice(0, PREVIEW_ROWS).forEach((row, index) => {
-    if (row.Section !== section) { section = row.Section; markup += `<div class="sheet-section">${esc(section || "Other")}</div>`; }
-    markup += `<div class="sheet-row"><span>${esc(prefix)}-${String(index + 1).padStart(2, "0")}</span><strong>${esc(row.Item)}</strong><em>${esc(rowDescription(row))}</em></div>`;
+    if (!isHidden("Section") && row.Section !== section) { section = row.Section; markup += `<div class="sheet-section">${esc(section || "Other")}</div>`; }
+    // the schedule prints the link after the description, so the paper preview shows it there too
+    const link = isUrl(row["Product URL"]) && !isHidden("Product URL") ? ` – <a class="product-link" href="${esc(row["Product URL"])}" target="_blank" rel="noopener noreferrer">Product Link</a>` : "";
+    const item = [isHidden("Item") ? "" : esc(row.Item), isHidden("Room / Area") ? "" : esc(row["Room / Area"] || "")].filter(Boolean).join("<br>");
+    markup += `<div class="sheet-row${columns}">${isHidden("code") ? "" : `<span>${esc(prefix)}-${String(index + 1).padStart(2, "0")}</span>`}${itemColumn ? `<strong>${item}</strong>` : ""}<em>${esc(rowDescription(row))}${link}</em></div>`;
   });
   if (rows.length > PREVIEW_ROWS) markup += `<div class="sheet-more">+ ${rows.length - PREVIEW_ROWS} more selection${rows.length - PREVIEW_ROWS === 1 ? "" : "s"} in the download</div>`;
   $("preview-rows").innerHTML = markup || '<div class="sheet-more">Add selections to this project to see them here.</div>';
@@ -187,6 +223,8 @@ function render() {
   renderSpec();
   $("export-title").placeholder = scheduleDefaults().title || "Selections";
   $("export-prefix").placeholder = scheduleDefaults().code_prefix || "EX";
+  renderHideGrid("export-hide-grid");
+  renderHideGrid("schedule-hide-grid", "schedule");
   renderPreview(project, included);
   const mode = $("export-mode").value;
   const count = mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified").length : included.length;
@@ -222,6 +260,8 @@ const SPEC_COLUMNS = [
   { field: "Manufacturer", label: "BRAND", placeholder: "Brand" },
   { field: "Model #", label: "MODEL", placeholder: "Model / SKU" },
   { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish" },
+  // the product URL is stored as it always was; this column is where it is pasted and read
+  { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true },
   { field: "Qty", label: "QTY", placeholder: "1", number: true },
   { field: "Unit Price", label: "UNIT PRICE", placeholder: "—", number: true },
   { field: "Markup %", label: "MARKUP %", placeholder: "0", number: true },
@@ -257,12 +297,20 @@ function renderSpec() {
   if (!all.length) {
     $("spec-groups").innerHTML = '<div class="empty-state"><div class="empty-icon">▤</div><h3>Nothing specified yet</h3><p>Add your first line item to start building this home’s specification.</p></div>';
     $("spec-total").textContent = "—";
+    specAutosaveUI();
     return;
   }
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
     const total = items.reduce((sum, r) => sum + lineTotal(r), 0);
     const collapsed = state.specCollapsed.has(name);
-    const body = items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => `<td${c.number ? ' class="num"' : ""}><input class="cell${c.number ? " num" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(r[c.field] ?? "")}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
+    const body = items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => {
+      const pending = state.specPending.get(r._row) || {};   // unsaved edits outlive every re-render
+      const edited = c.field in pending;
+      const value = String(edited ? pending[c.field] : r[c.field] ?? "");
+      // a saved address is shown as the words "Product Link", never as the raw URL
+      const link = c.link && isUrl(value) ? `<a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer">Product Link ↗</a>` : "";
+      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}>${link}</td>`;
+    }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
       <div class="spec-body"><table class="spec-table"><thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
@@ -271,6 +319,7 @@ function renderSpec() {
   }).join("");
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
+  specAutosaveUI();
 }
 
 let specDrag = null, specPress = null, specRenderPending = false;
@@ -355,9 +404,23 @@ function finishSpecDrop(target, after, card) {
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
   action(async () => {
     await api("/api/selections/order", { project: state.project, order, updates });
+    remapPendingSpec(order, all);
     await refresh();
     toast("Line item moved.");
   });
+}
+
+function remapPendingSpec(order, all) {
+  // The server moves each row's contents to sorted position i of order[i], so unsaved
+  // edits must follow their selection instead of staying on a row number someone else now owns.
+  if (!state.specPending.size) return;
+  const positions = [...all].sort((a, b) => a - b);
+  const moved = new Map();
+  for (const [row, values] of state.specPending) {
+    const index = order.indexOf(row);
+    moved.set(index < 0 ? row : positions[index], values);
+  }
+  state.specPending = moved;
 }
 
 function restoreFocus() {
@@ -593,6 +656,7 @@ function scheduleDetails() {
                address: values.address.trim(), date: values.date },
     title: values.title.trim() || defaults.title || "Selections",
     prefix: (values.prefix.trim() || defaults.code_prefix || "EX").toUpperCase(),
+    hidden: [...state.hidden],
   };
 }
 
@@ -609,6 +673,7 @@ function openScheduleDialog(format) {
   form.date.value = (project["Presentation Date"] || "").slice(0, 10);
   form.title.value = $("export-title").value.trim() || defaults.title || "";
   form.prefix.value = $("export-prefix").value.trim() || defaults.code_prefix || "";
+  renderHideGrid("schedule-hide-grid", "schedule");
   $("schedule-error").hidden = true;
   $("schedule-frame").removeAttribute("src");
   $("schedule-dialog").showModal();
@@ -653,18 +718,21 @@ async function downloadSchedule(event) {
   } finally { setBusy(false); }
 }
 
+const FORMAT_LABELS = { pdf: "PDF", docx: "Word", pptx: "PowerPoint", form: "fillable", "form-docx": "fillable Word" };
+const FORMAT_EXTENSIONS = { pdf: "pdf", docx: "docx", pptx: "pptx", form: "pdf", "form-docx": "docx" };
+
 async function exportPresentation(format, extra = {}) {
-  const { title, prefix } = scheduleOptions();
-  const label = { pdf: "PDF", pptx: "PowerPoint", form: "fillable" }[format];
+  const { title, prefix, hidden: columns } = scheduleOptions();
+  const label = FORMAT_LABELS[format];
   const quiet = Object.keys(extra).length > 0;   // the dialog shows its own progress
   if (!quiet) setBusy(true, `Building your ${label} finish schedule…`);
   try {
-    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix, ...extra }, true);
+    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix, hidden: columns, ...extra }, true);
     const blob = await response.blob(), url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const filename = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/);
     link.href = url;
-    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${format === "pptx" ? "pptx" : "pdf"}`;
+    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${FORMAT_EXTENSIONS[format] || "pdf"}`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -803,17 +871,23 @@ $("edit-project").addEventListener("click", () => openEditor("project", selected
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
+// Word downloads skip the details dialog: its preview is an iframe, which cannot show a .docx.
+const specQuery = () => `?project=${encodeURIComponent(state.project)}&hide=${encodeURIComponent([...state.hidden].join(","))}`;
 const FILE_ACTIONS = {
   pdf: () => openScheduleDialog("pdf"),
+  docx: () => action(() => exportPresentation("docx")),
   form: () => openScheduleDialog("form"),
+  "form-docx": () => action(() => exportPresentation("form-docx")),
   pptx: () => action(() => exportPresentation("pptx")),
-  csv: () => { window.location.href = `/api/selections/csv?project=${encodeURIComponent(state.project)}`; },
+  csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
+  "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
   workbook: () => { window.location.href = "/api/workbook"; },
   "import-csv": () => $("spec-import-file").click(),
   "import-form": () => $("form-import-file").click(),
   "import-workbook": () => $("import-file").click(),
 };
-const NEEDS_PROJECT = new Set(["pdf", "form", "pptx", "csv", "import-csv", "import-form"]);
+const NEEDS_PROJECT = new Set(["pdf", "docx", "form", "form-docx", "pptx", "csv", "spec-docx",
+                               "import-csv", "import-form"]);
 
 $("files-button").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
 $("files-dialog").addEventListener("click", (event) => {
@@ -836,8 +910,54 @@ $("spec-collapse").addEventListener("click", () => {
   specGroups(projectRows()).forEach(([name]) => state.specCollapsed.add(name));
   renderSpec();
 });
+const pendingSpecCount = () => [...state.specPending.values()].reduce((sum, values) => sum + Object.keys(values).length, 0);
+
+function specAutosaveUI() {
+  const count = pendingSpecCount();
+  $("spec-autosave").textContent = `Auto-save ${state.specAutosave ? "on" : "off"}`;
+  $("spec-autosave").classList.toggle("autosave-on", state.specAutosave);
+  $("spec-save").hidden = !count;
+  $("spec-save").textContent = `Save changes${count ? ` (${count})` : ""}`;
+}
+
+async function specSaveAll() {
+  const count = pendingSpecCount();
+  if (!count) return;
+  if ([...state.specPending.values()].some((values) => "Item" in values && !values.Item)) {
+    toast("An item needs a name.", true);
+    return;
+  }
+  const batch = Object.fromEntries(state.specPending);
+  setBusy(true, "Saving changes…");
+  try {
+    await api("/api/selections", { batch });
+    state.specPending.clear();   // only once the workbook has them
+    await refresh();
+    toast(`Saved ${count} change${count === 1 ? "" : "s"}.`);
+  } finally { setBusy(false); }
+}
+
+$("spec-autosave").addEventListener("click", () => action(async () => {
+  if (!state.specAutosave && state.specPending.size) await specSaveAll();   // leaving manual mode flushes what is held
+  state.specAutosave = !state.specAutosave;
+  try { localStorage.setItem("uh-spec-autosave", state.specAutosave ? "on" : "off"); } catch {}
+  specAutosaveUI();
+}));
+
+$("spec-save").addEventListener("click", () => action(specSaveAll));
+
 $("spec-groups").addEventListener("change", (event) => {
-  if (event.target.classList.contains("cell")) action(() => saveCell(event.target));
+  if (!event.target.classList.contains("cell")) return;
+  if (state.specAutosave) return action(() => saveCell(event.target));
+  const input = event.target, row = Number(input.dataset.row), field = input.dataset.field;
+  const record = projectRows().find((r) => r._row === row);
+  const pending = state.specPending.get(row) || {};
+  if (record && String(record[field] ?? "") === input.value.trim()) delete pending[field];   // back to the saved value
+  else pending[field] = input.value.trim();
+  if (Object.keys(pending).length) state.specPending.set(row, pending);
+  else state.specPending.delete(row);
+  input.classList.toggle("dirty", field in pending);
+  specAutosaveUI();
 });
 $("project-detail-values").addEventListener("change", (event) => {
   const input = event.target;
@@ -893,6 +1013,12 @@ $("sign-out")?.addEventListener("click", () => action(async () => {
 }));
 $("find-links").addEventListener("click", () => action(() => lookup()));
 $("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
+document.querySelectorAll(".hide-grid").forEach((grid) => grid.addEventListener("change", (event) => {
+  const box = event.target.closest("[data-hide]");
+  if (box) toggleHidden(box.dataset.hide, !box.checked);
+}));
+$("export-hide-clear").addEventListener("click", () => { state.hidden.clear(); render(); });
+$("schedule-hide-clear").addEventListener("click", () => { state.hidden.clear(); render(); });
 $("export-pdf").addEventListener("click", () => openScheduleDialog("pdf"));
 $("export-more").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
 $("schedule-form").addEventListener("submit", downloadSchedule);

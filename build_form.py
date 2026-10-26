@@ -18,13 +18,17 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
 from xml.sax.saxutils import escape
 
 from build_lookbook import (BAND_FIELDS, BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, C, CFG, CODE_STYLE,
-                            CODE_W, CONTENT_W, DESC_STYLE, FIELD_GAP, FIELD_W, FONT_B, FONT_BB, Heading,
-                            ITEM_STYLE, ITEM_W, M, NOTE_STYLE, OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W,
-                            ROOM_STYLE, SCHEDULE, SECTION_GAP, SignOff, band_values, clean, code_prefix,
-                            description, furniture, group_sections, numbered, place, schedule_title)
+                            CONTENT_W, DESC_STYLE, FIELD_GAP, FIELD_W, FONT_B, FONT_BB, Heading,
+                            HIDEABLE, M, NOTE_STYLE, OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, SCHEDULE,
+                            SECTION_GAP, SignOff, band_values, clean, code_prefix, description,
+                            furniture, group_sections, item_cell, numbered, place, row_widths,
+                            schedule_title)
 
 REMOVE_W = 42           # the remove column only exists on the fillable copy
 FIELD_H = 15
+# Which columns the copy was built without, so re-importing it cannot mistake a shortened
+# description for one the client reworded by hand.
+HIDDEN_FIELD = "schedule_hidden"
 BORDER = Color(0.78, 0.74, 0.65)
 # PDF form fields accept only the standard 14 fonts, so typed text uses Helvetica
 # while every label, item and heading on the page keeps the brand font.
@@ -81,15 +85,19 @@ class RemoveBox(Flowable):
 class FormBand(Flowable):
     """The client band, with each value as a form field."""
 
-    def __init__(self, values):
+    def __init__(self, values, hidden=()):
         super().__init__()
-        self.values = values
+        self.values, self.hidden = values, hidden
 
     def wrap(self, *_):
         return CONTENT_W, BAND_H
 
     def draw(self):
         canvas = self.canv
+        canvas.acroForm.textfield(
+            name=HIDDEN_FIELD, value=",".join(sorted(self.hidden)), x=0, y=0, width=1, height=1,
+            fontName=FORM_FONT, fontSize=1, borderWidth=0, relative=True,
+            annotationFlags="hidden noview", fieldFlags="readOnly doNotSpellCheck")
         canvas.setFillColor(C["band"])
         canvas.rect(0, 0, CONTENT_W, BAND_H, stroke=0, fill=1)
         for index, (label, value) in enumerate(self.values):
@@ -104,17 +112,18 @@ class FormBand(Flowable):
                 borderColor=BORDER, borderWidth=0.5, forceBorder=True, relative=True, fieldFlags=flags)
 
 
-def rows_table(rows):
-    description_width = CONTENT_W - CODE_W - ITEM_W - REMOVE_W
+def rows_table(rows, hidden=()):
+    code_w, item_w, description_width = row_widths(hidden, REMOVE_W)
     data = []
     for row in rows:
-        item = [Paragraph(escape(clean(row.get("Item"))), ITEM_STYLE)]
-        if clean(row.get("Room / Area")):
-            item.append(Paragraph(escape(clean(row["Room / Area"])), ROOM_STYLE))
-        data.append([Paragraph(escape(row.get("_code", "")), CODE_STYLE), item,
-                     FieldCell(field_name(row["_row"], "desc"), description(row), description_width - 2 * PAD_X),
-                     RemoveBox(field_name(row["_row"], "remove"))])
-    return Table(data, colWidths=[CODE_W, ITEM_W, description_width, REMOVE_W], style=TableStyle([
+        cells = [Paragraph(escape(row.get("_code", "")), CODE_STYLE)] if code_w else []
+        if item_w:
+            cells.append(item_cell(row, hidden))
+        data.append(cells + [FieldCell(field_name(row["_row"], "desc"), description(row, hidden=hidden),
+                                       description_width - 2 * PAD_X),
+                             RemoveBox(field_name(row["_row"], "remove"))])
+    widths = [width for width in (code_w, item_w) if width]
+    return Table(data, colWidths=widths + [description_width, REMOVE_W], style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
         ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
@@ -138,13 +147,15 @@ def form_band_values(project):
             for label, value in values]
 
 
-def build(pid, project, rows, output_dir=None, title=None, prefix=None):
+def build(pid, project, rows, output_dir=None, title=None, prefix=None, hidden=()):
     title, rows = schedule_title(title), numbered(rows, code_prefix(prefix))
-    story = [FormBand(form_band_values(project)), Spacer(0, BAND_GAP)]
-    for index, (section, items) in enumerate(group_sections(rows).items()):
+    story = [FormBand(form_band_values(project), hidden), Spacer(0, BAND_GAP)]
+    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        story += [Heading(section), rows_table(items)]
+        if section:
+            story.append(Heading(section))
+        story.append(rows_table(items, hidden))
     story.append(Spacer(0, SECTION_GAP))
     story.append(KeepTogether([Paragraph(escape(clean(SCHEDULE.get("note"))), NOTE_STYLE), Spacer(0, 16),
                                SignOff(SCHEDULE.get("signatures") or [])]))
@@ -167,11 +178,11 @@ def build(pid, project, rows, output_dir=None, title=None, prefix=None):
 
 
 def read(path_or_stream):
-    """Field values from a filled form: client details, per-row text and remove ticks."""
+    """Field values from a filled form: client details, per-row text, remove ticks, hidden columns."""
     from pypdf import PdfReader
 
     fields = PdfReader(path_or_stream).get_fields() or {}
-    details, lines = {}, {}
+    details, lines, hidden = {}, {}, set()
     for name, field in fields.items():
         value = field.get("/V")
         value = "" if value is None else str(value)
@@ -185,4 +196,7 @@ def read(path_or_stream):
                 entry["remove"] = value.strip("/").lower() in {"yes", "on", "1", "true"}
         elif str(name) in {"client", "project_lot", "address", "date"}:
             details[str(name)] = clean(value)
-    return details, lines
+        elif str(name) == HIDDEN_FIELD:
+            # a form from an older copy carries no marker, which reads as "nothing was hidden"
+            hidden = {column for column in clean(value).split(",") if column in HIDEABLE}
+    return details, lines, hidden

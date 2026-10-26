@@ -5,6 +5,7 @@ Usage:
     python build_powerpoint.py --project UH-101
     python build_powerpoint.py --project UH-101 --draft
     python build_powerpoint.py --project UH-101 --title "Interior Selections" --prefix IN
+    python build_powerpoint.py --project UH-101 --hide "Manufacturer,Qty"
 
 Output: output/<ProjectID>_<Project Name>_<Schedule title>.pptx
 
@@ -29,11 +30,12 @@ from reportlab.lib.utils import simpleSplit
 
 from branding import load_logo
 from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTENT_W, FIELD_GAP,
-                            FIELD_W, FONT_B, FONT_BB, HEADING_GAP, HEADING_H, HEADING_OVERHANG, ITEM_W,
-                            LOGO_H, M, MARK_W,
-                            OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, SCHEDULE, SECTION_GAP, SIGN_H, SIGN_W,
-                            SIGN_X, STATUS_W, band_values, clean, code_prefix, description, fit,
-                            group_sections, load_data, numbered, presentation_details, schedule_title, spaced_caps)
+                            FIELD_W, FONT_B, FONT_BB, HIDEABLE, HEADING_GAP, HEADING_H, HEADING_OVERHANG,
+                            ITEM_W, LOGO_H, M, MARK_W,
+                            OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, PRODUCT_LINK, SCHEDULE, SECTION_GAP,
+                            SIGN_H, SIGN_W, SIGN_X, STATUS_W, band_values, clean, code_prefix,
+                            description, fit, group_sections, hidden_columns, load_data, numbered,
+                            presentation_details, product_link, row_widths, schedule_title, spaced_caps)
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
 FONTS = CFG.get("fonts", {})
@@ -42,6 +44,7 @@ DESC_W = CONTENT_W - CODE_W - ITEM_W
 CODE, ITEM, ROOM, DESC, STATUS = (9, 13), (10, 13), (8, 10.5), (10, 13), (8, 10)   # (font size, leading)
 NOTE = (8, 10.5)
 ASCENT = 0.8          # cap height used to turn a PDF baseline into a text box top
+LINK_SUFFIX = f" \u2013 {PRODUCT_LINK}"   # the PDF's clickable tail, in the same words
 
 
 def emu(points):
@@ -57,13 +60,15 @@ def lines(text, size, width):
     return simpleSplit(clean(text), FONT_B, size, width) or [""]
 
 
-def textbox(slide, x, y, width, height, text, size, color, bold=False, align=PP_ALIGN.LEFT, leading=None):
-    """Text box whose top edge sits at PDF height y."""
+def textbox(slide, x, y, width, height, text, size, color, bold=False, align=PP_ALIGN.LEFT, leading=None,
+            link=""):
+    """Text box whose top edge sits at PDF height y, optionally ending in a product link."""
     box = slide.shapes.add_textbox(emu(x), top(y), emu(width), emu(height))
     frame = box.text_frame
     frame.word_wrap = True
     frame.vertical_anchor = MSO_ANCHOR.TOP
     frame.margin_left = frame.margin_right = frame.margin_top = frame.margin_bottom = 0
+    paragraph = None
     for index, line in enumerate(str(text or "").split("\n")):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
         paragraph.alignment = align
@@ -72,6 +77,13 @@ def textbox(slide, x, y, width, height, text, size, color, bold=False, align=PP_
         run.text = line
         run.font.name, run.font.size, run.font.bold = FAMILY, Pt(size), bold
         run.font.color.rgb = RGBColor.from_string(color)
+    if link:
+        run = paragraph.add_run()
+        run.text = LINK_SUFFIX
+        run.font.name, run.font.size, run.font.bold = FAMILY, Pt(size), bold
+        run.font.color.rgb = RGBColor.from_string(COLORS["accent"])
+        run.font.underline = True
+        run.hyperlink.address = link
     return box
 
 
@@ -111,33 +123,40 @@ def picture(slide, source, x, baseline, height=None, width=None):
     return width
 
 
-def cell(x, width, text, font, color, offset=0, align=PP_ALIGN.LEFT, bold=False):
+def cell(x, width, text, font, color, offset=0, align=PP_ALIGN.LEFT, bold=False, link=""):
     size, leading = font
     return {"x": x, "width": width, "text": clean(text), "size": size, "leading": leading,
-            "color": color, "offset": offset, "align": align, "bold": bold}
+            "color": color, "offset": offset, "align": align, "bold": bold, "link": link}
 
 
 def cell_height(item):
-    return len(lines(item["text"], item["size"], item["width"] - 2 * PAD_X)) * item["leading"]
+    # the link is one more run in the same paragraph, so it wraps with the description
+    text = item["text"] + (LINK_SUFFIX if item["link"] else "")
+    return len(lines(text, item["size"], item["width"] - 2 * PAD_X)) * item["leading"]
 
 
-def row_cells(row, draft):
-    width = DESC_W - (STATUS_W if draft else 0)
-    item = cell(CODE_W, ITEM_W, row.get("Item"), ITEM, COLORS["dark"])
-    cells = [cell(0, CODE_W, row.get("_code"), CODE, COLORS["muted"]), item,
-             cell(CODE_W + ITEM_W, width, description(row), DESC, COLORS["body"])]
-    if clean(row.get("Room / Area")):
-        cells.append(cell(CODE_W, ITEM_W, row["Room / Area"], ROOM, COLORS["muted"], offset=cell_height(item)))
+def row_cells(row, draft, hidden=()):
+    code_w, item_w, width = row_widths(hidden, STATUS_W if draft else 0)
+    item = cell(code_w, item_w, "" if "Item" in hidden else row.get("Item"), ITEM, COLORS["dark"])
+    cells = [cell(0, code_w, row.get("_code"), CODE, COLORS["muted"])] if code_w else []
+    if item_w:
+        cells.append(item)
+    cells.append(cell(code_w + item_w, width, description(row, hidden=hidden), DESC, COLORS["body"],
+                      link=product_link(row, hidden)))
+    if item_w and "Room / Area" not in hidden and clean(row.get("Room / Area")):
+        # the room sits under the item name, so it only needs clearing when that name is printed
+        cells.append(cell(code_w, item_w, row["Room / Area"], ROOM, COLORS["muted"],
+                          offset=0 if "Item" in hidden else cell_height(item)))
     if draft:
-        cells.append(cell(CODE_W + ITEM_W + width, STATUS_W, clean(row.get("Lookup Status")) or "Not run",
+        cells.append(cell(code_w + item_w + width, STATUS_W, clean(row.get("Lookup Status")) or "Not run",
                           STATUS, COLORS["muted"], align=PP_ALIGN.RIGHT))
     return cells
 
 
-def detail_rows(project, rows):
+def detail_rows(project, rows, hidden=()):
     """(group heading, name, value) for project and selection custom fields."""
     return [(title if index == 0 else "", field["name"], field["value"] or "Not provided")
-            for title, fields in presentation_details(project, rows)
+            for title, fields in ([] if "details" in hidden else presentation_details(project, rows))
             for index, field in enumerate(fields)]
 
 
@@ -205,7 +224,7 @@ class Deck:
         for item in cells:
             textbox(slide, M + item["x"] + PAD_X, self.y - PAD_Y - item["offset"], item["width"] - 2 * PAD_X,
                     cell_height(item), item["text"], item["size"], item["color"], bold=item["bold"],
-                    align=item["align"], leading=item["leading"])
+                    align=item["align"], leading=item["leading"], link=item["link"])
         self.y -= height
         if hairline:
             rule(slide, M, PAGE_W - M, self.y, COLORS["hairline"], 0.4)
@@ -241,16 +260,17 @@ class Deck:
         return output
 
 
-def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None):
+def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None, hidden=()):
     deck = Deck(schedule_title(title), draft)
     rows = numbered(rows, code_prefix(prefix))
     deck.page()
     deck.band(band_values(project))
-    for index, (section, items) in enumerate(group_sections(rows).items()):
-        deck.heading(section, first=index == 0)
+    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
+        if section:
+            deck.heading(section, first=index == 0)
         for position, row in enumerate(items):
-            deck.row(row_cells(row, draft), position < len(items) - 1)
-    details = detail_rows(project, rows)
+            deck.row(row_cells(row, draft, hidden), position < len(items) - 1)
+    details = detail_rows(project, rows, hidden)
     if details:
         deck.heading("Additional details")
         for index, (heading, name, value) in enumerate(details):
@@ -272,14 +292,20 @@ def main():
     parser.add_argument("--verified-only", action="store_true")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
+    parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
     args = parser.parse_args()
+    try:
+        hidden = hidden_columns(args.hide)
+    except ValueError as error:
+        parser.error(str(error))
     projects, items = load_data(args.verified_only)
     if args.project not in projects or not items.get(args.project):
         parser.error("Project not found or no selections match the export options.")
     rows = items[args.project]
     if not args.draft and any(row["Lookup Status"] != "Verified" for row in rows):
         parser.error("Review all selections first, or use --draft or --verified-only.")
-    print(build(args.project, projects[args.project], rows, args.draft, title=args.title, prefix=args.prefix))
+    print(build(args.project, projects[args.project], rows, args.draft, title=args.title, prefix=args.prefix,
+                hidden=hidden))
 
 
 if __name__ == "__main__":

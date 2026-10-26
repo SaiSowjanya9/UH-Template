@@ -18,6 +18,12 @@ except ImportError:
 
 @unittest.skipIf(sync_playwright is None, "Install requirements-dev.txt to run browser tests.")
 class BrowserTests(unittest.TestCase):
+    def setUp(self):
+        # REQUIRE_LOGIN depends on the ambient .env; these tests drive the local, signed-out app.
+        patcher = patch.object(app, "REQUIRE_LOGIN", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_custom_project_and_selection_fields(self):
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "custom.xlsx"
@@ -41,9 +47,9 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Field value", exact=True).fill("Lot 24")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 24")
+                        expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_value("Lot 24")
                         page.locator('[data-project="UH-102"]').click()
-                        expect(page.locator("#project-detail-values")).not_to_contain_text("Lot 24")
+                        expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_count(0)
                         page.locator('[data-project="UH-101"]').click()
                         page.get_by_role("button", name="Edit Siding", exact=True).click()
                         editor.locator("#add-custom-field").click()
@@ -54,14 +60,14 @@ class BrowserTests(unittest.TestCase):
                         page.locator(".selection-details summary").first.click()
                         expect(page.locator("#selection-rows")).to_contain_text("Approved supplier")
                         page.reload()
-                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 24")
+                        expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_value("Lot 24")
                         page.locator("#project-edit-details").click()
                         expect(editor).to_be_visible()
                         self.assertEqual(editor.get_by_label("Field value", exact=True).count(), 1, {"errors": errors, "labels": editor.locator("label").all_text_contents()})
                         editor.get_by_label("Field value", exact=True).fill("Lot 25")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        expect(page.locator("#project-detail-values")).to_contain_text("Lot 25")
+                        expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_value("Lot 25")
                         page.locator("#search").fill("Approved supplier")
                         expect(page.locator("#selection-rows tr")).to_have_count(1)
                         page.locator("#search").fill("")
@@ -75,7 +81,71 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_role("button", name="Remove field", exact=True).click()
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        expect(page.locator("#project-detail-values")).not_to_contain_text("Lot 25")
+                        expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_count(0)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_spec_sheet_manual_save_survives_reorder(self):
+        """Manual mode holds edits in page state, so neither a drag (which renumbers
+        workbook rows) nor a background refresh may lose them or move them to another row."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "spec.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors, saves = [], []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("request", lambda r: saves.append(r.url) if r.url.endswith("/api/selections") else None)
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        rows = page.locator(".spec-table tr[data-row]")
+                        expect(rows.first).to_be_attached()
+
+                        page.locator("#spec-autosave").click()
+                        expect(page.locator("#spec-autosave")).to_have_text("Auto-save off")
+                        expect(page.locator("#spec-save")).to_be_hidden()
+
+                        moved = rows.first.get_attribute("data-row")
+                        page.locator(f'tr[data-row="{moved}"] input.cell').first.fill("Held edit")
+                        page.locator(f'tr[data-row="{moved}"] input.cell').first.blur()
+                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
+                        self.assertEqual(saves, [])   # manual mode writes nothing yet
+
+                        target = rows.nth(2)
+                        grip = page.locator(f'tr[data-row="{moved}"] .drag-handle').bounding_box()
+                        box = target.bounding_box()
+                        page.mouse.move(grip["x"] + grip["width"] / 2, grip["y"] + grip["height"] / 2)
+                        page.mouse.down()
+                        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.75, steps=12)
+                        page.mouse.up()
+                        expect(page.locator("#toast")).to_have_text("Line item moved.")
+                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
+                        held = page.locator("#spec-groups .cell.dirty")
+                        expect(held).to_have_count(1)
+                        expect(held).to_have_value("Held edit")
+
+                        page.evaluate("refresh()")   # what polling does after any background save
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_value("Held edit")
+
+                        page.locator("#spec-save").click()
+                        expect(page.locator("#spec-save")).to_be_hidden()
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_count(0)
+                        self.assertEqual(len(saves), 1, saves)   # one atomic batch, not one call per row
+                        page.reload()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator('#spec-groups input.cell[value="Held edit"]')).to_have_count(1)
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
@@ -108,7 +178,7 @@ class BrowserTests(unittest.TestCase):
                         errors = []
                         page.on("pageerror", lambda error: errors.append(str(error)))
                         page.goto(f"http://127.0.0.1:{server.server_port}")
-                        expect(page.locator("#automation-banner")).to_be_visible()
+                        expect(page.locator("#selection-rows tr").first).to_be_attached()
                         page.get_by_role("button", name="Edit Siding", exact=True).click()
                         editor = page.locator("#editor")
                         editor.get_by_label("Model #", exact=True).fill("AUTO-ONE")
@@ -189,7 +259,7 @@ class BrowserTests(unittest.TestCase):
                         expect(editor).not_to_be_visible()
                         expect(page.locator("#project-name")).to_have_text("Browser Test Residence")
                         page.get_by_role("button", name="Add selection", exact=False).click()
-                        editor.get_by_label("Item", exact=False).fill("Test Kitchen Faucet")
+                        editor.locator('input[name="Item"]').fill("Test Kitchen Faucet")
                         editor.get_by_label("Manufacturer", exact=True).fill("Test Manufacturer")
                         editor.get_by_label("Model #", exact=True).fill("00123-VS")
                         editor.get_by_label("Finish / Color").fill("Stainless")

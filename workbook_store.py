@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from openpyxl import load_workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -30,6 +31,12 @@ BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
 OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override"]
+# Generated Selections column: the clickable face of Product URL, rebuilt on every save.
+# The header and the words inside the cell are deliberately the same, so a reader
+# clicks "Product Link" under "Product Link" instead of reading a raw address.
+PRODUCT_LINK = "Product Link"
+GENERATED_SELECTION_FIELDS = [PRODUCT_LINK]
+LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
 # Numeric input columns: (maximum, message)
 NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
                   "Unit Price": (100_000_000, "Unit Price must be a number between 0 and 100,000,000."),
@@ -74,6 +81,28 @@ def http_url(value):
         return False
 
 
+def hyperlink_formula(url):
+    """A product URL as a spreadsheet formula that reads 'Product Link' and opens the page.
+
+    CSV carries no hyperlinks of its own, so the exported spec sheet hands Excel and Sheets
+    a formula instead. Only a validated http(s) address is ever written, so the leading '='
+    is always ours and never text somebody typed into a cell.
+    """
+    url = clean(url)
+    if not http_url(url):
+        return ""
+    return f'=HYPERLINK("{url.replace(chr(34), chr(34) * 2)}","{PRODUCT_LINK}")'
+
+
+def parse_hyperlink(value):
+    """The address inside a HYPERLINK formula, or the cell's own text when it is a URL."""
+    value = clean(value)
+    match = re.match(r'^=HYPERLINK\(\s*"(.*?)"\s*(?:[,;].*)?\)$', value, re.IGNORECASE | re.DOTALL)
+    if match:
+        value = match[1].replace('""', '"')
+    return value if http_url(value) else ""
+
+
 def validate_values(data, fields):
     if not isinstance(data, dict) or set(data) - set(fields):
         raise ValidationError("Unexpected fields in the submitted data.")
@@ -115,7 +144,10 @@ def put(sheet, row, data):
 
 
 def records(wb, name):
-    return [{**{k: v.isoformat() if isinstance(v, (dt.datetime, dt.date)) else clean(v) for k, v in data.items()}, "_row": row}
+    # Generated columns are left out: they only restate a value the record already carries,
+    # so reading one back would make a workbook saved before they existed look different.
+    return [{**{k: v.isoformat() if isinstance(v, (dt.datetime, dt.date)) else clean(v)
+                for k, v in data.items() if k not in GENERATED_SELECTION_FIELDS}, "_row": row}
             for row, data in Sheet(wb[name]).rows()]
 
 
@@ -155,7 +187,7 @@ def read_custom_fields(value, reserved=()):
 
 
 def detailed_records(wb, name):
-    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS + GENERATED_SELECTION_FIELDS
     return [{**row, "custom_fields": read_custom_fields(row.get("Custom Fields"), reserved)} for row in records(wb, name)]
 
 
@@ -174,7 +206,7 @@ def presentation_details(project, rows):
 
 
 def set_custom_fields(wb, name, row, fields):
-    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + GENERATED_SELECTION_FIELDS
     fields = validate_custom_fields(fields, reserved)
     sheet = Sheet(wb[name])
     if not fields and "Custom Fields" not in sheet.cols:
@@ -303,6 +335,38 @@ def ensure_selection_columns(wb):
     if added:
         ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
     return sheet
+
+
+def ensure_product_links(wb):
+    """Rewrite the generated 'Product Link' column from each row's Product URL.
+
+    Product URL stays the column anything writes to - the app, the CSV import, automatic
+    lookup - and this one is only its readable face, so it is rebuilt from scratch on every
+    save and anything typed into it by hand is discarded.
+    """
+    ws = wb["Selections"]
+    sheet = Sheet(ws)
+    if PRODUCT_LINK not in sheet.cols:
+        column = ws.max_column + 1
+        if column > 50:
+            raise ValidationError(f"This worksheet has no space for the {PRODUCT_LINK} column.")
+        cell = ws.cell(1, column, PRODUCT_LINK)
+        cell._style = copy(ws.cell(1, 1)._style)
+        ws.column_dimensions[get_column_letter(column)].width = 16
+        sheet = Sheet(ws)
+        ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    target, source = sheet.cols[PRODUCT_LINK], sheet.cols["Product URL"]
+    for row in range(2, ws.max_row + 1):
+        origin = ws.cell(row, source)
+        url = clean(origin.value)
+        cell = ws.cell(row, target)
+        cell._style = copy(origin._style)
+        if not http_url(url):
+            cell.value, cell.hyperlink = None, None
+            continue
+        cell.value = PRODUCT_LINK
+        cell.hyperlink = url
+        cell.font = Font(name=origin.font.name, size=origin.font.size, color=LINK_COLOR, underline="single")
 
 
 def ensure_list_values(wb):
@@ -542,6 +606,7 @@ class WorkbookStore:
                 raise PermissionError("The workbook is open in another program.")
             self.backend.backup()
             ensure_selection_columns(wb)
+            ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)
             ensure_project_formulas(wb)

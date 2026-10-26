@@ -7,6 +7,7 @@ Usage:
     python build_lookbook.py --all --verified-only                         # only rows marked 'Verified'
     python build_lookbook.py --project UH-101 --draft                      # internal copy (watermark + status)
     python build_lookbook.py --project UH-101 --title "Interior Selections" --prefix IN
+    python build_lookbook.py --project UH-101 --hide "Manufacturer,Qty"      # leave columns out
 
 Output: output/<ProjectID>_<Project Name>_<Schedule title>.pdf
 
@@ -36,7 +37,7 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
 
 from branding import load_logo
 from common import BASE_DIR, Sheet, clean, open_workbook, section_order
-from workbook_store import presentation_details
+from workbook_store import PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
 M = 46.8                         # side margins
@@ -130,11 +131,67 @@ def load_data(verified_only):
     return projects, items
 
 
-def group_sections(rows):
+# --------------------------------------------------------------------------
+# Hidden columns
+# --------------------------------------------------------------------------
+# What an export may leave out, chosen per download. Keys are the workbook columns, except
+# 'code' and 'details', which name generated blocks rather than a column. 'schedule' covers
+# the PDF, the PowerPoint twin and the fillable copy; 'sheet' is the spec sheet CSV.
+HIDEABLE_COLUMNS = [
+    ("code", "Item code", ("schedule",)),
+    ("Section", "Category headings", ("schedule", "sheet")),
+    ("Item", "Item name", ("schedule", "sheet")),
+    ("Room / Area", "Room / area", ("schedule", "sheet")),
+    ("Manufacturer", "Manufacturer", ("schedule", "sheet")),
+    ("Product Name", "Product name", ("schedule",)),
+    ("Model #", "Model number", ("schedule", "sheet")),
+    ("Finish / Color", "Finish / color", ("schedule", "sheet")),
+    ("Qty", "Quantity", ("schedule", "sheet")),
+    ("Client Notes", "Client notes", ("schedule", "sheet")),
+    ("Product URL", "Product link", ("schedule", "sheet")),
+    ("details", "Additional details", ("schedule",)),
+    ("Unit Price", "Unit price", ("sheet",)),
+    ("Markup %", "Markup %", ("sheet",)),
+    ("Client Status", "Client status", ("sheet",)),
+    ("Include in Lookbook", "Include in lookbook", ("sheet",)),
+]
+HIDEABLE = OrderedDict((key, label) for key, label, _ in HIDEABLE_COLUMNS)
+
+
+def hidden_columns(value):
+    """The columns an export leaves out, from a list or a comma-separated string.
+
+    Hiding nothing, one column or every column is all legitimate; an unknown name is not,
+    because it would silently print a field the user believes they have hidden.
+    """
+    if value is None:
+        value = []
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        raise ValueError("Hidden columns must be given as a list of column names.")
+    names = {clean(name) for name in value} - {""}
+    unknown = names - set(HIDEABLE)
+    if unknown:
+        raise ValueError(f"Unknown column(s) to hide: {', '.join(sorted(unknown))}.")
+    return names
+
+
+def group_sections(rows, hidden=()):
+    """Rows under their printed section heading, or all together under '' when headings are hidden."""
+    if "Section" in hidden:
+        return OrderedDict([("", list(rows))])
     groups = OrderedDict()
     for row in rows:
         groups.setdefault(clean(row.get("Section")) or "Other", []).append(row)
     return groups
+
+
+def row_widths(hidden, reserved=0):
+    """Code / item / description widths; the space a hidden column frees goes to the description."""
+    code = 0 if "code" in hidden else CODE_W
+    item = 0 if {"Item", "Room / Area"} <= set(hidden) else ITEM_W
+    return code, item, CONTENT_W - code - item - reserved
 
 
 def numbered(rows, prefix):
@@ -143,24 +200,44 @@ def numbered(rows, prefix):
     return [dict(row, _code=f"{prefix}-{index:0{digits}d}") for index, row in enumerate(rows, start=1)]
 
 
-def description(row, include_quantity=True):
+def description(row, include_quantity=True, hidden=()):
     """One plain-English line per selection, assembled from the workbook columns.
 
-    A Description Override, typed on the fillable schedule, replaces the assembled text.
+    A Description Override, typed on the fillable schedule, replaces the assembled text and is
+    printed as typed: it is literal text, not columns, so hiding a column cannot edit it.
     Tables that show quantity in their own column pass include_quantity=False.
     """
     if clean(row.get("Description Override")):
         return clean(row["Description Override"])
-    product = clean(row.get("Product Name")) or clean(row.get("Model #"))
-    finish = clean(row.get("Finish / Color"))
-    identity = " ".join(filter(None, [clean(row.get("Manufacturer")), product]))
+    def shown(column):
+        return "" if column in hidden else clean(row.get(column))
+
+    product = shown("Product Name") or shown("Model #")
+    finish = shown("Finish / Color")
+    identity = " ".join(filter(None, [shown("Manufacturer"), product]))
     if not product and finish:
         identity, finish = " ".join(filter(None, [identity, finish])), ""
-    model = clean(row.get("Model #"))
+    model = shown("Model #")
     if model and product != model and model.lower() not in identity.lower():
         identity = f"{identity} (Model {model})".strip()
-    segments = [identity, finish, quantity(row) if include_quantity else "", clean(row.get("Client Notes"))]
+    quantity_segment = quantity(row) if include_quantity and "Qty" not in hidden else ""
+    segments = [identity, finish, quantity_segment, shown("Client Notes")]
     return " \u2013 ".join(segment for segment in segments if segment)
+
+
+def product_link(row, hidden=()):
+    """The product page a schedule row links to, or '' when there is nothing to open."""
+    url = "" if "Product URL" in hidden else clean(row.get("Product URL"))
+    return url if http_url(url) else ""
+
+
+def link_markup(row, hidden=()):
+    """The row's product page as a clickable 'Product Link' after its description."""
+    url = product_link(row, hidden)
+    if not url:
+        return ""
+    return (f' \u2013 <link href="{escape(url, {chr(34): "&quot;"})}" color="{CFG["colors"]["accent"]}">'
+            f"<u>{PRODUCT_LINK}</u></link>")
 
 
 def quantity(row):
@@ -329,15 +406,23 @@ class SignOff(Flowable):
             x += width
 
 
-def rows_table(rows, draft):
-    widths = [CODE_W, ITEM_W, CONTENT_W - CODE_W - ITEM_W - (STATUS_W if draft else 0)]
+def item_cell(row, hidden=()):
+    """The item column: the item name, with its room beneath, minus whatever is hidden."""
+    parts = [] if "Item" in hidden else [Paragraph(escape(clean(row.get("Item"))), ITEM_STYLE)]
+    if "Room / Area" not in hidden and clean(row.get("Room / Area")):
+        parts.append(Paragraph(escape(clean(row["Room / Area"])), ROOM_STYLE))
+    return parts or ""
+
+
+def rows_table(rows, draft, hidden=()):
+    code_w, item_w, desc_w = row_widths(hidden, STATUS_W if draft else 0)
+    widths = [width for width in (code_w, item_w) if width] + [desc_w]
     data = []
     for row in rows:
-        item = [Paragraph(escape(clean(row.get("Item"))), ITEM_STYLE)]
-        if clean(row.get("Room / Area")):
-            item.append(Paragraph(escape(clean(row["Room / Area"])), ROOM_STYLE))
-        cells = [Paragraph(escape(row.get("_code", "")), CODE_STYLE), item,
-                 Paragraph(escape(description(row)), DESC_STYLE)]
+        cells = [Paragraph(escape(row.get("_code", "")), CODE_STYLE)] if code_w else []
+        if item_w:
+            cells.append(item_cell(row, hidden))
+        cells.append(Paragraph(escape(description(row, hidden=hidden)) + link_markup(row, hidden), DESC_STYLE))
         if draft:
             cells.append(Paragraph(escape(clean(row.get("Lookup Status")) or "Not run"), STATUS_STYLE))
         data.append(cells)
@@ -351,9 +436,9 @@ def rows_table(rows, draft):
     ]))
 
 
-def detail_flowables(project, rows):
+def detail_flowables(project, rows, hidden=()):
     """Project and selection custom fields, in the same two-column rhythm."""
-    groups = presentation_details(project, rows)
+    groups = [] if "details" in hidden else presentation_details(project, rows)
     if not groups:
         return []
     story = [Spacer(0, SECTION_GAP), Heading("Additional details")]
@@ -374,14 +459,16 @@ def detail_flowables(project, rows):
 
 
 # --------------------------------------------------------------------------
-def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None):
+def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None, hidden=()):
     title, rows = schedule_title(title), numbered(rows, code_prefix(prefix))
     story = [Band(band_values(project)), Spacer(0, BAND_GAP)]
-    for index, (section, items) in enumerate(group_sections(rows).items()):
+    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        story += [Heading(section), rows_table(items, draft)]
-    story += detail_flowables(project, rows)
+        if section:
+            story.append(Heading(section))
+        story.append(rows_table(items, draft, hidden))
+    story += detail_flowables(project, rows, hidden)
     story.append(Spacer(0, SECTION_GAP))
     story.append(KeepTogether([Paragraph(escape(clean(SCHEDULE.get("note"))), NOTE_STYLE), Spacer(0, 16),
                                SignOff(SCHEDULE.get("signatures") or [])]))
@@ -414,8 +501,13 @@ def main():
     parser.add_argument("--draft", action="store_true", help="Internal review copy with status labels")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
+    parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
     args = parser.parse_args()
 
+    try:
+        hidden = hidden_columns(args.hide)
+    except ValueError as error:
+        parser.error(str(error))
     projects, items = load_data(args.verified_only)
     for pid in (list(projects) if args.all else [args.project]):
         if pid not in projects:
@@ -425,7 +517,7 @@ def main():
         if not rows:
             print(f"- {pid}: no selections to include, skipped")
             continue
-        out = build(pid, projects[pid], rows, args.draft, title=args.title, prefix=args.prefix)
+        out = build(pid, projects[pid], rows, args.draft, title=args.title, prefix=args.prefix, hidden=hidden)
         print(f"+ {pid}: {len(rows)} selections -> {out.relative_to(BASE_DIR)}")
         pending = [row for row in rows if row["Lookup Status"] != "Verified"]
         if pending and not args.draft:

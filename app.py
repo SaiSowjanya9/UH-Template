@@ -1,5 +1,6 @@
 import csv
 import datetime as dt
+import importlib
 import io
 import json
 import os
@@ -21,9 +22,10 @@ import spec_template
 import supabase_store
 from auto_lookup import AutoLookup
 from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
-                            PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES, ValidationError,
-                            WorkbookStore, delete_record, ensure_selection_columns, http_url, next_row,
-                            put, records, stale_check, validate_values, detailed_records, set_custom_fields)
+                            PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES,
+                            ValidationError, WorkbookStore, delete_record, ensure_selection_columns,
+                            http_url, hyperlink_formula, next_row, parse_hyperlink, put, records,
+                            stale_check, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
 LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
@@ -228,6 +230,8 @@ def state():
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        statuses=STATUSES, client_statuses=CLIENT_STATUSES, stale_days=180,
+                       hideable=[{"key": key, "label": label, "documents": list(documents)}
+                                 for key, label, documents in build_lookbook.HIDEABLE_COLUMNS],
                        revision=revision, provider=provider_info(),
                        automation=automation.status() if automation else {"enabled": False, "pending": [], "message": ""},
                        workbook=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
@@ -339,10 +343,45 @@ def reorder_selections():
     return jsonify(ok=True)
 
 
+def merge_selection(old, values, confirm_verified, row=None):
+    """Merge validated cell values into one selection record; shared by single and batch saves."""
+    merged = {k: old.get(k, "") if old else "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}
+    merged.update(values)
+    if not merged["Project ID"] or not merged["Item"]:
+        raise ValidationError("Project and item name are required.")
+    if automation and row is not None and str(row) in automation.active() and values.get("Lookup Status") == "Verified":
+        raise ValidationError("Automatic lookup is pending for this changed product. Wait for the result or save a new manual link before verifying.")
+    merged["Client Status"] = merged.get("Client Status") or "Proposed"
+    if old and any(merged[k] != old[k] for k in IDENTITY_FIELDS):
+        if merged["Client Status"] in {"Presented", "Approved"}:
+            merged["Client Status"] = "Changed"
+        elif merged["Client Status"] == "Rejected":
+            merged["Client Status"] = "Proposed"
+        new_url = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
+        merged.update({k: "" for k in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
+        if merged["Product Name"] == old["Product Name"]:
+            merged["Product Name"] = ""
+        merged["Product URL"] = new_url
+        merged["Lookup Status"] = "Found - verify" if new_url else "Not run"
+    elif old and merged["Product URL"] != old["Product URL"]:
+        merged["Lookup Status"] = "Found - verify" if merged["Product URL"] else "Not run"
+        merged["Checked On"] = ""
+        merged["Lookup Notes"] = "Manually updated link. Review before verifying."
+    elif not old and (merged["Lookup Status"] == "Verified" or merged["Product URL"]):
+        merged["Lookup Status"] = "Found - verify"
+    merged["Lookup Status"] = merged["Lookup Status"] or "Not run"
+    merged["Include in Lookbook"] = merged["Include in Lookbook"] or "Yes"
+    if merged["Lookup Status"] == "Verified" and (not old or old["Lookup Status"] != "Verified"):
+        if not confirm_verified:
+            raise ValidationError("Confirm that you checked the manufacturer, model, and finish on the product page.")
+        merged["Checked On"] = dt.date.today().isoformat()
+    return merged
+
+
 @app.post("/api/selections")
 def save_selection():
     data = payload()
-    values = validate_values(data.get("values"), SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
+    values = {} if data.get("batch") else validate_values(data.get("values"), SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
     with store.lock:
         wb, revision = current(data)
         sheet = common.Sheet(wb["Selections"])
@@ -355,42 +394,32 @@ def save_selection():
             if automation:
                 automation.observe(wb)
             return jsonify(ok=True, deleted=True)
+        if data.get("batch"):
+            sheet = ensure_selection_columns(wb)
+            applied = []
+            for key, raw in data["batch"].items():
+                try:
+                    row = int(key)
+                except (TypeError, ValueError):
+                    raise ValidationError("Batch edits must name selection rows.")
+                old = next((r for r in records(wb, "Selections") if r["_row"] == row), None)
+                if not old:
+                    raise ConflictError(f"Selection row {row} no longer exists. Refresh the page.")
+                merged = merge_selection(old, validate_values(raw, SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS),
+                                         data.get("confirm_verified"), row)
+                put(sheet, row, merged)
+                applied.append(row)
+            store.save(wb, revision, f"batch edit {len(applied)} selection rows")
+            if automation:
+                automation.observe(wb)
+            return jsonify(ok=True, applied=applied)
         old = None
         if data.get("row") is not None:
             old = next((r for r in records(wb, "Selections") if r["_row"] == data["row"]), None)
             if not old:
                 raise ConflictError("This selection no longer exists. Refresh the page.")
         row = old["_row"] if old else next_row(sheet)
-        merged = {k: old.get(k, "") if old else "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}
-        merged.update(values)
-        if not merged["Project ID"] or not merged["Item"]:
-            raise ValidationError("Project and item name are required.")
-        if automation and str(row) in automation.active() and values.get("Lookup Status") == "Verified":
-            raise ValidationError("Automatic lookup is pending for this changed product. Wait for the result or save a new manual link before verifying.")
-        merged["Client Status"] = merged.get("Client Status") or "Proposed"
-        if old and any(merged[k] != old[k] for k in IDENTITY_FIELDS):
-            if merged["Client Status"] in {"Presented", "Approved"}:
-                merged["Client Status"] = "Changed"
-            elif merged["Client Status"] == "Rejected":
-                merged["Client Status"] = "Proposed"
-            new_url = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
-            merged.update({k: "" for k in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
-            if merged["Product Name"] == old["Product Name"]:
-                merged["Product Name"] = ""
-            merged["Product URL"] = new_url
-            merged["Lookup Status"] = "Found - verify" if new_url else "Not run"
-        elif old and merged["Product URL"] != old["Product URL"]:
-            merged["Lookup Status"] = "Found - verify" if merged["Product URL"] else "Not run"
-            merged["Checked On"] = ""
-            merged["Lookup Notes"] = "Manually updated link. Review before verifying."
-        elif not old and (merged["Lookup Status"] == "Verified" or merged["Product URL"]):
-            merged["Lookup Status"] = "Found - verify"
-        merged["Lookup Status"] = merged["Lookup Status"] or "Not run"
-        merged["Include in Lookbook"] = merged["Include in Lookbook"] or "Yes"
-        if merged["Lookup Status"] == "Verified" and (not old or old["Lookup Status"] != "Verified"):
-            if not data.get("confirm_verified"):
-                raise ValidationError("Confirm that you checked the manufacturer, model, and finish on the product page.")
-            merged["Checked On"] = dt.date.today().isoformat()
+        merged = merge_selection(old, values, data.get("confirm_verified"), row)
         sheet = ensure_selection_columns(wb)
         put(sheet, row, merged)
         from openpyxl.utils import get_column_letter
@@ -499,18 +528,20 @@ def normalise_date(value):
 
 @app.post("/api/schedule/form")
 def import_schedule_form():
-    """Apply a filled fillable schedule: client details, line descriptions and removals."""
-    import build_form
+    """Apply a filled fillable schedule, PDF or Word: client details, line descriptions and removals."""
     upload = request.files.get("file")
-    if not upload or not upload.filename.lower().endswith(".pdf"):
-        raise ValidationError("Choose the fillable schedule PDF you downloaded and filled in.")
+    name = (upload.filename or "").lower() if upload else ""
+    if not name.endswith((".pdf", ".docx")):
+        raise ValidationError("Choose the fillable schedule PDF or Word document you downloaded and filled in.")
+    # Both copies name their fields the same way, so one reader swaps in for the other.
+    reader = importlib.import_module("build_word" if name.endswith(".docx") else "build_form")
     project_id = common.clean(request.form.get("project"))
     try:
-        details, lines = build_form.read(io.BytesIO(upload.read()))
+        details, lines, form_hidden = reader.read(io.BytesIO(upload.read()))
     except Exception:
-        raise ValidationError("That PDF could not be read as a fillable schedule. Download a fresh copy and fill that in.") from None
+        raise ValidationError("That file could not be read as a fillable schedule. Download a fresh copy and fill that in.") from None
     if not lines and not details:
-        raise ValidationError("That PDF has no schedule fields. Use the fillable copy, not the client PDF.")
+        raise ValidationError("That file has no schedule fields. Use the fillable copy, not the client document.")
 
     with store.lock:
         wb, revision = current({"revision": request.form.get("revision", "")})
@@ -541,8 +572,10 @@ def import_schedule_form():
                 removed += 1
                 continue
             typed = entry.get("description", "")
-            # Unedited fields still read back transliterated, so compare like for like.
-            generated = build_form.form_text(build_lookbook.description({**record, "Description Override": ""}))
+            # Unedited fields still read back transliterated, and a copy printed without some
+            # columns reads back without them too, so compare like for like.
+            generated = reader.form_text(build_lookbook.description({**record, "Description Override": ""},
+                                                                    hidden=form_hidden))
             override = "" if typed in {"", generated} else typed
             if override != record.get("Description Override", ""):
                 put(sheet, row, validate_values({"Description Override": override},
@@ -557,18 +590,52 @@ def import_schedule_form():
     return jsonify(ok=True, removed=removed, described=described, details=sorted(updates))
 
 
+PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
 SPEC_CSV_FIELDS = ["Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
-                   "Qty", "Unit Price", "Markup %", "Client Notes", "Client Status", "Include in Lookbook"]
+                   "Qty", "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
+                   "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
+# The spec sheet shows the product URL as a Product Link column, hidden under the column's own name.
+CSV_HIDE_KEYS = {PRODUCT_LINK: "Product URL"}
+
+
+def hidden_option(value):
+    """The columns this export leaves out, as named by the hide-columns chooser."""
+    try:
+        return build_lookbook.hidden_columns(value)
+    except ValueError as error:
+        raise ValidationError(str(error)) from None
+
+
+def csv_fields(hidden):
+    """The spec sheet's columns, minus the hidden ones."""
+    return [field for field in SPEC_CSV_FIELDS if CSV_HIDE_KEYS.get(field, field) not in hidden]
 
 
 def spec_key(row):
     return (common.clean(row.get("Section")), common.clean(row.get("Room / Area")), common.clean(row.get("Item")))
 
 
+def csv_values(entry, headers):
+    """One CSV line as selection fields; the Product Link column carries the product URL."""
+    values = {field: common.clean(entry.get(field)) for field in SPEC_CSV_FIELDS if field in headers}
+    link = values.pop(PRODUCT_LINK, "")
+    if link:
+        # Excel writes a formula's displayed text ("Product Link") when it re-saves a CSV, so a
+        # cell we cannot read an address out of means "unchanged", never "drop the saved link".
+        values["Product URL"] = parse_hyperlink(link)
+        if not values["Product URL"]:
+            del values["Product URL"]
+    return values
+
+
 @app.get("/api/selections/csv")
 def export_spec_csv():
     project_id = common.clean(request.args.get("project"))
+    hidden = hidden_option(request.args.get("hide", ""))
     with store.lock:
         wb, _ = store.snapshot()
         project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
@@ -577,13 +644,38 @@ def export_spec_csv():
         order = common.section_order(wb)
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
     rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    fields = csv_fields(hidden)
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=SPEC_CSV_FIELDS, extrasaction="ignore", lineterminator="\r\n")
+    writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
     writer.writeheader()
-    writer.writerows({field: row.get(field, "") for field in SPEC_CSV_FIELDS} for row in rows)
+    # Product Link is generated from the URL, never copied from the workbook's own link column.
+    writer.writerows({**{field: row.get(field, "") for field in fields},
+                      PRODUCT_LINK: hyperlink_formula(row.get("Product URL"))} for row in rows)
     name = re.sub(r"[^A-Za-z0-9_-]", "_", project_id)[:50]
     return send_file(io.BytesIO(buffer.getvalue().encode("utf-8-sig")), as_attachment=True,
                      download_name=f"{name}_spec_sheet.csv", mimetype="text/csv")
+
+
+@app.get("/api/selections/docx")
+def export_spec_docx():
+    """The same line items as the CSV, as a Word document to read, print and mark up."""
+    import build_word
+    project_id = common.clean(request.args.get("project"))
+    hidden = hidden_option(request.args.get("hide", ""))
+    with store.lock:
+        wb, _ = store.snapshot()
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        order = common.section_order(wb)
+        rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
+    if not rows:
+        raise ValidationError("This project has no line items to export.")
+    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
+        output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder), hidden=hidden)
+        raw = output.read_bytes()
+    return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=DOCX_MIME)
 
 
 @app.post("/api/selections/csv")
@@ -605,7 +697,7 @@ def import_spec_csv():
         raise ValidationError(f"Unexpected column(s): {', '.join(unknown[:4])}. Export the spec sheet to see the format.")
     incoming = []
     for entry in reader:
-        values = {field: common.clean(entry.get(field)) for field in SPEC_CSV_FIELDS if field in headers}
+        values = csv_values(entry, headers)
         if any(values.values()):
             incoming.append(values)
         if len(incoming) > CSV_ROW_LIMIT:
@@ -634,18 +726,24 @@ def import_spec_csv():
             old = matches.pop(0) if matches else None
             if old:
                 merged = {**{k: old.get(k, "") for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values}
+                link = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
                 if any(merged[key] != old[key] for key in IDENTITY_FIELDS):
                     # the product itself changed, so its old link and verification no longer apply
                     merged.update({key: "" for key in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
                     merged["Lookup Status"] = "Not run"
                     if merged["Client Status"] in {"Presented", "Approved"}:
                         merged["Client Status"] = "Changed"
+                if link:
+                    # a link typed into the spreadsheet still has to be reviewed before it is trusted
+                    merged.update({"Product URL": link, "Lookup Status": "Found - verify", "Checked On": "",
+                                   "Lookup Notes": "Manually updated link. Review before verifying."})
                 put(sheet, old["_row"], merged)
                 updated += 1
             else:
                 row = next_row(sheet)
                 put(sheet, row, {**{k: "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values,
-                                 "Project ID": project_id, "Lookup Status": "Not run",
+                                 "Project ID": project_id,
+                                 "Lookup Status": "Found - verify" if values.get("Product URL") else "Not run",
                                  "Include in Lookbook": values.get("Include in Lookbook") or "Yes",
                                  "Client Status": values.get("Client Status") or "Proposed"})
                 added += 1
@@ -740,13 +838,25 @@ def with_details(project, overrides):
 
 
 def schedule_options(data):
-    """Per-export schedule title and item code prefix, falling back to the branding defaults."""
+    """Per-export title, item code prefix and hidden columns, falling back to the branding defaults."""
     title, prefix = common.clean(data.get("title")), common.clean(data.get("prefix"))
     if len(title) > 80 or any(ord(character) < 32 for character in title):
         raise ValidationError("Enter a schedule title of up to 80 characters on one line.")
     if prefix and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,5}", prefix):
         raise ValidationError("The item code prefix must be 1-6 letters, numbers, or hyphens, such as EX.")
-    return title or None, prefix or None
+    return title or None, prefix or None, hidden_option(data.get("hidden"))
+
+
+# Download format -> (module, builder, mime). The builders are imported on demand so a local
+# run only pays for the one it is asked for.
+PRESENTATION_FORMATS = {
+    "pdf": ("build_lookbook", "build", PDF_MIME),
+    "docx": ("build_word", "build", DOCX_MIME),
+    "pptx": ("build_powerpoint", "build", PPTX_MIME),
+    "form": ("build_form", "build", PDF_MIME),
+    "form-docx": ("build_word", "build_fillable", DOCX_MIME),
+}
+FILLABLE_FORMATS = {"form", "form-docx"}
 
 
 @app.post("/api/presentation")
@@ -757,9 +867,9 @@ def presentation():
     if not project:
         raise ValidationError("Choose a valid project.")
     mode, kind = data.get("mode", "draft"), data.get("format", "pdf")
-    if mode not in {"draft", "verified", "final"} or kind not in {"pdf", "pptx", "form"}:
+    if mode not in {"draft", "verified", "final"} or kind not in PRESENTATION_FORMATS:
         raise ValidationError("Invalid presentation options.")
-    title, prefix = schedule_options(data)
+    title, prefix, hidden = schedule_options(data)
     overrides = band_overrides(data)
     rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
     if automation:
@@ -805,21 +915,13 @@ def presentation():
                 store.log(note)
         rev = store.count_notes(f"export {project['Project ID']} ")
     shown = with_details(project, overrides)
+    module, builder, mime = PRESENTATION_FORMATS[kind]
+    build_schedule = getattr(importlib.import_module(module), builder)
+    # A working copy is neither watermarked nor numbered: it is filled in and brought back.
+    extra = {} if kind in FILLABLE_FORMATS else {"draft": mode == "draft", "rev": None if preview else rev}
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
-        if kind == "form":
-            import build_form
-            output = build_form.build(project["Project ID"], shown, rows,
-                                      output_dir=Path(folder), title=title, prefix=prefix)
-            mime = "application/pdf"
-        else:
-            if kind == "pdf":
-                build_schedule, mime = build_lookbook.build, "application/pdf"
-            else:
-                from build_powerpoint import build as build_schedule
-                mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            output = build_schedule(project["Project ID"], shown, rows, mode == "draft",
-                                    output_dir=Path(folder), title=title, prefix=prefix,
-                                    rev=None if preview else rev)
+        output = build_schedule(project["Project ID"], shown, rows, output_dir=Path(folder),
+                                title=title, prefix=prefix, hidden=hidden, **extra)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=not preview, download_name=output.name, mimetype=mime)
 

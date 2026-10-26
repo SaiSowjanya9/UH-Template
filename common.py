@@ -59,7 +59,8 @@ class Sheet:
 # Product URL left behind by a row delete) carries no user data and must not count.
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
                    "Lookup Status", "Include in Lookbook", "Client Status",
-                   "Checked On", "Lookup Notes", "Product URL", "Image URL", "Product Name"}
+                   "Checked On", "Lookup Notes", "Product URL", "Product Link",
+                   "Image URL", "Product Name"}
 
 
 def open_workbook(data_only=False):
