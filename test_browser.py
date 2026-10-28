@@ -16,6 +16,12 @@ except ImportError:
     sync_playwright = None
 
 
+def settle_layout(page):
+    """The shell's margin-left transitions for 180ms after a viewport change, so an
+    immediate measurement still reports the desktop layout."""
+    expect(page.locator(".app-shell")).to_have_css("margin-left", "0px")
+
+
 @unittest.skipIf(sync_playwright is None, "Install requirements-dev.txt to run browser tests.")
 class BrowserTests(unittest.TestCase):
     def setUp(self):
@@ -61,12 +67,12 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#selection-rows")).to_contain_text("Approved supplier")
                         page.reload()
                         expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_value("Lot 24")
-                        page.locator("#project-edit-details").click()
-                        expect(editor).to_be_visible()
-                        self.assertEqual(editor.get_by_label("Field value", exact=True).count(), 1, {"errors": errors, "labels": editor.locator("label").all_text_contents()})
-                        editor.get_by_label("Field value", exact=True).fill("Lot 25")
-                        editor.get_by_role("button", name="Save changes").click()
-                        expect(editor).not_to_be_visible()
+                        # one field, not a duplicate per reload, and edited in place rather than in a dialog
+                        value = page.locator('#project-detail-values input[data-custom-key="value"]')
+                        expect(value).to_have_count(1)
+                        value.fill("Lot 25")
+                        page.locator("#project-save-details").click()
+                        page.reload()
                         expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_value("Lot 25")
                         page.locator("#search").fill("Approved supplier")
                         expect(page.locator("#selection-rows tr")).to_have_count(1)
@@ -75,10 +81,14 @@ class BrowserTests(unittest.TestCase):
                         output.mkdir(exist_ok=True)
                         page.screenshot(path=str(output / "custom-fields-desktop.png"), full_page=True)
                         page.set_viewport_size({"width": 390, "height": 844})
+                        settle_layout(page)
                         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
                         page.screenshot(path=str(output / "custom-fields-mobile.png"), full_page=True)
-                        page.locator("#project-edit-details").click()
-                        editor.get_by_role("button", name="Remove field", exact=True).click()
+                        page.set_viewport_size({"width": 1440, "height": 1000})
+                        page.locator("#project-add-field").click()   # the only route to the field editor
+                        expect(editor).to_be_visible()
+                        while editor.locator(".remove-custom-field").count():
+                            editor.locator(".remove-custom-field").first.click()
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
                         expect(page.locator('#project-detail-values input[data-custom-key="value"]')).to_have_count(0)
@@ -123,14 +133,11 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
                         self.assertEqual(saves, [])   # manual mode writes nothing yet
 
-                        target = rows.nth(2)
-                        grip = page.locator(f'tr[data-row="{moved}"] .drag-handle').bounding_box()
-                        box = target.bounding_box()
-                        page.mouse.move(grip["x"] + grip["width"] / 2, grip["y"] + grip["height"] / 2)
-                        page.mouse.down()
-                        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.75, steps=12)
-                        page.mouse.up()
-                        expect(page.locator("#toast")).to_have_text("Line item moved.")
+                        target = rows.nth(2).get_attribute("data-row")
+                        page.drag_and_drop(f'tr[data-row="{moved}"] .drag-handle',
+                                           f'tr[data-row="{target}"]',
+                                           target_position={"x": 60, "y": 20})
+                        expect(page.locator("#toast")).to_have_text("Line item moved.", timeout=15000)
                         expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
                         held = page.locator("#spec-groups .cell.dirty")
                         expect(held).to_have_count(1)
@@ -146,6 +153,55 @@ class BrowserTests(unittest.TestCase):
                         page.reload()
                         page.locator('[data-view="spec"]').click()
                         expect(page.locator('#spec-groups input.cell[value="Held edit"]')).to_have_count(1)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_spec_product_link_shows_link_text(self):
+        """A pasted address renders as a "Product Link" anchor; the pencil button
+        reopens the input so the stored URL can be viewed or changed."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "link.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+
+                        url = "https://example.com/catalog/faucet"
+                        row = page.locator(".spec-table tr[data-row]").first.get_attribute("data-row")
+                        cell = page.locator(f'tr[data-row="{row}"] .link-col')
+                        if cell.locator(".link-edit").count():
+                            cell.locator(".link-edit").click()   # the row already links somewhere
+                        cell.locator("input.cell").fill(url)
+                        cell.locator("input.cell").blur()
+                        link = page.locator(f'tr[data-row="{row}"] a.product-link')
+                        expect(link).to_have_text("Product Link ↗")
+                        expect(link).to_have_attribute("href", url)
+                        expect(link).to_have_attribute("title", url)
+                        expect(cell.locator("input.cell")).to_have_count(0)
+
+                        cell.locator(".link-edit").click()
+                        expect(cell.locator("input.cell")).to_have_value(url)
+                        cell.locator("input.cell").blur()
+                        expect(link).to_have_text("Product Link ↗")
+
+                        page.reload()
+                        page.locator('[data-view="spec"]').click()
+                        expect(link).to_have_text("Product Link ↗")
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
@@ -199,8 +255,10 @@ class BrowserTests(unittest.TestCase):
                             expect(page.locator("#export-pdf")).to_be_disabled()
                             self.assertEqual(search.call_count, 1)
                         expect(page.locator("#export-pdf")).to_be_enabled(timeout=20000)
+                        page.locator("#export-pdf").click()   # the PDF now goes through the details dialog
+                        expect(page.locator("#schedule-dialog")).to_be_visible()
                         with page.expect_download(timeout=30000) as download_info:
-                            page.locator("#export-pdf").click()
+                            page.locator("#schedule-download").click()
                         path = Path(folder) / "automatic.pdf"
                         download_info.value.save_as(path)
                         from pypdf import PdfReader
@@ -266,29 +324,42 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Qty", exact=True).fill("2")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        expect(page.locator("#selection-rows")).to_contain_text("00123-VS")
+                        # a new project is seeded with the standard template, so filter to the new row
+                        page.locator("#search").fill("Test Kitchen Faucet")
                         expect(page.locator("#selection-rows tr")).to_have_count(1)
-                        page.locator('[data-view="review"]').click()
-                        page.get_by_role("button", name="Find product", exact=True).click()
+                        expect(page.locator("#selection-rows")).to_contain_text("00123-VS")
+                        page.locator("#setup-button").click()   # the review view is gone; setup opens from the sidebar
                         expect(page.locator("#setup-dialog")).to_be_visible()
                         expect(page.locator("#provider-status")).to_contain_text("not configured")
                         page.locator("#setup-dialog").get_by_role("button", name="Close dialog").click()
-                        page.get_by_role("button", name="Edit details").click()
+                        page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         editor.get_by_label("Product URL", exact=True).fill("https://example.com/product")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        page.get_by_role("button", name="Mark verified").click()
-                        expect(page.locator("#review-grid")).to_contain_text("Everything checked")
+                        # verification moved into the row editor when the review grid was removed
+                        page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
+                        page.locator("#editor-verify").click()
+                        expect(page.locator("#selection-rows")).to_contain_text("Verified")
                         page.locator('[data-view="presentation"]').click()
-                        page.locator("#export-mode").select_option("final")
-                        for button, suffix in [("#export-pdf", ".pdf"), ("#export-pptx", ".pptx")]:
-                            with page.expect_download(timeout=30000) as download_info:
-                                page.locator(button).click()
-                            download = download_info.value
-                            self.assertTrue(download.suggested_filename.endswith(suffix))
-                            self.assertIn("Interior_Selections", download.suggested_filename)
-                            download.save_as(Path(folder) / f"download{suffix}")
-                            expect(page.locator("#busy-banner")).not_to_be_visible()
+                        # "final" would demand every seeded template row be verified too
+                        page.locator("#export-mode").select_option("verified")
+                        page.locator("#export-pdf").click()
+                        expect(page.locator("#schedule-dialog")).to_be_visible()
+                        with page.expect_download(timeout=30000) as download_info:
+                            page.locator("#schedule-download").click()
+                        download = download_info.value
+                        self.assertTrue(download.suggested_filename.endswith(".pdf"))
+                        self.assertIn("Interior_Selections", download.suggested_filename)
+                        download.save_as(Path(folder) / "download.pdf")
+                        expect(page.locator("#schedule-dialog")).not_to_be_visible()   # the dialog closes once the file lands
+                        page.locator("#export-more").click()   # PowerPoint moved into the files dialog
+                        with page.expect_download(timeout=30000) as download_info:
+                            page.locator('#files-dialog [data-file="pptx"]').click()
+                        download = download_info.value
+                        self.assertTrue(download.suggested_filename.endswith(".pptx"))
+                        self.assertIn("Interior_Selections", download.suggested_filename)
+                        download.save_as(Path(folder) / "download.pptx")
+                        expect(page.locator("#busy-banner")).not_to_be_visible()
                         page.locator('[data-view="selections"]').click()
                         page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         editor.get_by_label("Model #", exact=True).fill("NEW-00123")

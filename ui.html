@@ -54,6 +54,15 @@
         <div class="workflow-note"><span class="note-icon">i</span><p><strong>A little review makes all the difference.</strong> Saved product edits automatically queue a search. Check the exact manufacturer, model, and finish before marking a selection verified.</p></div>
       </section>
       <section id="spec-view" class="view" hidden>
+        <div id="spec-client-panel" class="spec-client" hidden>
+          <div class="spec-client-head"><div class="eyebrow">CLIENT DETAILS</div><p class="muted">Saved to this project — these print in the band at the top of every exported document.</p></div>
+          <div class="spec-client-fields">
+            <label class="field">Client<input id="spec-client" type="text" maxlength="200" autocomplete="off" placeholder="Client name" data-project-field="Client Name"></label>
+            <label class="field">Plan / Lot<input id="spec-lot" type="text" maxlength="200" autocomplete="off" placeholder="Plan / elevation" data-project-field="Plan / Elevation"></label>
+            <label class="field">Address<input id="spec-address" type="text" maxlength="200" autocomplete="off" placeholder="Site address" data-project-field="Address"></label>
+            <label class="field">Date<input id="spec-date" type="date" data-project-field="Presentation Date"></label>
+          </div>
+        </div>
         <div class="spec-toolbar">
           <label class="search-field"><span aria-hidden="true">⌕</span><input id="spec-filter" type="search" aria-label="Filter line items" placeholder="Filter items, brands, finishes…"></label>
           <div class="chip-group" role="group" aria-label="Group line items by"><button class="chip" data-group="Section">By category</button><button class="chip" data-group="Room / Area">By room</button></div>
@@ -113,15 +122,10 @@
     <div class="dialog-heading"><div><div class="eyebrow">FINISH SCHEDULE</div><h2 id="schedule-dialog-title">Download schedule</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
     <div class="schedule-dialog-body">
       <form id="schedule-form" class="schedule-fields">
-        <p class="muted">These details print in the band at the top of the schedule.</p>
-        <label class="field">Client<input name="client" type="text" maxlength="200" autocomplete="off"></label>
-        <label class="field">Project / Lot<input name="project_lot" type="text" maxlength="200" autocomplete="off"></label>
-        <label class="field">Address<input name="address" type="text" maxlength="200" autocomplete="off"></label>
-        <label class="field">Date<input name="date" type="date"></label>
+        <p class="muted">Client details come from the Spec sheet header and print in the band at the top of the schedule.</p>
         <label class="field">Schedule title<input name="title" type="text" maxlength="80" autocomplete="off"></label>
         <label class="field">Item code prefix<input name="prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label>
         <details class="hide-fields"><summary>Hide columns<span id="schedule-hide-count"></span></summary><div id="schedule-hide-grid" class="hide-grid"></div><p id="schedule-hide-note" class="muted"></p><button type="button" id="schedule-hide-clear" class="text-button">Show every column</button></details>
-        <label class="checkbox-field"><input id="schedule-save-details" type="checkbox" checked> Also save the client, address and date to this project</label>
         <p id="schedule-error" class="form-error" role="alert" hidden></p>
         <div class="schedule-actions"><button type="button" id="schedule-refresh" class="button secondary">Refresh preview</button><button type="submit" id="schedule-download" class="button primary">Download ↓</button></div>
       </form>

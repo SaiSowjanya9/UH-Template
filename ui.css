@@ -286,6 +286,12 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .cell.num { text-align:right; }
 .cell::placeholder { color:#c3bdaf; }
 .cell.dirty { border-color:var(--gold); }
+.link-cell { display:flex; align-items:center; gap:4px; padding:3px 5px 3px 9px; border:1px solid transparent; border-radius:4px; }
+.link-cell.dirty { border-color:var(--gold); }
+.link-cell .product-link { font-size:12px; padding:5px 1px; overflow:hidden; text-overflow:ellipsis; }
+.link-cell.dirty .product-link { color:var(--red); }
+.link-edit { flex:none; font-size:12px; line-height:1; padding:5px 6px; color:#b7a87f; }
+.link-edit:hover { background:#f0ead8; color:var(--gold-ink); }
 .spec-table tr[data-row] { cursor:grab; }
 .spec-table tr[data-row]:active { cursor:grabbing; }
 .drag-col { width:26px; padding:4px 0 4px 10px !important; }

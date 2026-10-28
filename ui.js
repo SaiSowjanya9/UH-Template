@@ -4,7 +4,8 @@ const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
                 specGroup: "Section", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
-                specAutosave: localStorage.getItem("uh-spec-autosave") !== "off", specPending: new Map() };
+                specAutosave: localStorage.getItem("uh-spec-autosave") !== "off", specPending: new Map(),
+                specLinkEdit: new Set() };
 const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -44,9 +45,10 @@ async function refresh() {
   const data = await api("/api/state");
   state.data = data;
   if (!data.projects.some((p) => p["Project ID"] === state.project)) state.project = data.projects[0]?.["Project ID"] || "";
-  if (state.specPending.size) {   // never hold an edit for a line item that no longer exists
+  if (state.specPending.size || state.specLinkEdit.size) {   // never hold an edit for a line item that no longer exists
     const live = new Set(data.selections.map((r) => r._row));
     for (const row of [...state.specPending.keys()]) if (!live.has(row)) state.specPending.delete(row);
+    for (const row of [...state.specLinkEdit]) if (!live.has(row)) state.specLinkEdit.delete(row);
   }
   $("load-error").hidden = true;
   render();
@@ -180,6 +182,14 @@ function render() {
   $("project-summary").hidden = !project || state.view === "manufacturers" || bare;
   $("stats").hidden = !project || state.view === "manufacturers" || bare;
   $("project-details-panel").hidden = !project || state.view !== "selections";
+  $("spec-client-panel").hidden = !project || state.view !== "spec";
+  if (project) {
+    document.querySelectorAll("#spec-client-panel [data-project-field]").forEach((input) => {
+      if (document.activeElement === input) return;   // never clobber a keystroke in progress
+      const value = project[input.dataset.projectField] || "";
+      input.value = input.dataset.projectField === "Presentation Date" ? value.slice(0, 10) : value;
+    });
+  }
   if (project) {
     const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"];
     const custom = project.custom_fields || [];
@@ -247,7 +257,7 @@ function renderTable() {
   const rows = projectRows().filter((r) => (!category || r.Section === category) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer">View product ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -307,9 +317,11 @@ function renderSpec() {
       const pending = state.specPending.get(r._row) || {};   // unsaved edits outlive every re-render
       const edited = c.field in pending;
       const value = String(edited ? pending[c.field] : r[c.field] ?? "");
-      // a saved address is shown as the words "Product Link", never as the raw URL
-      const link = c.link && isUrl(value) ? `<a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer">Product Link ↗</a>` : "";
-      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}>${link}</td>`;
+      // a saved address shows the words "Product Link", never the raw URL; the pencil reopens the input
+      if (c.link && isUrl(value) && !state.specLinkEdit.has(r._row)) {
+        return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Product Link ↗</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address"${r._auto_phase ? " disabled" : ""}>✎</button></div></td>`;
+      }
+      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
@@ -413,7 +425,7 @@ function finishSpecDrop(target, after, card) {
 function remapPendingSpec(order, all) {
   // The server moves each row's contents to sorted position i of order[i], so unsaved
   // edits must follow their selection instead of staying on a row number someone else now owns.
-  if (!state.specPending.size) return;
+  if (!state.specPending.size && !state.specLinkEdit.size) return;
   const positions = [...all].sort((a, b) => a - b);
   const moved = new Map();
   for (const [row, values] of state.specPending) {
@@ -421,6 +433,10 @@ function remapPendingSpec(order, all) {
     moved.set(index < 0 ? row : positions[index], values);
   }
   state.specPending = moved;
+  state.specLinkEdit = new Set([...state.specLinkEdit].map((row) => {
+    const index = order.indexOf(row);
+    return index < 0 ? row : positions[index];
+  }));
 }
 
 function restoreFocus() {
@@ -649,11 +665,10 @@ async function addFromLink() {
 }
 
 function scheduleDetails() {
+  // Client details live in the spec-sheet header, saved to the project itself.
   const values = Object.fromEntries(new FormData($("schedule-form")));
   const defaults = scheduleDefaults();
   return {
-    details: { client: values.client.trim(), project_lot: values.project_lot.trim(),
-               address: values.address.trim(), date: values.date },
     title: values.title.trim() || defaults.title || "Selections",
     prefix: (values.prefix.trim() || defaults.code_prefix || "EX").toUpperCase(),
     hidden: [...state.hidden],
@@ -667,10 +682,6 @@ function openScheduleDialog(format) {
   state.scheduleFormat = format;
   $("schedule-dialog-title").textContent = { pdf: "Download finish schedule", form: "Download fillable schedule" }[format];
   const form = $("schedule-form");
-  form.client.value = project["Client Name"] || "";
-  form.project_lot.value = [project["Project Name"], project["Plan / Elevation"]].filter(Boolean).join(" / ");
-  form.address.value = project.Address || "";
-  form.date.value = (project["Presentation Date"] || "").slice(0, 10);
   form.title.value = $("export-title").value.trim() || defaults.title || "";
   form.prefix.value = $("export-prefix").value.trim() || defaults.code_prefix || "";
   renderHideGrid("schedule-hide-grid", "schedule");
@@ -710,7 +721,7 @@ async function downloadSchedule(event) {
   $("schedule-error").hidden = true;
   setBusy(true, "Building your finish schedule…");
   try {
-    await exportPresentation(state.scheduleFormat, { ...scheduleDetails(), save_details: $("schedule-save-details").checked });
+    await exportPresentation(state.scheduleFormat, { ...scheduleDetails() });
     $("schedule-dialog").close();
   } catch (error) {
     $("schedule-error").textContent = error.message;
@@ -946,9 +957,13 @@ $("spec-autosave").addEventListener("click", () => action(async () => {
 
 $("spec-save").addEventListener("click", () => action(specSaveAll));
 
+let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
 $("spec-groups").addEventListener("change", (event) => {
   if (!event.target.classList.contains("cell")) return;
-  if (state.specAutosave) return action(() => saveCell(event.target));
+  if (state.specAutosave) {
+    specSaving++;
+    return action(() => saveCell(event.target)).finally(() => specSaving--);
+  }
   const input = event.target, row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   const pending = state.specPending.get(row) || {};
@@ -958,6 +973,18 @@ $("spec-groups").addEventListener("change", (event) => {
   else state.specPending.delete(row);
   input.classList.toggle("dirty", field in pending);
   specAutosaveUI();
+});
+$("spec-groups").addEventListener("focusout", (event) => {
+  const input = event.target;
+  if (!input.classList.contains("cell")) return;
+  const column = SPEC_COLUMNS.find((c) => c.field === input.dataset.field);
+  if (!column?.link) return;
+  const wasEditing = state.specLinkEdit.delete(Number(input.dataset.row));
+  // the link editor folds back into the "Product Link" anchor once it loses focus
+  if (!specSaving && (wasEditing || isUrl(input.value.trim()))) renderSpec();
+});
+$("spec-client-panel").addEventListener("change", (event) => {
+  if (event.target.dataset.projectField) action(() => saveProjectField(event.target));
 });
 $("project-detail-values").addEventListener("change", (event) => {
   const input = event.target;
@@ -1047,7 +1074,7 @@ document.addEventListener("click", (event) => {
   if (button.classList.contains("close-dialog")) { button.closest("dialog").close(); return; }
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
-  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; $("search").value = ""; $("section-filter").value = ""; render(); }
+  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; render(); }
   if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
@@ -1061,6 +1088,13 @@ document.addEventListener("click", (event) => {
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));
+  if (button.dataset.linkEdit !== undefined) {
+    const row = Number(button.dataset.linkEdit);
+    state.specLinkEdit.add(row);
+    state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="Product URL"]`;
+    renderSpec();
+    restoreFocus();
+  }
   if (button.dataset.edit) openEditor("selection", projectRows().find((r) => r._row === Number(button.dataset.edit)));
   if (button.dataset.manufacturer !== undefined) openEditor("manufacturer", state.data.manufacturers[Number(button.dataset.manufacturer)]);
 });
