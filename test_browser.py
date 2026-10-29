@@ -99,9 +99,9 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
-    def test_spec_sheet_manual_save_survives_reorder(self):
-        """Manual mode holds edits in page state, so neither a drag (which renumbers
-        workbook rows) nor a background refresh may lose them or move them to another row."""
+    def test_spec_sheet_autosaves_and_manual_save_retries(self):
+        """Every committed cell saves itself and confirms with a toast. The Save button
+        stays as a manual fallback: a save the network drops is held for it to retry."""
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "spec.xlsx"
             shutil.copy2(app.common.WORKBOOK, workbook)
@@ -122,37 +122,42 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#spec-view")).to_be_visible()
                         rows = page.locator(".spec-table tr[data-row]")
                         expect(rows.first).to_be_attached()
-
-                        page.locator("#spec-autosave").click()
-                        expect(page.locator("#spec-autosave")).to_have_text("Auto-save off")
-                        expect(page.locator("#spec-save")).to_be_hidden()
+                        expect(page.locator("#spec-save")).to_have_text("Save")
 
                         moved = rows.first.get_attribute("data-row")
-                        page.locator(f'tr[data-row="{moved}"] input.cell').first.fill("Held edit")
+                        page.locator(f'tr[data-row="{moved}"] input.cell').first.fill("Autosaved edit")
                         page.locator(f'tr[data-row="{moved}"] input.cell').first.blur()
-                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
-                        self.assertEqual(saves, [])   # manual mode writes nothing yet
+                        expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
+                        self.assertEqual(len(saves), 1, saves)   # the edit wrote itself
+
+                        page.locator("#spec-save").click()
+                        expect(page.locator("#toast")).to_have_text("Everything is already saved.")
+
+                        page.route("**/api/selections", lambda route: route.abort())
+                        page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).fill("Retry me")
+                        page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).blur()
+                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)", timeout=15000)
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_value("Retry me")
+                        page.unroute("**/api/selections")
+                        page.locator("#spec-save").click()
+                        expect(page.locator("#toast")).to_have_text("Saved 1 change.")
+                        expect(page.locator("#spec-save")).to_have_text("Save")
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_count(0)
 
                         target = rows.nth(2).get_attribute("data-row")
                         page.drag_and_drop(f'tr[data-row="{moved}"] .drag-handle',
                                            f'tr[data-row="{target}"]',
                                            target_position={"x": 60, "y": 20})
                         expect(page.locator("#toast")).to_have_text("Line item moved.", timeout=15000)
-                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
-                        held = page.locator("#spec-groups .cell.dirty")
-                        expect(held).to_have_count(1)
-                        expect(held).to_have_value("Held edit")
 
                         page.evaluate("refresh()")   # what polling does after any background save
-                        expect(page.locator("#spec-groups .cell.dirty")).to_have_value("Held edit")
+                        expect(page.locator('#spec-groups input.cell[value="Autosaved edit"]')).to_have_count(1)
+                        expect(page.locator('#spec-groups input.cell[value="Retry me"]')).to_have_count(1)
 
-                        page.locator("#spec-save").click()
-                        expect(page.locator("#spec-save")).to_be_hidden()
-                        expect(page.locator("#spec-groups .cell.dirty")).to_have_count(0)
-                        self.assertEqual(len(saves), 1, saves)   # one atomic batch, not one call per row
                         page.reload()
                         page.locator('[data-view="spec"]').click()
-                        expect(page.locator('#spec-groups input.cell[value="Held edit"]')).to_have_count(1)
+                        expect(page.locator('#spec-groups input.cell[value="Autosaved edit"]')).to_have_count(1)
+                        expect(page.locator('#spec-groups input.cell[value="Retry me"]')).to_have_count(1)
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
