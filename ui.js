@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
                 specGroup: "Section", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
-                specAutosave: localStorage.getItem("uh-spec-autosave") !== "off", specPending: new Map(),
+                specPending: new Map(),
                 specLinkEdit: new Set() };
 const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -36,7 +36,9 @@ async function api(path, body, binary = false) {
   }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
-    throw new Error(detail.error || `Request failed (${response.status}).`);
+    const error = new Error(detail.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
   }
   return binary ? response : response.json();
 }
@@ -307,7 +309,7 @@ function renderSpec() {
   if (!all.length) {
     $("spec-groups").innerHTML = '<div class="empty-state"><div class="empty-icon">▤</div><h3>Nothing specified yet</h3><p>Add your first line item to start building this home’s specification.</p></div>';
     $("spec-total").textContent = "—";
-    specAutosaveUI();
+    specSaveUI();
     return;
   }
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
@@ -331,7 +333,7 @@ function renderSpec() {
   }).join("");
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
-  specAutosaveUI();
+  specSaveUI();
 }
 
 let specDrag = null, specPress = null, specRenderPending = false;
@@ -415,7 +417,16 @@ function finishSpecDrop(target, after, card) {
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
   action(async () => {
-    await api("/api/selections/order", { project: state.project, order, updates });
+    const payload = { project: state.project, order, updates };
+    try {
+      await api("/api/selections/order", payload);
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      // AutoLookup may have saved between the last poll and this drop; the same
+      // swap is still valid against the new revision, so refresh and retry once.
+      await refresh();
+      await api("/api/selections/order", payload);
+    }
     remapPendingSpec(order, all);
     await refresh();
     toast("Line item moved.");
@@ -460,6 +471,7 @@ async function saveProjectField(input) {
   // the Project ID travels with every edit so the server updates this row instead of adding one
   await api("/api/projects", { values: { "Project ID": project["Project ID"], [field]: value } });
   await refresh();
+  toast("Saved.");
 }
 
 async function saveProjectCustom(input) {
@@ -472,21 +484,34 @@ async function saveProjectCustom(input) {
   state.focusSelector = `[data-custom-index="${index}"][data-custom-key="${key}"]`;
   await api("/api/projects", { values: { "Project ID": project["Project ID"] }, custom_fields: fields });
   await refresh();
+  toast("Saved.");
+}
+
+function dropHeldSpecEdit(row, field) {
+  const held = state.specPending.get(row);
+  if (!held) return;
+  delete held[field];   // a confirmed save covers whatever this row and field held
+  if (!Object.keys(held).length) state.specPending.delete(row);
+  specSaveUI();
 }
 
 async function saveCell(input) {
   const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
-  if (!record || String(record[field] ?? "") === input.value.trim()) return;
-  if (field === "Item" && !input.value.trim()) { toast("An item needs a name.", true); renderSpec(); return; }
+  if (!record) return;
+  const value = input.value.trim();
+  if (String(record[field] ?? "") === value) { dropHeldSpecEdit(row, field); return; }
+  if (field === "Item" && !value) { toast("An item needs a name.", true); renderSpec(); return; }
   input.classList.add("dirty");
   state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
   try {
-    const result = await api("/api/selections", { row, values: { [field]: input.value.trim() } });
+    const result = await api("/api/selections", { row, values: { [field]: value } });
+    dropHeldSpecEdit(row, field);
     await refresh();
-    if (result.queued) toast("Saved. Automatic product lookup is queued for this change.");
+    toast(result.queued ? "Saved. Automatic product lookup is queued for this change." : "Saved.");
   } catch (error) {
     state.focusSelector = null;
+    holdSpecEdit(input);   // a failed save stays held so Save can retry it
     toast(error.message, true);
     await refresh().catch(() => {});
   }
@@ -923,12 +948,9 @@ $("spec-collapse").addEventListener("click", () => {
 });
 const pendingSpecCount = () => [...state.specPending.values()].reduce((sum, values) => sum + Object.keys(values).length, 0);
 
-function specAutosaveUI() {
+function specSaveUI() {
   const count = pendingSpecCount();
-  $("spec-autosave").textContent = `Auto-save ${state.specAutosave ? "on" : "off"}`;
-  $("spec-autosave").classList.toggle("autosave-on", state.specAutosave);
-  $("spec-save").hidden = !count;
-  $("spec-save").textContent = `Save changes${count ? ` (${count})` : ""}`;
+  $("spec-save").textContent = count ? `Save changes (${count})` : "Save";
 }
 
 async function specSaveAll() {
@@ -948,23 +970,17 @@ async function specSaveAll() {
   } finally { setBusy(false); }
 }
 
-$("spec-autosave").addEventListener("click", () => action(async () => {
-  if (!state.specAutosave && state.specPending.size) await specSaveAll();   // leaving manual mode flushes what is held
-  state.specAutosave = !state.specAutosave;
-  try { localStorage.setItem("uh-spec-autosave", state.specAutosave ? "on" : "off"); } catch {}
-  specAutosaveUI();
+// Manual save stays available even though edits autosave: it commits the cell being
+// typed and retries anything a busy moment or failed save left held.
+$("spec-save").addEventListener("click", () => action(async () => {
+  const editing = document.activeElement;
+  if (editing?.classList?.contains("cell")) editing.blur();
+  if (pendingSpecCount()) await specSaveAll();
+  else if (!specSaving) toast("Everything is already saved.");
 }));
 
-$("spec-save").addEventListener("click", () => action(specSaveAll));
-
-let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
-$("spec-groups").addEventListener("change", (event) => {
-  if (!event.target.classList.contains("cell")) return;
-  if (state.specAutosave) {
-    specSaving++;
-    return action(() => saveCell(event.target)).finally(() => specSaving--);
-  }
-  const input = event.target, row = Number(input.dataset.row), field = input.dataset.field;
+function holdSpecEdit(input) {
+  const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   const pending = state.specPending.get(row) || {};
   if (record && String(record[field] ?? "") === input.value.trim()) delete pending[field];   // back to the saved value
@@ -972,7 +988,15 @@ $("spec-groups").addEventListener("change", (event) => {
   if (Object.keys(pending).length) state.specPending.set(row, pending);
   else state.specPending.delete(row);
   input.classList.toggle("dirty", field in pending);
-  specAutosaveUI();
+  specSaveUI();
+}
+
+let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
+$("spec-groups").addEventListener("change", (event) => {
+  if (!event.target.classList.contains("cell")) return;
+  if (state.busy) { holdSpecEdit(event.target); return; }   // a save is running — hold this edit for Save
+  specSaving++;
+  action(() => saveCell(event.target)).finally(() => specSaving--);
 });
 $("spec-groups").addEventListener("focusout", (event) => {
   const input = event.target;
