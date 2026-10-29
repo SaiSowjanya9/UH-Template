@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
-                specGroup: "Section", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
+                specGroup: "Room / Area", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
                 specPending: new Map(),
                 specLinkEdit: new Set() };
 const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
