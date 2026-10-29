@@ -254,6 +254,13 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 
 /* Spec sheet - cream and gold */
 :root { --cream:#fbf8f1; --cream-deep:#f4eee1; --gold-line:#e3d7bf; --gold-ink:#8d7342; }
+.spec-client { border:1px solid var(--line); background:#fff; border-radius:8px; padding:16px 20px 18px; margin-bottom:16px; }
+.spec-client-head { display:flex; justify-content:space-between; gap:14px; align-items:baseline; margin-bottom:12px; }
+.spec-client-head .muted { margin:0; font-size:10px; }
+.spec-client-fields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
+.spec-client-fields .field { margin-bottom:0; }
+@media(max-width:900px) { .spec-client-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:480px) { .spec-client-fields { grid-template-columns:1fr; } .spec-client-head { flex-direction:column; gap:2px; } }
 .spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
 .spec-toolbar .search-field { flex:1; min-width:220px; }
 #spec-autosave { font-weight:500; color:var(--muted); }
