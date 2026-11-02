@@ -271,6 +271,14 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .chip.active { background:var(--gold); color:#fff; }
 .spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
 #spec-view .spec-toolbar .heading-actions { gap:4px; }
+.spec-toolbar .toolbar-divider { width:1px; height:20px; background:var(--gold-line); margin:0 6px; flex:none; }
+.save-status { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); white-space:nowrap; padding:0 5px; }
+.save-status::before { content:""; width:7px; height:7px; border-radius:50%; background:#97a468; flex:none; }
+.save-status.pending { color:var(--gold-ink); }
+.save-status.pending::before { background:var(--gold); }
+.save-status.saving { color:var(--gold-ink); }
+.save-status.saving::before { background:var(--gold); animation:save-pulse 1s ease-in-out infinite; }
+@keyframes save-pulse { 50% { opacity:.3; } }
 .spec-groups { display:flex; flex-direction:column; gap:14px; }
 .spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
 .spec-card-head { display:flex; align-items:center; gap:12px; width:100%; border:0; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }

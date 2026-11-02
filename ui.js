@@ -62,6 +62,7 @@ function setBusy(value, message = "") {
   $("busy-message").textContent = message;
   document.querySelectorAll("button:not(.close-dialog):not(.sidebar-toggle)").forEach((button) => { button.disabled = value; });
   $("cancel-lookup").disabled = false;
+  specSaveUI();
   if (!value && state.data) render();
 }
 
@@ -948,9 +949,16 @@ $("spec-collapse").addEventListener("click", () => {
 });
 const pendingSpecCount = () => [...state.specPending.values()].reduce((sum, values) => sum + Object.keys(values).length, 0);
 
+let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
+
 function specSaveUI() {
-  const count = pendingSpecCount();
+  const count = pendingSpecCount(), saving = state.busy || specSaving > 0;
   $("spec-save").textContent = count ? `Save changes (${count})` : "Save";
+  const status = $("spec-save-status");
+  status.className = `save-status${saving ? " saving" : count ? " pending" : ""}`;
+  status.textContent = saving ? "Saving…"
+    : count ? `${count} unsaved change${count === 1 ? "" : "s"}`
+    : projectRows().length ? "All changes saved" : "";
 }
 
 async function specSaveAll() {
@@ -991,12 +999,12 @@ function holdSpecEdit(input) {
   specSaveUI();
 }
 
-let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
 $("spec-groups").addEventListener("change", (event) => {
   if (!event.target.classList.contains("cell")) return;
   if (state.busy) { holdSpecEdit(event.target); return; }   // a save is running — hold this edit for Save
   specSaving++;
-  action(() => saveCell(event.target)).finally(() => specSaving--);
+  specSaveUI();
+  action(() => saveCell(event.target)).finally(() => { specSaving--; specSaveUI(); });
 });
 $("spec-groups").addEventListener("focusout", (event) => {
   const input = event.target;
