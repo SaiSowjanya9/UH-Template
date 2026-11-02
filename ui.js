@@ -417,12 +417,24 @@ function finishSpecDrop(target, after, card) {
     }
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
+  // Land the row now: the server round-trip on a hosted workbook takes a moment,
+  // and nobody wants to watch the row hang while it saves.
+  const byRow = new Map(projectRows().map((r) => [r._row, r]));
+  const positions = all.slice().sort((a, b) => a - b);
+  const next = new Map(state.data.selections.map((r) => [r._row, r]));
+  positions.forEach((pos, i) => next.set(pos, byRow.get(order[i])));
+  state.data = { ...state.data, selections: [...next.values()] };
+  for (const [row, values] of Object.entries(updates)) {
+    const record = state.data.selections.find((r) => r._row === Number(row));
+    if (record) Object.assign(record, values);
+  }
+  renderSpec();
   action(async () => {
     const payload = { project: state.project, order, updates };
     try {
       await api("/api/selections/order", payload);
     } catch (error) {
-      if (error.status !== 409) throw error;
+      if (error.status !== 409) { await refresh().catch(() => {}); throw error; }
       // AutoLookup may have saved between the last poll and this drop; the same
       // swap is still valid against the new revision, so refresh and retry once.
       await refresh();
