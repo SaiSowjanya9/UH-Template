@@ -282,7 +282,10 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .cover-field { display:flex; align-items:center; gap:8px; }
 .cover-field .cell { flex:1; min-width:0; }
 .cover-field .text-button { flex:none; }
-.cover-thumb { display:block; width:140px; max-height:88px; object-fit:cover; border:1px solid var(--line); border-radius:5px; margin-top:8px; }
+.cover-thumb { display:block; width:140px; max-height:88px; object-fit:cover; border:1px solid var(--line); border-radius:5px; margin-top:8px;  cursor:zoom-in; }
+.cover-lightbox { width:auto; max-width:min(1100px,94vw); max-height:92vh; padding:12px; border:0; border-radius:8px; background:#fdfbf4; box-shadow:0 25px 90px #1c160a80; cursor:zoom-out; }
+.cover-lightbox::backdrop { background:#241d0fb8; backdrop-filter:blur(4px); }
+.cover-lightbox img { display:block; max-width:calc(94vw - 24px); max-height:calc(92vh - 24px); object-fit:contain; border-radius:4px; }
 .spec-groups { display:flex; flex-direction:column; gap:14px; }
 .spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
 .spec-card-head { display:flex; align-items:center; gap:12px; width:100%; border:0; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }

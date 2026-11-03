@@ -1043,8 +1043,15 @@ $("project-detail-values").addEventListener("change", (event) => {
   action(() => (input.dataset.projectField ? saveProjectField(input) : saveProjectCustom(input)));
 });
 $("project-detail-values").addEventListener("click", (event) => {
+  const thumb = event.target.closest(".cover-thumb");
+  if (thumb) {
+    $("cover-lightbox-img").src = thumb.src;
+    $("cover-lightbox").showModal();
+    return;
+  }
   if (event.target.closest("[data-cover-upload]") && !state.busy && selectedProject()) $("cover-file").click();
 });
+$("cover-lightbox").addEventListener("click", () => $("cover-lightbox").close());
 async function uploadCover(file) {
   const project = selectedProject();
   if (!project || !file) return;
