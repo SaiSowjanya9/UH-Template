@@ -279,6 +279,10 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .save-status.saving { color:var(--gold-ink); }
 .save-status.saving::before { background:var(--gold); animation:save-pulse 1s ease-in-out infinite; }
 @keyframes save-pulse { 50% { opacity:.3; } }
+.cover-field { display:flex; align-items:center; gap:8px; }
+.cover-field .cell { flex:1; min-width:0; }
+.cover-field .text-button { flex:none; }
+.cover-thumb { display:block; width:140px; max-height:88px; object-fit:cover; border:1px solid var(--line); border-radius:5px; margin-top:8px; }
 .spec-groups { display:flex; flex-direction:column; gap:14px; }
 .spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
 .spec-card-head { display:flex; align-items:center; gap:12px; width:100%; border:0; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }

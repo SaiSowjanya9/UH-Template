@@ -36,6 +36,11 @@ OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Descrip
 # clicks "Product Link" under "Product Link" instead of reading a raw address.
 PRODUCT_LINK = "Product Link"
 GENERATED_SELECTION_FIELDS = [PRODUCT_LINK]
+
+# A Cover Image cell holding "cover:<name>" points at a file the app stored: ./covers beside the
+# local workbook, objects under covers/ in the hosted bucket. Plain URLs and file paths still work.
+COVER_PREFIX = "cover:"
+COVER_NAME = re.compile(r"^cover-[A-Za-z0-9_-]{1,50}\.(png|jpg)$")
 LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
 # Numeric input columns: (maximum, message)
 NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
@@ -555,6 +560,20 @@ class LocalBackend:
             raise ValidationError("That saved copy is no longer available. Refresh and try again.")
         return path.read_bytes()
 
+    @property
+    def cover_dir(self):
+        return self.path.parent / "covers"
+
+    def store_cover(self, name, raw, content_type="image/png"):
+        self.cover_dir.mkdir(exist_ok=True)
+        (self.cover_dir / name).write_bytes(raw)
+
+    def read_cover(self, name):
+        path = self.cover_dir / name
+        if path.parent.resolve() != self.cover_dir.resolve() or not path.is_file():
+            raise ValidationError("That cover image is no longer on disk. Upload it again.")
+        return path.read_bytes()
+
     def state(self):
         key = hashlib.sha256(str(self.path.resolve()).encode("utf-8")).hexdigest()[:16]
         return FileState(self.path.parent / "lookup_state" / f"{key}.json")
@@ -632,6 +651,17 @@ class WorkbookStore:
         if not BACKUP_PATTERN.match(name):
             raise ValidationError("Choose one of the saved copies listed here.")
         return self.backend.read_backup(name)
+
+    def store_cover(self, name, raw, content_type="image/png"):
+        """A cover image lives outside the workbook, so it survives unchanged across saves."""
+        if not COVER_NAME.match(name):
+            raise ValidationError("Invalid cover image name.")
+        self.backend.store_cover(name, raw, content_type)
+
+    def read_cover(self, name):
+        if not COVER_NAME.match(name):
+            raise ValidationError("Invalid cover image name.")
+        return self.backend.read_cover(name)
 
     def import_bytes(self, raw, revision):
         try:

@@ -19,12 +19,18 @@ sign-off block. Brand colors, fonts, logo, contact line and the schedule default
 """
 import argparse
 import datetime as dt
+import io
+import ipaddress
 import json
 import re
+import socket
 from collections import OrderedDict
 from pathlib import Path
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
+import requests
+from PIL import Image
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
@@ -32,12 +38,12 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, PageTemplate,
-                                Paragraph, Spacer, Table, TableStyle)
+from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, NextPageTemplate,
+                                PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
-from common import BASE_DIR, Sheet, clean, open_workbook, section_order
-from workbook_store import PRODUCT_LINK, http_url, presentation_details
+from common import BASE_DIR, WORKBOOK, Sheet, clean, open_workbook, section_order
+from workbook_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
 M = 46.8                         # side margins
@@ -259,6 +265,64 @@ def band_pair(primary, secondary):
     return combined
 
 
+def public_url(value):
+    """An http(s) address that cannot reach back into a private network or this machine.
+
+    The hosted app fetches whatever a Cover Image cell holds, so loopback, link-local and
+    private ranges (including cloud metadata endpoints) are refused before connecting.
+    """
+    if not http_url(value):
+        return False
+    try:
+        infos = socket.getaddrinfo(urlsplit(value).hostname, None)
+        return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
+    except (OSError, ValueError):
+        return False
+
+
+def resolve_cover(value):
+    """Cover Image cell -> image bytes: an app upload (cover:name), a web address, or a file path.
+
+    Uploads land in ./covers beside the workbook; the hosted app resolves the same reference
+    through its storage backend and passes the bytes in. A source that cannot be read simply
+    produces no cover rather than failing the schedule.
+    """
+    value = clean(value)
+    if not value:
+        return None
+    if value.startswith(COVER_PREFIX):
+        folder = WORKBOOK.parent / "covers"
+        path = folder / value[len(COVER_PREFIX):]
+        if path.parent.resolve() != folder.resolve() or not path.is_file():
+            return None
+        return path.read_bytes()
+    if http_url(value):
+        if not public_url(value):
+            return None
+        try:
+            response = requests.get(value, timeout=15, headers={"User-Agent": "UH-Homes-Selections/1.0"})
+            if response.ok and len(response.content) <= 8_000_000:
+                return response.content
+            return None
+        except requests.RequestException:
+            return None
+    path = Path(value)
+    path = path if path.is_absolute() else WORKBOOK.parent / path
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def open_cover(source):
+    """Cover bytes -> a PIL image, or None when the source is not a usable image."""
+    try:
+        with Image.open(io.BytesIO(source)) as image:
+            return image.convert("RGB")
+    except Exception:
+        return None
+
+
 def band_values(project):
     return list(zip(BAND_FIELDS, [clean(project.get("Client Name")),
                                   band_pair(project.get("Project Name"), project.get("Plan / Elevation")),
@@ -331,6 +395,75 @@ def furniture(canvas, doc, title, draft):
     has_mark = brand_image(canvas, CFG.get("logo_mark_path"), M, 24.48, width=MARK_W)
     place(canvas, 64.8 if has_mark else M, 28.8, CFG.get("contact_line", ""), FONT_B, 7.5, C["muted"])
     place(canvas, PAGE_W - M, 28.8, f"Page {doc.page}", FONT_B, 7.5, C["muted"], "right")
+    if draft:
+        canvas.setFillColor(C["accent"])
+        canvas.setFillAlpha(0.07)
+        canvas.setFont(FONT_BB, 120)
+        canvas.translate(PAGE_W / 2, PAGE_H / 2)
+        canvas.rotate(28)
+        canvas.drawCentredString(0, -40, "DRAFT")
+    canvas.restoreState()
+
+
+def cover_page(canvas, doc, image, project, title, draft):
+    """Opening page when a project has a cover image: brand header, the home's rendering
+    aspect-fit inside a hairline frame, then the project and client centred underneath."""
+    canvas.saveState()
+    logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M, 734.4, height=LOGO_H)
+    if not logo_width:
+        place(canvas, M, 738, CFG["company_name"], FONT_BB, 13, C["dark"])
+    eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
+    place(canvas, PAGE_W - M, 752.4, f"{eyebrow}   \u00b7   DRAFT" if draft else eyebrow, FONT_BB, 7, C["accent"], "right")
+    canvas.setStrokeColor(C["dark"])
+    canvas.setLineWidth(0.8)
+    canvas.line(M, HEAD_RULE_Y, PAGE_W - M, HEAD_RULE_Y)
+
+    box_y, box_h = 285, 396
+    iw, ih = image.size
+    scale = min(CONTENT_W / iw, box_h / ih)
+    w, h = iw * scale, ih * scale
+    canvas.setStrokeColor(C["hairline"])
+    canvas.setLineWidth(0.5)
+    canvas.rect(M, box_y, CONTENT_W, box_h, stroke=1, fill=0)
+    canvas.drawImage(ImageReader(image), M + (CONTENT_W - w) / 2, box_y + (box_h - h) / 2, w, h, mask="auto")
+
+    y = box_y - 42
+    name = clean(project.get("Project Name")) or clean(project.get("Project ID"))
+    size, shown = fit(name, FONT_H, 19, CONTENT_W - 40, minimum=11)
+    canvas.setFont(FONT_H, size)
+    canvas.setFillColor(C["dark"])
+    canvas.drawCentredString(PAGE_W / 2, y, shown)
+    plan = clean(project.get("Plan / Elevation"))
+    if plan:
+        y -= 17
+        size, shown = fit(plan, FONT_B, 11, CONTENT_W - 40, minimum=7)
+        canvas.setFont(FONT_B, size)
+        canvas.setFillColor(C["muted"])
+        canvas.drawCentredString(PAGE_W / 2, y, shown)
+    y -= 15
+    canvas.setStrokeColor(C["accent"])
+    canvas.setLineWidth(1.2)
+    canvas.line(PAGE_W / 2 - 24, y, PAGE_W / 2 + 24, y)
+    y -= 16
+    details = "   \u00b7   ".join(part for part in [clean(project.get("Client Name")),
+                                                clean(project.get("Address")),
+                                                fmt_date(project.get("Presentation Date"))] if part)
+    size, shown = fit(details, FONT_B, 9.5, CONTENT_W - 30, minimum=6.5)
+    canvas.setFont(FONT_B, size)
+    canvas.setFillColor(C["body"])
+    canvas.drawCentredString(PAGE_W / 2, y, shown)
+    y -= 15
+    size, shown = fit(title, FONT_BB, 8, CONTENT_W - 30, minimum=6)
+    canvas.setFont(FONT_BB, size)
+    canvas.setFillColor(C["accent"])
+    canvas.drawCentredString(PAGE_W / 2, y, shown.upper())
+
+    canvas.setStrokeColor(C["hairline"])
+    canvas.setLineWidth(0.5)
+    canvas.line(M, FOOT_RULE_Y, PAGE_W - M, FOOT_RULE_Y)
+    canvas.setFont(FONT_B, 7.5)
+    canvas.setFillColor(C["muted"])
+    canvas.drawCentredString(PAGE_W / 2, 28.8, CFG.get("contact_line", ""))
     if draft:
         canvas.setFillColor(C["accent"])
         canvas.setFillAlpha(0.07)
@@ -459,8 +592,9 @@ def detail_flowables(project, rows, hidden=()):
 
 
 # --------------------------------------------------------------------------
-def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None, hidden=()):
+def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=None, rev=None, hidden=(), cover=None):
     title, rows = schedule_title(title), numbered(rows, code_prefix(prefix))
+    cover_image = open_cover(cover) if cover else None
     story = [Band(band_values(project)), Spacer(0, BAND_GAP)]
     for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
         if index:
@@ -486,8 +620,15 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
                           author=CFG["company_name"],
                           subject=f"Revision {rev} - exported {dt.date.today().isoformat()}" if rev else "")
     frame = Frame(M, BODY_BOTTOM, CONTENT_W, BODY_TOP - BODY_BOTTOM, 0, 0, 0, 0, id="schedule")
-    doc.addPageTemplates([PageTemplate("schedule", [frame],
-                                       onPage=lambda canvas, document: furniture(canvas, document, title, draft))])
+    templates = []
+    if cover_image:
+        templates.append(PageTemplate("cover", [Frame(M, BODY_BOTTOM, CONTENT_W, BODY_TOP - BODY_BOTTOM, 0, 0, 0, 0, id="cover")],
+                                      onPage=lambda canvas, document: cover_page(canvas, document, cover_image, project, title, draft)))
+    templates.append(PageTemplate("schedule", [frame],
+                                  onPage=lambda canvas, document: furniture(canvas, document, title, draft)))
+    doc.addPageTemplates(templates)
+    if cover_image:
+        story = [Spacer(0, 0), NextPageTemplate("schedule"), PageBreak()] + story
     doc.build(story)
     return out
 
@@ -517,7 +658,8 @@ def main():
         if not rows:
             print(f"- {pid}: no selections to include, skipped")
             continue
-        out = build(pid, projects[pid], rows, args.draft, title=args.title, prefix=args.prefix, hidden=hidden)
+        out = build(pid, projects[pid], rows, args.draft, title=args.title, prefix=args.prefix, hidden=hidden,
+                    cover=resolve_cover(projects[pid].get("Cover Image")))
         print(f"+ {pid}: {len(rows)} selections -> {out.relative_to(BASE_DIR)}")
         pending = [row for row in rows if row["Lookup Status"] != "Verified"]
         if pending and not args.draft:

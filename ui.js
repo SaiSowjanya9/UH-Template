@@ -200,6 +200,13 @@ function render() {
     $("project-detail-values").innerHTML = standard.map((name) => {
       const date = name === "Presentation Date";
       const value = date ? (project[name] || "").slice(0, 10) : project[name] || "";
+      if (name === "Cover Image") {
+        const source = value.startsWith("cover:") ? `/api/covers/${encodeURIComponent(value.slice(6))}`
+          : isUrl(value) ? value : "";
+        return entry(`<dt>${esc(name)}</dt>`,
+          `<div class="cover-field"><input class="cell" data-project-field="${esc(name)}" type="text" value="${esc(value)}" maxlength="4000" placeholder="Image URL, or upload a file"><button type="button" class="text-button" data-cover-upload>Upload…</button></div>` +
+          (source ? `<img class="cover-thumb" src="${esc(source)}" alt="Cover image preview" loading="lazy" referrerpolicy="no-referrer">` : ""));
+      }
       return entry(`<dt>${esc(name)}</dt>`,
         `<input class="cell" data-project-field="${esc(name)}" type="${date ? "date" : "text"}" value="${esc(value)}" maxlength="4000" placeholder="Not provided">`);
     }).join("") + custom.map((field, index) => entry(
@@ -583,8 +590,8 @@ function openEditor(kind, record, prefill = {}) {
   const r = record || prefill;
   if (kind === "project") {
     fields = field("Project ID", r["Project ID"], { required: true, readonly: !!record, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
-    note = record ? "Cover Image accepts a public image URL or a local file path. Each project gets its own presentation."
-      : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts a public image URL or a local file path.";
+    note = record ? "Cover Image accepts an uploaded image, a public image URL, or a local file path, and opens the exported schedule. Each project gets its own presentation."
+      : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.";
   } else if (kind === "selection") {
     fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
     if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
@@ -1034,6 +1041,27 @@ $("project-detail-values").addEventListener("change", (event) => {
   const input = event.target;
   if (!input.classList.contains("cell")) return;
   action(() => (input.dataset.projectField ? saveProjectField(input) : saveProjectCustom(input)));
+});
+$("project-detail-values").addEventListener("click", (event) => {
+  if (event.target.closest("[data-cover-upload]") && !state.busy && selectedProject()) $("cover-file").click();
+});
+async function uploadCover(file) {
+  const project = selectedProject();
+  if (!project || !file) return;
+  const data = new FormData();
+  data.append("file", file);
+  data.append("revision", state.data.revision);
+  setBusy(true, "Saving the cover image…");
+  try {
+    await api(`/api/projects/${encodeURIComponent(project["Project ID"])}/cover`, data);
+    await refresh();
+    toast("Cover image saved. It opens this project’s next exported schedule.");
+  } finally { setBusy(false); }
+}
+$("cover-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  action(() => uploadCover(file));
 });
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
 function whenText(iso) {

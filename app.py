@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 from flask import Flask, Request, jsonify, redirect, render_template, request, send_file, session, url_for
+from PIL import Image
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -21,7 +22,7 @@ import find_urls
 import spec_template
 import supabase_store
 from auto_lookup import AutoLookup
-from workbook_store import (CLIENT_STATUSES, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
+from workbook_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
                             PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES,
                             ValidationError, WorkbookStore, delete_record, ensure_selection_columns,
                             http_url, hyperlink_formula, next_row, parse_hyperlink, put, records,
@@ -304,6 +305,58 @@ def save_project():
         if automation and seeded:
             automation.observe(wb)
     return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded)
+
+
+COVER_MIME = {".png": "image/png", ".jpg": "image/jpeg"}
+COVER_PIXEL_LIMIT = 2400
+
+
+@app.post("/api/projects/<pid>/cover")
+def upload_cover(pid):
+    """Store a cover image outside the workbook and point the project's Cover Image at it."""
+    upload = request.files.get("file")
+    if not upload:
+        raise ValidationError("Choose a PNG or JPEG image.")
+    try:
+        with Image.open(upload.stream) as source:
+            image = source.convert("RGBA") if source.mode in {"RGBA", "LA", "PA", "P"} else source.convert("RGB")
+        image.thumbnail((COVER_PIXEL_LIMIT, COVER_PIXEL_LIMIT), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        if image.mode == "RGBA" and image.getchannel("A").getextrema()[0] < 255:
+            image.save(buffer, "PNG")
+            ext, mime = ".png", "image/png"
+        else:
+            image.convert("RGB").save(buffer, "JPEG", quality=88)
+            ext, mime = ".jpg", "image/jpeg"
+    except Exception:
+        raise ValidationError("That file is not a readable image. Choose a PNG or JPEG.") from None
+    name = f"cover-{re.sub(r'[^A-Za-z0-9_-]', '_', pid)[:40]}{ext}"
+    with store.lock:
+        wb, revision = current({"revision": request.form.get("revision", "")})
+        project = next((p for p in records(wb, "Projects") if p["Project ID"] == pid), None)
+        if not project:
+            raise ValidationError("Choose a valid project.")
+        store.store_cover(name, buffer.getvalue(), mime)
+        put(common.Sheet(wb["Projects"]), project["_row"], {"Cover Image": f"{COVER_PREFIX}{name}"})
+        store.save(wb, revision, f"cover image {pid}")
+    return jsonify(ok=True, value=f"{COVER_PREFIX}{name}")
+
+
+@app.get("/api/covers/<name>")
+def project_cover(name):
+    """A stored cover image, for the thumbnail beside the Cover Image field. The name comes
+    from a cover: cell value, so no workbook read is needed to serve it."""
+    return send_file(io.BytesIO(store.read_cover(name)),
+                     mimetype=COVER_MIME.get(Path(name).suffix, "image/png"))
+
+
+def cover_bytes(value):
+    """A Cover Image value -> bytes for the export. Uploads come through the storage backend;
+    web addresses and file paths resolve exactly as they do for the command-line builder."""
+    value = common.clean(value)
+    if value.startswith(COVER_PREFIX):
+        return store.read_cover(value[len(COVER_PREFIX):])
+    return build_lookbook.resolve_cover(value)
 
 
 @app.post("/api/selections/order")
@@ -919,6 +972,8 @@ def presentation():
     build_schedule = getattr(importlib.import_module(module), builder)
     # A working copy is neither watermarked nor numbered: it is filled in and brought back.
     extra = {} if kind in FILLABLE_FORMATS else {"draft": mode == "draft", "rev": None if preview else rev}
+    if kind == "pdf":
+        extra["cover"] = cover_bytes(shown.get("Cover Image"))
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
         output = build_schedule(project["Project ID"], shown, rows, output_dir=Path(folder),
                                 title=title, prefix=prefix, hidden=hidden, **extra)

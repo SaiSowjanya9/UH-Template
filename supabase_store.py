@@ -71,10 +71,10 @@ class Supabase:
         response = self.session.get(f"{self.url}/storage/v1/object/{self.bucket}/{path}", timeout=TIMEOUT)
         return self._check(response, "read the stored workbook").content
 
-    def upload(self, path, raw):
+    def upload(self, path, raw, content_type=XLSX_MIME):
         response = self.session.post(f"{self.url}/storage/v1/object/{self.bucket}/{path}", data=raw,
-                                     headers={"Content-Type": XLSX_MIME, "x-upsert": "true"}, timeout=TIMEOUT)
-        self._check(response, "store the workbook")
+                                     headers={"Content-Type": content_type, "x-upsert": "true"}, timeout=TIMEOUT)
+        self._check(response, "store the file")
 
     def remove(self, path):
         self.session.delete(f"{self.url}/storage/v1/object/{self.bucket}/{path}", timeout=TIMEOUT)
@@ -234,6 +234,16 @@ class SupabaseBackend:
         if not rows or not rows[0]["object_path"]:
             raise ValidationError("That saved copy is no longer available. Refresh and try again.")
         return self.api.download(rows[0]["object_path"])
+
+    def store_cover(self, name, raw, content_type="image/png"):
+        # Lives beside the versions rather than among them: it is not a restorable workbook.
+        self.api.upload(f"covers/{name}", raw, content_type)
+
+    def read_cover(self, name):
+        try:
+            return self.api.download(f"covers/{name}")
+        except RuntimeError:
+            raise ValidationError("That cover image is no longer in storage. Upload it again.") from None
 
     def state(self):
         key = hashlib.sha256(f"{self.config['bucket']}/{self.name}".encode("utf-8")).hexdigest()[:16]
