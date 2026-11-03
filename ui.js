@@ -9,9 +9,13 @@ const state = { data: null, project: "", view: "selections", page: 0, busy: fals
 const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
+// A Cover Image cell -> something an <img> can show: stored upload or web address. Local file paths
+// reach only the export builders, never the browser.
+const coverSource = (value) => (value || "").startsWith("cover:") ? `/api/covers/${encodeURIComponent(value.slice(6))}` : isUrl(value) ? value : "";
 const selectedProject = () => state.data?.projects.find((p) => p["Project ID"] === state.project);
 const projectRows = () => state.data?.selections.filter((r) => r["Project ID"] === state.project) || [];
 let toastTimer;
+let EMBLEM_SVG;
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -196,13 +200,17 @@ function render() {
   if (project) {
     const standard = ["Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"];
     const custom = project.custom_fields || [];
-    const entry = (label, control, isCustom) => `<div class="detail-entry ${isCustom ? "custom-detail" : ""}">${label}<dd>${control}</dd></div>`;
-    $("project-detail-values").innerHTML = standard.map((name) => {
+    // Rebuilding the inputs on every poll would steal focus and reload the cover thumbnail, so only
+    // repaint when the underlying values actually changed.
+    const detailsSig = JSON.stringify([project["Project ID"], standard.map((n) => project[n] || ""), custom]);
+    if (detailsSig !== state.detailsSig) {
+      state.detailsSig = detailsSig;
+      const entry = (label, control, isCustom) => `<div class="detail-entry ${isCustom ? "custom-detail" : ""}">${label}<dd>${control}</dd></div>`;
+      $("project-detail-values").innerHTML = standard.map((name) => {
       const date = name === "Presentation Date";
       const value = date ? (project[name] || "").slice(0, 10) : project[name] || "";
       if (name === "Cover Image") {
-        const source = value.startsWith("cover:") ? `/api/covers/${encodeURIComponent(value.slice(6))}`
-          : isUrl(value) ? value : "";
+        const source = coverSource(value);
         return entry(`<dt>${esc(name)}</dt>`,
           `<div class="cover-field"><input class="cell" data-project-field="${esc(name)}" type="text" value="${esc(value)}" maxlength="4000" placeholder="Image URL, or upload a file"><button type="button" class="text-button" data-cover-upload>Upload…</button></div>` +
           (source ? `<img class="cover-thumb" src="${esc(source)}" alt="Cover image preview" loading="lazy" referrerpolicy="no-referrer">` : ""));
@@ -212,8 +220,16 @@ function render() {
     }).join("") + custom.map((field, index) => entry(
       `<dt><input class="cell cell-label" data-custom-index="${index}" data-custom-key="name" value="${esc(field.name)}" maxlength="80" aria-label="Field name"></dt>`,
       `<input class="cell" data-custom-index="${index}" data-custom-key="value" value="${esc(field.value)}" maxlength="2000" placeholder="Not provided" aria-label="${esc(field.name)}">`, true)).join("");
+    }
     $("project-custom-empty").hidden = custom.length > 0;
+  } else {
+    state.detailsSig = null;
   }
+  const emblem = $("project-emblem");
+  const emblemSrc = coverSource(project?.["Cover Image"]);
+  EMBLEM_SVG ||= emblem.innerHTML;   // the house line-art, kept for projects with no usable image
+  emblem.classList.toggle("has-cover", !!emblemSrc);
+  emblem.innerHTML = emblemSrc ? `<img src="${esc(emblemSrc)}" alt="Cover image">` : EMBLEM_SVG;
   if (project) {
     $("project-id").textContent = project["Project ID"];
     $("project-name").textContent = project["Project Name"];
@@ -1052,6 +1068,12 @@ $("project-detail-values").addEventListener("click", (event) => {
   if (event.target.closest("[data-cover-upload]") && !state.busy && selectedProject()) $("cover-file").click();
 });
 $("cover-lightbox").addEventListener("click", () => $("cover-lightbox").close());
+$("project-emblem").addEventListener("click", () => {
+  const img = $("project-emblem").querySelector("img");
+  if (!img) return;
+  $("cover-lightbox-img").src = img.src;
+  $("cover-lightbox").showModal();
+});
 async function uploadCover(file) {
   const project = selectedProject();
   if (!project || !file) return;
