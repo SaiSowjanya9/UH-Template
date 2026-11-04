@@ -207,7 +207,7 @@ alongside the files); to use different brand fonts, drop the `.ttf` files in and
 ```
 UH_Homes_Selections_Tracker.xlsx   the workbook
 find_urls.py                       product link lookup
-build_lookbook.py                  finish schedule PDF generator
+build_lookbook.py                  finish schedule PDF and spec sheet generators
 build_word.py                      editable Word version, fillable copy and spec sheet
 build_powerpoint.py                editable PowerPoint version
 lookbook_config.json               brand settings

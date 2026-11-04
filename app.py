@@ -709,12 +709,9 @@ def export_spec_csv():
                      download_name=f"{name}_spec_sheet.csv", mimetype="text/csv")
 
 
-@app.get("/api/selections/docx")
-def export_spec_docx():
-    """The same line items as the CSV, as a Word document to read, print and mark up."""
-    import build_word
+def spec_export_rows():
+    """The requested project's line items in spec-sheet order for a document export."""
     project_id = common.clean(request.args.get("project"))
-    hidden = hidden_option(request.args.get("hide", ""))
     with store.lock:
         wb, _ = store.snapshot()
         project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
@@ -725,10 +722,30 @@ def export_spec_docx():
     if not rows:
         raise ValidationError("This project has no line items to export.")
     rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    return project_id, project, rows
+
+
+@app.get("/api/selections/docx")
+def export_spec_docx():
+    """The same line items as the CSV, as a Word document to read, print and mark up."""
+    import build_word
+    hidden = hidden_option(request.args.get("hide", ""))
+    project_id, project, rows = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder), hidden=hidden)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=DOCX_MIME)
+
+
+@app.get("/api/selections/pdf")
+def export_spec_pdf():
+    """The spec sheet as a printable PDF: the same columns as the Word copy."""
+    hidden = hidden_option(request.args.get("hide", ""))
+    project_id, project, rows = spec_export_rows()
+    with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
+        output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder), hidden=hidden)
+        raw = output.read_bytes()
+    return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=PDF_MIME)
 
 
 @app.post("/api/selections/csv")

@@ -46,7 +46,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, HEADING_OVERHANG, HIDEABLE,
                             ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W, NOTE_STYLE, OUT, PAD_X, PAD_Y,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, band_values, clean,
+                            SIGN_H, SIGN_W, SIGN_X, SPEC_COLUMNS, SPEC_TITLE, band_values, clean,
                             code_prefix, description, fit, group_sections, hidden_columns,
                             load_data, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps)
@@ -61,15 +61,6 @@ CODE, ITEM, ROOM, DESC, NOTE = ((style.fontSize, style.leading) for style in
                                  NOTE_STYLE))
 HEADER_TOP, FOOTER_BOTTOM = 32, 24   # header and footer insets from the page edges
 BAND_INSET = 10.8                    # left and right padding inside a band field
-SPEC_TITLE = "Spec Sheet"
-# Internal column dump; Section becomes the heading and the lookbook flag a note under the item.
-# (column, width share, the hideable key that drops it); shares are rescaled to what is shown.
-SPEC_COLUMNS = [("Room / Area", 68, "Room / Area"), ("Item", 100, "Item"),
-                ("Manufacturer", 78, "Manufacturer"), ("Model #", 66, "Model #"),
-                ("Finish / Color", 80, "Finish / Color"), ("Qty", 28, "Qty"),
-                ("Unit Price", 46, "Unit Price"), ("Markup %", 42, "Markup %"),
-                ("Client Status", 54, "Client Status"), (PRODUCT_LINK, 52, "Product URL"),
-                ("Client Notes", 84, "Client Notes")]
 
 # WordprocessingML fixes the order of these property children, so new ones are inserted in place.
 PPR_ORDER = ("w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr",
@@ -635,7 +626,8 @@ def main():
     parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
-    parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
+    parser.add_argument("--hide", default="",
+                        help="Columns to leave out, comma separated: " + ", ".join(HIDEABLE).replace("%", "%%"))
     args = parser.parse_args()
     try:
         hidden = hidden_columns(args.hide)

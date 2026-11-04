@@ -953,13 +953,14 @@ const FILE_ACTIONS = {
   pptx: () => action(() => exportPresentation("pptx")),
   csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
   "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
+  "spec-pdf": () => { window.location.href = `/api/selections/pdf${specQuery()}`; },
   workbook: () => { window.location.href = "/api/workbook"; },
   "import-csv": () => $("spec-import-file").click(),
   "import-form": () => $("form-import-file").click(),
   "import-workbook": () => $("import-file").click(),
 };
 const NEEDS_PROJECT = new Set(["pdf", "docx", "form", "form-docx", "pptx", "csv", "spec-docx",
-                               "import-csv", "import-form"]);
+                               "spec-pdf", "import-csv", "import-form"]);
 
 $("files-button").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
 $("files-dialog").addEventListener("click", (event) => {

@@ -354,6 +354,15 @@ class AppTests(unittest.TestCase):
         self.assertIn("ITEM", text)
         self.assertEqual(self.client.get(f"/api/selections/docx?project={project}&hide=Nonsense").status_code, 400)
 
+        pdf_sheet = self.client.get(f"/api/selections/pdf?project={project}&hide={','.join(hidden)}")
+        self.assertEqual(pdf_sheet.status_code, 200)
+        text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf_sheet.data)).pages).split())
+        self.assertNotIn("MANUFACTURER", text)
+        self.assertNotIn("UNIT PRICE", text)
+        self.assertNotIn("1234.5", text)
+        self.assertIn("ITEM", text)
+        self.assertEqual(self.client.get(f"/api/selections/pdf?project={project}&hide=Nonsense").status_code, 400)
+
         sheet = self.client.get(f"/api/selections/csv?project={project}&hide={','.join(hidden)}")
         self.assertEqual(sheet.status_code, 200)
         lines = list(csvlib.DictReader(io.StringIO(sheet.data.decode("utf-8-sig"))))
@@ -858,6 +867,17 @@ class AppTests(unittest.TestCase):
         self.assertIn("MANUFACTURER", docx_text(sheet.data))
         self.assertEqual(self.client.get("/api/selections/docx?project=nope").status_code, 400)
 
+        sheet_pdf = self.client.get(f"/api/selections/pdf?project={pid}")
+        self.assertEqual(sheet_pdf.status_code, 200)
+        self.assertIn("Spec_Sheet", sheet_pdf.headers["Content-Disposition"])
+        from pypdf import PdfReader
+        # narrow column headings wrap, so check the words against whitespace-normalised text
+        text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(sheet_pdf.data)).pages)
+        text = " ".join(text.split())
+        self.assertIn("MANUFACTURER", text)
+        self.assertIn("UNIT PRICE", text)
+        self.assertEqual(self.client.get("/api/selections/pdf?project=nope").status_code, 400)
+
     def test_fillable_word_round_trip(self):
         """A Word working copy reads back through the same route as the fillable PDF."""
         pid = self.state()["projects"][0]["Project ID"]
@@ -941,6 +961,9 @@ class AppTests(unittest.TestCase):
         # the spec sheet is the internal document, so there the price is meant to show
         sheet = self.client.get(f"/api/selections/docx?project={row['Project ID']}")
         self.assertIn("4321.99", docx_text(sheet.data))
+        sheet_pdf = self.client.get(f"/api/selections/pdf?project={row['Project ID']}")
+        sheet_text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(sheet_pdf.data)).pages)
+        self.assertIn("4321.99", sheet_text)
 
     def test_backups_are_listed_and_restore_earlier_data(self):
         row = self.state()["selections"][0]

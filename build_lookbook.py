@@ -7,6 +7,7 @@ Usage:
     python build_lookbook.py --all --verified-only                         # only rows marked 'Verified'
     python build_lookbook.py --project UH-101 --draft                      # internal copy (watermark + status)
     python build_lookbook.py --project UH-101 --title "Interior Selections" --prefix IN
+    python build_lookbook.py --project UH-101 --spec                       # internal priced spec sheet
     python build_lookbook.py --project UH-101 --hide "Manufacturer,Qty"      # leave columns out
 
 Output: output/<ProjectID>_<Project Name>_<Schedule title>.pdf
@@ -32,7 +33,6 @@ from xml.sax.saxutils import escape
 import requests
 from PIL import Image
 from reportlab.lib.colors import HexColor
-from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
@@ -87,9 +87,26 @@ CODE_STYLE = style("code", 9, 13, C["muted"])
 ITEM_STYLE = style("item", 10, 13, C["dark"])
 ROOM_STYLE = style("room", 8, 10.5, C["muted"])
 DESC_STYLE = style("description", 10, 13, C["body"])
-STATUS_STYLE = style("status", 8, 10, C["muted"], align=TA_RIGHT)
 GROUP_STYLE = style("group", 10, 13, C["dark"], font=FONT_BB, spaceBefore=8, spaceAfter=3, leftIndent=PAD_X)
 NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PAD_X)
+SPEC_HEAD_STYLE = style("spec_head", 6.5, 9, C["muted"], font=FONT_BB)
+SPEC_CELL_STYLE = style("spec_cell", 8, 10.5, C["body"])
+SPEC_NOTE_STYLE = style("spec_note", 6.5, 9, C["muted"])
+
+SPEC_TITLE = "Spec Sheet"
+# Internal column dump; Section becomes the heading and the lookbook flag a note under the
+# item. (column, width share, the hideable key that drops it); shares are rescaled to what
+# is shown. build_word.build_spec lays the same registry out in Word.
+SPEC_COLUMNS = [("Room / Area", 68, "Room / Area"), ("Item", 100, "Item"),
+                ("Manufacturer", 78, "Manufacturer"), ("Model #", 66, "Model #"),
+                ("Finish / Color", 80, "Finish / Color"), ("Qty", 28, "Qty"),
+                ("Unit Price", 46, "Unit Price"), ("Markup %", 42, "Markup %"),
+                ("Client Status", 54, "Client Status"), (PRODUCT_LINK, 52, "Product URL"),
+                ("Client Notes", 84, "Client Notes")]
+# Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
+LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
+LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
+LAND_BODY_TOP = LAND_H - (PAGE_H - BODY_TOP)   # the same 96pt from the top edge
 
 
 # --------------------------------------------------------------------------
@@ -375,31 +392,36 @@ def brand_image(canvas, source, x, y, height=None, width=None):
     return width
 
 
-def furniture(canvas, doc, title, draft):
-    """Header and footer, repeated on every page."""
+def furniture(canvas, doc, title, draft, landscape=False):
+    """Header and footer, repeated on every page. Positions hang off the page edges so the
+    same furniture fits the landscape spec sheet."""
+    page_w, page_h = (LAND_W, LAND_H) if landscape else (PAGE_W, PAGE_H)
+    content_w = page_w - 2 * M
     canvas.saveState()
-    logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M, 734.4, height=LOGO_H)
+    logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M,
+                             page_h - 57.6, height=LOGO_H)
     if not logo_width:
-        place(canvas, M, 738, CFG["company_name"], FONT_BB, 13, C["dark"])
+        place(canvas, M, page_h - 54, CFG["company_name"], FONT_BB, 13, C["dark"])
         logo_width = pdfmetrics.stringWidth(CFG["company_name"], FONT_BB, 13)
     eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
-    place(canvas, PAGE_W - M, 752.4, f"{eyebrow}   \u00b7   DRAFT" if draft else eyebrow, FONT_BB, 7, C["accent"], "right")
-    size, shown = fit(title, FONT_H, 15, CONTENT_W - logo_width - 12, minimum=9)   # keep clear of the wordmark
-    place(canvas, PAGE_W - M, 736.56, shown, FONT_H, size, C["dark"], "right")
+    place(canvas, page_w - M, page_h - 39.6, f"{eyebrow}   \u00b7   DRAFT" if draft else eyebrow,
+          FONT_BB, 7, C["accent"], "right")
+    size, shown = fit(title, FONT_H, 15, content_w - logo_width - 12, minimum=9)   # keep clear of the wordmark
+    place(canvas, page_w - M, page_h - 55.44, shown, FONT_H, size, C["dark"], "right")
     canvas.setStrokeColor(C["dark"])
     canvas.setLineWidth(0.8)
-    canvas.line(M, HEAD_RULE_Y, PAGE_W - M, HEAD_RULE_Y)
+    canvas.line(M, page_h - 72, page_w - M, page_h - 72)
     canvas.setStrokeColor(C["hairline"])
     canvas.setLineWidth(0.5)
-    canvas.line(M, FOOT_RULE_Y, PAGE_W - M, FOOT_RULE_Y)
+    canvas.line(M, FOOT_RULE_Y, page_w - M, FOOT_RULE_Y)
     has_mark = brand_image(canvas, CFG.get("logo_mark_path"), M, 24.48, width=MARK_W)
     place(canvas, 64.8 if has_mark else M, 28.8, CFG.get("contact_line", ""), FONT_B, 7.5, C["muted"])
-    place(canvas, PAGE_W - M, 28.8, f"Page {doc.page}", FONT_B, 7.5, C["muted"], "right")
+    place(canvas, page_w - M, 28.8, f"Page {doc.page}", FONT_B, 7.5, C["muted"], "right")
     if draft:
         canvas.setFillColor(C["accent"])
         canvas.setFillAlpha(0.07)
         canvas.setFont(FONT_BB, 120)
-        canvas.translate(PAGE_W / 2, PAGE_H / 2)
+        canvas.translate(page_w / 2, page_h / 2)
         canvas.rotate(28)
         canvas.drawCentredString(0, -40, "DRAFT")
     canvas.restoreState()
@@ -477,37 +499,38 @@ def cover_page(canvas, doc, image, project, title, draft):
 class Band(Flowable):
     """Client / project / address / date fields under the header."""
 
-    def __init__(self, values):
+    def __init__(self, values, width=CONTENT_W):
         super().__init__()
-        self.values = values
+        self.values, self.width = values, width
 
     def wrap(self, *_):
-        return CONTENT_W, BAND_H
+        return self.width, BAND_H
 
     def draw(self):
         canvas = self.canv
         canvas.setFillColor(C["band"])
-        canvas.rect(0, 0, CONTENT_W, BAND_H, stroke=0, fill=1)
+        canvas.rect(0, 0, self.width, BAND_H, stroke=0, fill=1)
+        field_w = (self.width - 2 * 10.8 - (len(self.values) - 1) * FIELD_GAP) / len(self.values)
         for index, (label, value) in enumerate(self.values):
-            x = 10.8 + index * (FIELD_W + FIELD_GAP)
+            x = 10.8 + index * (field_w + FIELD_GAP)
             place(canvas, x, 33.5, label, FONT_BB, 6.5, C["muted"])
-            size, shown = fit(value, FONT_B, 9, FIELD_W)
+            size, shown = fit(value, FONT_B, 9, field_w)
             place(canvas, x, 17, shown, FONT_B, size, C["text"])
             canvas.setStrokeColor(C["field_rule"])
             canvas.setLineWidth(0.5)
-            canvas.line(x, 11, x + FIELD_W, 11)
+            canvas.line(x, 11, x + field_w, 11)
 
 
 class Heading(Flowable):
     """Letter-spaced section heading with a rule running past the right margin."""
 
-    def __init__(self, text):
+    def __init__(self, text, width=CONTENT_W):
         super().__init__()
-        self.text = spaced_caps(text)
+        self.text, self.width = spaced_caps(text), width
         self.keepWithNext = 1
 
     def wrap(self, *_):
-        return CONTENT_W, HEADING_H
+        return self.width, HEADING_H
 
     def draw(self):
         canvas = self.canv
@@ -515,7 +538,7 @@ class Heading(Flowable):
         canvas.setStrokeColor(C["heading_rule"])
         canvas.setLineWidth(0.5)
         canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 10) + HEADING_GAP, 8,
-                    CONTENT_W + HEADING_OVERHANG, 8)
+                    self.width + HEADING_OVERHANG, 8)
 
 
 class SignOff(Flowable):
@@ -631,16 +654,95 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
     return out
 
 
+def spec_cell(row, column, hidden):
+    """One spec-sheet cell: the product page as a clickable link, everything else as text."""
+    if column == PRODUCT_LINK:
+        url = product_link(row, hidden)
+        if not url:
+            return ""
+        return Paragraph(f'<link href="{escape(url, {chr(34): "&quot;"})}" '
+                         f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>',
+                         SPEC_CELL_STYLE)
+    return Paragraph(escape(clean(row.get(column))), SPEC_CELL_STYLE)
+
+
+def spec_table(items, columns, widths, hidden):
+    """A repeated-header table of every priced line item, one row per selection."""
+    data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
+    for row in items:
+        cells = [spec_cell(row, column, hidden) for column, _ in columns]
+        if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
+            cells[0] = [cells[0]] if cells[0] != "" else []
+            cells[0].append(Paragraph(escape("Not in lookbook"), SPEC_NOTE_STYLE))
+        data.append(cells)
+    return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
+        ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
+        ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, C["heading_rule"]),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.4, C["hairline"]),
+    ]))
+
+
+def build_spec(pid, project, rows, output_dir=None, hidden=()):
+    """The internal spec sheet: every priced line item, landscape, grouped by section."""
+    columns = [(column, share) for column, share, key in SPEC_COLUMNS if key not in hidden]
+    if not columns:
+        columns = [("Item", 1)]
+    widths = [LAND_CONTENT_W * share / sum(share for _, share in columns) for _, share in columns]
+    story = [Band(band_values(project), LAND_CONTENT_W), Spacer(0, BAND_GAP)]
+    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
+        if index:
+            story.append(Spacer(0, SECTION_GAP))
+        if section:
+            story.append(Heading(section, LAND_CONTENT_W))
+        story.append(spec_table(items, columns, widths, hidden))
+
+    destination = Path(output_dir or OUT)
+    destination.mkdir(exist_ok=True)
+    parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
+             re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
+             re.sub(r"[^A-Za-z0-9]+", "_", SPEC_TITLE).strip("_")[:60]]
+    out = destination / ("_".join(part for part in parts if part) + ".pdf")
+    doc = BaseDocTemplate(str(out), pagesize=(LAND_W, LAND_H), leftMargin=M, rightMargin=M,
+                          topMargin=LAND_H - LAND_BODY_TOP, bottomMargin=BODY_BOTTOM,
+                          title=f"{clean(project.get('Project Name')) or pid} - {SPEC_TITLE}",
+                          author=CFG["company_name"], subject=f"Internal spec sheet for {pid}")
+    frame = Frame(M, BODY_BOTTOM, LAND_CONTENT_W, LAND_BODY_TOP - BODY_BOTTOM, 0, 0, 0, 0, id="spec")
+    doc.addPageTemplates([PageTemplate("spec", [frame],
+                                       onPage=lambda canvas, document: furniture(canvas, document,
+                                                                                 SPEC_TITLE, False,
+                                                                                 landscape=True))])
+    doc.build(story)
+    return out
+
+
+def spec_rows(wb, pid):
+    """Every line item of a project in spec-sheet order; the lookbook flag is a note, not a filter."""
+    order = section_order(wb)
+    rows = [{**{k: clean(v) for k, v in data.items()}, "_row": row}
+            for row, data in Sheet(wb["Selections"]).rows()
+            if clean(data.get("Project ID")) == pid]
+    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order),
+                             r["Section"], r["_row"]))
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--project", help="Project ID, e.g. UH-101")
     group.add_argument("--all", action="store_true", help="Every project on the Projects sheet")
+    parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet, landscape")
     parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")
     parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked, unverified rows allowed)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
-    parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
+    parser.add_argument("--hide", default="",
+                        help="Columns to leave out, comma separated: " + ", ".join(HIDEABLE).replace("%", "%%"))
     args = parser.parse_args()
 
     try:
@@ -648,6 +750,14 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     projects, items = load_data(args.verified_only)
+    if args.spec:
+        wb = open_workbook(data_only=True)
+        for pid in (list(projects) if args.all else [args.project]):
+            if pid not in projects or not spec_rows(wb, pid):
+                print(f"- {pid}: no line items to export, skipped")
+                continue
+            print(f"+ {pid}: {build_spec(pid, projects[pid], spec_rows(wb, pid), hidden=hidden).relative_to(BASE_DIR)}")
+        return
     for pid in (list(projects) if args.all else [args.project]):
         if pid not in projects:
             print(f"x {pid}: not on the Projects sheet")
