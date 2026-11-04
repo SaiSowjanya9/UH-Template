@@ -46,7 +46,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, HEADING_OVERHANG, HIDEABLE,
                             ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W, NOTE_STYLE, OUT, PAD_X, PAD_Y,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, STATUS_STYLE, STATUS_W, band_values, clean,
+                            SIGN_H, SIGN_W, SIGN_X, band_values, clean,
                             code_prefix, description, fit, group_sections, hidden_columns,
                             load_data, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps)
@@ -56,9 +56,9 @@ COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()
 FONTS = CFG.get("fonts", {})
 FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
 # (font size, leading) taken from the PDF's styles so one change moves both deliverables.
-CODE, ITEM, ROOM, DESC, STATUS, NOTE = ((style.fontSize, style.leading) for style in
-                                        (CODE_STYLE, ITEM_STYLE, ROOM_STYLE, DESC_STYLE,
-                                         STATUS_STYLE, NOTE_STYLE))
+CODE, ITEM, ROOM, DESC, NOTE = ((style.fontSize, style.leading) for style in
+                                (CODE_STYLE, ITEM_STYLE, ROOM_STYLE, DESC_STYLE,
+                                 NOTE_STYLE))
 HEADER_TOP, FOOTER_BOTTOM = 32, 24   # header and footer insets from the page edges
 BAND_INSET = 10.8                    # left and right padding inside a band field
 SPEC_TITLE = "Spec Sheet"
@@ -429,11 +429,10 @@ def item_cell(cell, row, hidden):
 
 
 def rows_table(document, rows, content_w, draft=False, controls=False, hidden=()):
-    reserved = (STATUS_W if draft else 0) + (REMOVE_W if controls else 0)
+    reserved = REMOVE_W if controls else 0
     code_w, item_w, desc_w = row_widths(hidden, reserved)
     desc_w += content_w - CONTENT_W              # row_widths measures the portrait page
     widths = [width for width in (code_w, item_w) if width] + [desc_w]
-    widths += [STATUS_W] if draft else []
     widths += [REMOVE_W] if controls else []
     table = grid(document, widths)
     for position, row in enumerate(rows):
@@ -454,9 +453,6 @@ def rows_table(document, rows, content_w, draft=False, controls=False, hidden=()
             if url:
                 run_text(body, " \u2013 ", DESC[0], COLORS["body"])
                 hyperlink(body, url, PRODUCT_LINK, DESC[0], COLORS["accent"])
-        if draft:
-            write(next(cells).paragraphs[0], clean(row.get("Lookup Status")) or "Not run", STATUS[0],
-                  COLORS["muted"], leading=STATUS[1], align=WD_ALIGN_PARAGRAPH.RIGHT)
         if position < len(rows) - 1:
             for cell in table.rows[position].cells:
                 cell_rule(cell, "bottom", 0.4, COLORS["hairline"])
@@ -633,7 +629,7 @@ def read(path_or_stream):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", required=True, help="Project ID, e.g. UH-101")
-    parser.add_argument("--draft", action="store_true", help="Internal review copy with status labels")
+    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked, unverified rows allowed)")
     parser.add_argument("--fillable", action="store_true", help="Working copy with content controls")
     parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet")
     parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")

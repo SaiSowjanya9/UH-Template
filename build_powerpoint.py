@@ -33,7 +33,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W
                             FIELD_W, FONT_B, FONT_BB, HIDEABLE, HEADING_GAP, HEADING_H, HEADING_OVERHANG,
                             ITEM_W, LOGO_H, M, MARK_W,
                             OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, PRODUCT_LINK, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, STATUS_W, band_values, clean, code_prefix,
+                            SIGN_H, SIGN_W, SIGN_X, band_values, clean, code_prefix,
                             description, fit, group_sections, hidden_columns, load_data, numbered,
                             presentation_details, product_link, row_widths, schedule_title, spaced_caps)
 
@@ -41,7 +41,7 @@ COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()
 FONTS = CFG.get("fonts", {})
 FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
 DESC_W = CONTENT_W - CODE_W - ITEM_W
-CODE, ITEM, ROOM, DESC, STATUS = (9, 13), (10, 13), (8, 10.5), (10, 13), (8, 10)   # (font size, leading)
+CODE, ITEM, ROOM, DESC = (9, 13), (10, 13), (8, 10.5), (10, 13)   # (font size, leading)
 NOTE = (8, 10.5)
 ASCENT = 0.8          # cap height used to turn a PDF baseline into a text box top
 LINK_SUFFIX = f" \u2013 {PRODUCT_LINK}"   # the PDF's clickable tail, in the same words
@@ -136,7 +136,7 @@ def cell_height(item):
 
 
 def row_cells(row, draft, hidden=()):
-    code_w, item_w, width = row_widths(hidden, STATUS_W if draft else 0)
+    code_w, item_w, width = row_widths(hidden, 0)
     item = cell(code_w, item_w, "" if "Item" in hidden else row.get("Item"), ITEM, COLORS["dark"])
     cells = [cell(0, code_w, row.get("_code"), CODE, COLORS["muted"])] if code_w else []
     if item_w:
@@ -147,9 +147,6 @@ def row_cells(row, draft, hidden=()):
         # the room sits under the item name, so it only needs clearing when that name is printed
         cells.append(cell(code_w, item_w, row["Room / Area"], ROOM, COLORS["muted"],
                           offset=0 if "Item" in hidden else cell_height(item)))
-    if draft:
-        cells.append(cell(code_w + item_w + width, STATUS_W, clean(row.get("Lookup Status")) or "Not run",
-                          STATUS, COLORS["muted"], align=PP_ALIGN.RIGHT))
     return cells
 
 

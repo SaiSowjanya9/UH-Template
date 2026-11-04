@@ -51,7 +51,7 @@ CONTENT_W = PAGE_W - 2 * M       # 518.4
 BODY_TOP, BODY_BOTTOM = 696, 56  # flowing content area between the header and footer rules
 HEAD_RULE_Y, FOOT_RULE_Y = 720, 44.64
 LOGO_H, MARK_W = 20.16, 11.52
-CODE_W, ITEM_W, STATUS_W = 50.4, 144, 70   # STATUS_W is used by draft copies only
+CODE_W, ITEM_W = 50.4, 144
 PAD_X, PAD_Y = 6, 6.5            # table cell padding
 BAND_H, FIELD_W, FIELD_GAP = 56, 113.4, 14.4
 BAND_GAP, SECTION_GAP = 14, 10   # space below the band / above a section heading
@@ -548,7 +548,7 @@ def item_cell(row, hidden=()):
 
 
 def rows_table(rows, draft, hidden=()):
-    code_w, item_w, desc_w = row_widths(hidden, STATUS_W if draft else 0)
+    code_w, item_w, desc_w = row_widths(hidden, 0)
     widths = [width for width in (code_w, item_w) if width] + [desc_w]
     data = []
     for row in rows:
@@ -556,10 +556,8 @@ def rows_table(rows, draft, hidden=()):
         if item_w:
             cells.append(item_cell(row, hidden))
         cells.append(Paragraph(escape(description(row, hidden=hidden)) + link_markup(row, hidden), DESC_STYLE))
-        if draft:
-            cells.append(Paragraph(escape(clean(row.get("Lookup Status")) or "Not run"), STATUS_STYLE))
         data.append(cells)
-    return Table(data, colWidths=widths + ([STATUS_W] if draft else []), style=TableStyle([
+    return Table(data, colWidths=widths, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
         ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
@@ -639,7 +637,7 @@ def main():
     group.add_argument("--project", help="Project ID, e.g. UH-101")
     group.add_argument("--all", action="store_true", help="Every project on the Projects sheet")
     parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")
-    parser.add_argument("--draft", action="store_true", help="Internal review copy with status labels")
+    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked, unverified rows allowed)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
     parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
