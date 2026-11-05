@@ -192,11 +192,13 @@ def favicon():
 
 
 @app.get("/brand/<name>.png")
+@app.get("/brand/<name>.jpg")
 def brand_asset(name):
     sources = {"wordmark": build_lookbook.CFG.get("logo_path"),
                "wordmark-print": build_lookbook.CFG.get("logo_print_path"),
                "symbol": build_lookbook.CFG.get("logo_mark_path"),
-               "icon": "brand_assets/uh-icon.png"}
+               "icon": "brand_assets/uh-icon.png",
+               "login-background": "brand_assets/login-background.jpg"}
     source = sources.get(name)
     if not source:
         return jsonify(error="Brand asset not found."), 404
