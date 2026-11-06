@@ -155,7 +155,8 @@ function renderPreview(project, included) {
   $("preview-contact").textContent = branding.contact_line || "";
   $("preview-note").textContent = defaults.note || "";
   $("preview-sign").innerHTML = (defaults.signatures || []).map((label) => `<span>${esc(label)}</span>`).join("");
-  const plan = [project?.["Project Name"], project?.["Plan / Elevation"]].filter(Boolean).join(" / ");
+  const pname = project?.["Project Name"], elev = project?.["Plan / Elevation"];
+  const plan = pname && elev && pname.toLowerCase() !== elev.toLowerCase() ? `${pname} / ${elev}` : pname || elev || "";
   $("preview-band").innerHTML = [["CLIENT", project?.["Client Name"]], ["PROJECT / LOT", plan],
                                  ["ADDRESS", project?.Address], ["DATE", project?.["Presentation Date"]?.slice(0, 10)]]
     .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "")}</dd></div>`).join("");

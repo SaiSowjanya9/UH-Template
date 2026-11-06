@@ -276,6 +276,8 @@ def quantity(row):
 def band_pair(primary, secondary):
     """Keep the optional second detail only while the pair still fits on one field rule."""
     primary, secondary = clean(primary), clean(secondary)
+    if secondary.casefold() == primary.casefold():
+        secondary = ""
     combined = " / ".join(filter(None, [primary, secondary]))
     if secondary and pdfmetrics.stringWidth(combined, FONT_B, 9) > FIELD_W:
         return primary
@@ -455,7 +457,7 @@ def cover_page(canvas, doc, image, project, title, draft):
     canvas.setFillColor(C["dark"])
     canvas.drawCentredString(PAGE_W / 2, y, shown)
     plan = clean(project.get("Plan / Elevation"))
-    if plan:
+    if plan and plan.casefold() != name.casefold():
         y -= 17
         size, shown = fit(plan, FONT_B, 11, CONTENT_W - 40, minimum=7)
         canvas.setFont(FONT_B, size)
@@ -466,9 +468,14 @@ def cover_page(canvas, doc, image, project, title, draft):
     canvas.setLineWidth(1.2)
     canvas.line(PAGE_W / 2 - 24, y, PAGE_W / 2 + 24, y)
     y -= 16
-    details = "   \u00b7   ".join(part for part in [clean(project.get("Client Name")),
-                                                clean(project.get("Address")),
-                                                fmt_date(project.get("Presentation Date"))] if part)
+    seen = {name.casefold(), plan.casefold()}
+    parts = []
+    for part in [clean(project.get("Client Name")), clean(project.get("Address")),
+                 fmt_date(project.get("Presentation Date"))]:
+        if part and part.casefold() not in seen:
+            seen.add(part.casefold())
+            parts.append(part)
+    details = "   \u00b7   ".join(parts)
     size, shown = fit(details, FONT_B, 9.5, CONTENT_W - 30, minimum=6.5)
     canvas.setFont(FONT_B, size)
     canvas.setFillColor(C["body"])
