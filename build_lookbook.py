@@ -404,8 +404,7 @@ def furniture(canvas, doc, title, draft, landscape=False):
         place(canvas, M, page_h - 54, CFG["company_name"], FONT_BB, 13, C["dark"])
         logo_width = pdfmetrics.stringWidth(CFG["company_name"], FONT_BB, 13)
     eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
-    place(canvas, page_w - M, page_h - 39.6, f"{eyebrow}   \u00b7   DRAFT" if draft else eyebrow,
-          FONT_BB, 7, C["accent"], "right")
+    place(canvas, page_w - M, page_h - 39.6, eyebrow, FONT_BB, 7, C["accent"], "right")
     size, shown = fit(title, FONT_H, 15, content_w - logo_width - 12, minimum=9)   # keep clear of the wordmark
     place(canvas, page_w - M, page_h - 55.44, shown, FONT_H, size, C["dark"], "right")
     canvas.setStrokeColor(C["dark"])
@@ -435,7 +434,7 @@ def cover_page(canvas, doc, image, project, title, draft):
     if not logo_width:
         place(canvas, M, 738, CFG["company_name"], FONT_BB, 13, C["dark"])
     eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
-    place(canvas, PAGE_W - M, 752.4, f"{eyebrow}   \u00b7   DRAFT" if draft else eyebrow, FONT_BB, 7, C["accent"], "right")
+    place(canvas, PAGE_W - M, 752.4, eyebrow, FONT_BB, 7, C["accent"], "right")
     canvas.setStrokeColor(C["dark"])
     canvas.setLineWidth(0.8)
     canvas.line(M, HEAD_RULE_Y, PAGE_W - M, HEAD_RULE_Y)
