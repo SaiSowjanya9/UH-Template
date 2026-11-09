@@ -1,8 +1,7 @@
 # Render blueprint for the hosted selections workspace.
 #
-# One worker only: automatic lookup runs as a background thread in the process and the
-# workbook is saved whole, so a second worker would race the first. Scaling means more
-# threads, never more instances.
+# One worker only: the workbook is saved whole, so a second worker would race the first.
+# Scaling means more threads, never more instances.
 #
 # The workbook lives in Supabase Storage, so no disk is attached. Secrets marked
 # sync:false must be set in the Render dashboard, never committed.
@@ -10,9 +9,8 @@ services:
   - type: web
     name: uh-selections
     runtime: python
-    # The free plan sleeps after 15 minutes idle and takes ~1 minute to wake. Nothing is lost
-    # (the workbook and the pending-lookup queue both live in Supabase), but automatic lookup
-    # only progresses while someone has the app open. Change to "starter" to keep it awake.
+    # The free plan sleeps after 15 minutes idle and takes ~1 minute to wake. Nothing is lost,
+    # because the workbook lives in Supabase. Change to "starter" to keep it awake.
     plan: free
     region: oregon           # match your Supabase project's region
     buildCommand: pip install -r requirements.txt
@@ -32,10 +30,4 @@ services:
       - key: SUPABASE_SERVICE_KEY
         sync: false
       - key: SUPABASE_ANON_KEY
-        sync: false
-      # Match whichever provider your .env uses: serpapi -> SERPAPI_API_KEY,
-      # brave -> BRAVE_API_KEY, claude -> ANTHROPIC_API_KEY.
-      - key: SEARCH_PROVIDER
-        value: serpapi
-      - key: SERPAPI_API_KEY
         sync: false

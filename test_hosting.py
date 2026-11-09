@@ -18,7 +18,7 @@ from workbook_store import ConflictError, ValidationError, WorkbookStore, put, r
 import auth
 import deploy_render
 import supabase_store
-from supabase_store import HISTORY, LOOKUP_STATE, STATE, VERSIONS, SupabaseBackend
+from supabase_store import HISTORY, STATE, VERSIONS, SupabaseBackend
 
 CONFIG = {"url": "https://project.supabase.co", "key": "service-key-for-tests",
           "bucket": "workbooks", "name": "UH_Homes_Selections_Tracker.xlsx"}
@@ -29,7 +29,7 @@ class FakeSupabase:
 
     def __init__(self):
         self.objects = {}
-        self.tables = {STATE: [], VERSIONS: [], HISTORY: [], LOOKUP_STATE: []}
+        self.tables = {STATE: [], VERSIONS: [], HISTORY: []}
         self.selects = {}
         self.downloads = 0
         self.uploads = 0
@@ -77,7 +77,7 @@ class FakeSupabase:
         return rows[:int(params["limit"])] if "limit" in params else rows
 
     def _key(self, table):
-        return {STATE: "id", VERSIONS: "revision", LOOKUP_STATE: "key", HISTORY: None}[table]
+        return {STATE: "id", VERSIONS: "revision", HISTORY: None}[table]
 
     def insert(self, table, row, upsert=False):
         key = self._key(table)
@@ -246,12 +246,6 @@ class SupabaseBackendTests(unittest.TestCase):
     def test_the_hosted_workbook_is_never_locked_by_excel(self):
         self.assertFalse(self.store.locked_elsewhere())
 
-    def test_lookup_state_survives_a_round_trip(self):
-        state = self.store.state()
-        self.assertIsNone(state.read())
-        state.write('{"entries": {}, "pending": {}}')
-        self.assertEqual(state.read(), '{"entries": {}, "pending": {}}')
-
     def test_an_empty_pointer_table_explains_how_to_seed(self):
         self.api.tables[STATE].clear()
         with self.assertRaises(ValidationError) as caught:
@@ -404,8 +398,7 @@ class RenderDeployTests(unittest.TestCase):
 
     ENV = {"SUPABASE_URL": "https://p.supabase.co", "SUPABASE_SERVICE_KEY": "service",
            "SUPABASE_ANON_KEY": "anon", "UH_SECRET_KEY": "x" * 64, "RENDER_API_KEY": "rnd_key",
-           "SEARCH_PROVIDER": "serpapi", "SERPAPI_API_KEY": "serp", "BRAVE_API_KEY": "",
-           "SERPAPI_KEY": "", "ANTHROPIC_API_KEY": "", "UH_TRUSTED_HOSTS": "", "SUPABASE_BUCKET": ""}
+           "UH_WORKBOOK_NAME": "Tracker.xlsx", "UH_TRUSTED_HOSTS": "", "SUPABASE_BUCKET": ""}
 
     class Session:
         """Records calls and replays canned Render responses."""
@@ -465,9 +458,8 @@ class RenderDeployTests(unittest.TestCase):
         with patch.dict("os.environ", self.ENV):
             deploy_render.deploy(session=session)
         variables = {e["key"]: e["value"] for e in next(c for c in session.calls if c["method"] == "PUT")["json"]}
-        self.assertIn("SERPAPI_API_KEY", variables)
-        for absent in ["BRAVE_API_KEY", "SERPAPI_KEY", "ANTHROPIC_API_KEY", "SUPABASE_BUCKET"]:
-            self.assertNotIn(absent, variables)
+        self.assertEqual(variables["UH_WORKBOOK_NAME"], "Tracker.xlsx")
+        self.assertNotIn("SUPABASE_BUCKET", variables)
 
     def test_an_existing_service_is_reused_rather_than_duplicated(self):
         existing = [{"service": {"id": "srv-old", "name": "uh-selections", "slug": "uh-selections",
@@ -529,7 +521,6 @@ class HostedAppTests(unittest.TestCase):
         self.path = Path(self.folder.name) / "master.xlsx"
         shutil.copy2(common.WORKBOOK, self.path)
         self.patches = [patch.object(app, "store", WorkbookStore(self.path)),
-                        patch.object(app, "automation", None),
                         patch.object(app, "REQUIRE_LOGIN", True),
                         patch.object(app, "AUTH", SignInTests.CONFIG)]
         for item in self.patches:
@@ -548,14 +539,12 @@ class HostedAppTests(unittest.TestCase):
         self.assertIn("Sign in", response.json["error"])
 
     def test_every_mutating_route_requires_a_session(self):
-        for path in ["/api/projects", "/api/selections", "/api/presentation", "/api/workbook/import",
-                     "/api/backups/restore", "/api/automation/retry"]:
+        for path in ["/api/projects", "/api/selections", "/api/selections/csv", "/api/selections/order"]:
             self.assertEqual(self.client.post(path, json={}).status_code, 401, path)
 
-    def test_the_workbook_download_requires_a_session(self):
-        self.assertEqual(self.client.get("/api/workbook").status_code, 401)
-        self.assertEqual(self.client.get("/api/backups").status_code, 401)
-        self.assertEqual(self.client.get("/api/selections/csv?project=UH-101").status_code, 401)
+    def test_the_spec_sheet_downloads_require_a_session(self):
+        for path in ["/api/selections/csv", "/api/selections/pdf", "/api/selections/docx"]:
+            self.assertEqual(self.client.get(f"{path}?project=UH-101").status_code, 401, path)
 
     def test_the_interface_redirects_to_sign_in(self):
         response = self.client.get("/")

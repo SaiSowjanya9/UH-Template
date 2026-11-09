@@ -2,11 +2,11 @@
 
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
-const state = { data: null, project: "", view: "selections", page: 0, busy: false, cancel: false, editor: null,
-                specGroup: "Room / Area", specCollapsed: new Set(), focusSelector: null, hidden: new Set(),
+const state = { data: null, project: "", view: "selections", page: 0, busy: false, editor: null,
+                specGroup: "Location", specCollapsed: new Set(), focusSelector: null,
                 specPending: new Map(),
                 specLinkEdit: new Set() };
-const names = { selections: "Selection tracker", spec: "Spec sheet", presentation: "Client presentations", manufacturers: "Manufacturers" };
+const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
 // A Cover Image cell -> something an <img> can show: stored upload or web address. Local file paths
@@ -65,7 +65,6 @@ function setBusy(value, message = "") {
   $("busy-banner").hidden = !value;
   $("busy-message").textContent = message;
   document.querySelectorAll("button:not(.close-dialog):not(.sidebar-toggle)").forEach((button) => { button.disabled = value; });
-  $("cancel-lookup").disabled = false;
   specSaveUI();
   if (!value && state.data) render();
 }
@@ -75,8 +74,7 @@ async function action(fn) {
   try { await fn(); } catch (error) { toast(error.message, true); }
 }
 
-function badge(status, phase) {
-  if (phase) return `<span class="status review">${esc({ queued: "Auto queued", searching: "Searching…", saving: "Saving link…", waiting_excel: "Close Excel", waiting_key: "API key needed", retry: "Retry scheduled", failed: "Search paused" }[phase] || "Auto queued")}</span>`;
+function badge(status) {
   const kind = status === "Verified" ? "verified" : ["Not found", "Search error"].includes(status) ? "failed" : status && status !== "Not run" ? "review" : "";
   return `<span class="status ${kind}">${esc(status || "Not run")}</span>`;
 }
@@ -97,85 +95,6 @@ function selectionDetails(row) {
   return `<details class="selection-details"><summary>${fields.length} additional field${fields.length === 1 ? "" : "s"}</summary><dl>${fields.map((field) => `<div><dt>${esc(field.name)}</dt><dd>${detailValue(field.value)}</dd></div>`).join("")}</dl></details>`;
 }
 
-const PREVIEW_ROWS = 7;
-
-function scheduleDefaults() {
-  return state.data?.branding?.schedule || {};
-}
-
-function scheduleOptions() {
-  const defaults = scheduleDefaults();
-  return { title: $("export-title").value.trim() || defaults.title || "Selections",
-           prefix: ($("export-prefix").value.trim() || defaults.code_prefix || "EX").toUpperCase(),
-           hidden: [...state.hidden] };
-}
-
-const isHidden = (column) => state.hidden.has(column);
-// Hiding one of these leaves a spec sheet that cannot be matched back to its lines on import.
-const CSV_KEY_COLUMNS = ["Section", "Room / Area", "Item"];
-
-function renderHideGrid(id, scope) {
-  const grid = $(id);
-  const columns = (state.data?.hideable || []).filter((column) => !scope || column.documents.includes(scope));
-  if (grid.childElementCount !== columns.length) {
-    // built once, so clicking a box never pulls the focus out from under the pointer
-    grid.innerHTML = columns.map((column) => `<label><input type="checkbox" data-hide="${esc(column.key)}">${esc(column.label)}${column.documents.includes("schedule") ? "" : " <small>· spec sheet</small>"}</label>`).join("");
-  }
-  grid.querySelectorAll("[data-hide]").forEach((box) => { box.checked = isHidden(box.dataset.hide); });
-  const count = columns.filter((column) => isHidden(column.key)).length;
-  $(`${id.replace("-grid", "")}-count`).textContent = count ? `${count} hidden` : "Showing everything";
-  const keys = CSV_KEY_COLUMNS.filter(isHidden);
-  $(`${id.replace("-grid", "")}-note`).textContent = "Hidden columns are left out of the PDF, the Word and PowerPoint copies, the fillable copies and the spec sheet."
-    + (keys.length ? ` A spec sheet without ${keys.join(" or ")} cannot be matched back to these line items when you import it again.` : "");
-}
-
-function toggleHidden(key, off) {
-  if (off) state.hidden.delete(key); else state.hidden.add(key);
-  render();
-}
-
-function rowDescription(row) {
-  if (row["Description Override"]) return row["Description Override"];
-  const shown = (column) => (isHidden(column) ? "" : row[column] || "");
-  const product = shown("Product Name") || shown("Model #");
-  let identity = [shown("Manufacturer"), product].filter(Boolean).join(" ");
-  let finish = shown("Finish / Color");
-  if (!product && finish) { identity = [identity, finish].filter(Boolean).join(" "); finish = ""; }
-  const model = shown("Model #");
-  if (model && product !== model && !identity.toLowerCase().includes(model.toLowerCase())) identity = `${identity} (Model ${model})`.trim();
-  const qty = isHidden("Qty") || Number(row.Qty) === 1 || !row.Qty ? "" : `Qty ${row.Qty}`;
-  return [identity, finish, qty, shown("Client Notes")].filter(Boolean).join(" \u2013 ");
-}
-
-function renderPreview(project, included) {
-  const branding = state.data.branding || {}, defaults = scheduleDefaults();
-  const { title, prefix } = scheduleOptions();
-  $("preview-eyebrow").textContent = (branding.tagline || "Finish Schedule").toUpperCase();
-  $("preview-title").textContent = title;
-  $("preview-contact").textContent = branding.contact_line || "";
-  $("preview-note").textContent = defaults.note || "";
-  $("preview-sign").innerHTML = (defaults.signatures || []).map((label) => `<span>${esc(label)}</span>`).join("");
-  const pname = project?.["Project Name"], elev = project?.["Plan / Elevation"];
-  const plan = pname && elev && pname.toLowerCase() !== elev.toLowerCase() ? `${pname} / ${elev}` : pname || elev || "";
-  $("preview-band").innerHTML = [["CLIENT", project?.["Client Name"]], ["PROJECT / LOT", plan],
-                                 ["ADDRESS", project?.Address], ["DATE", project?.["Presentation Date"]?.slice(0, 10)]]
-    .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "")}</dd></div>`).join("");
-  const mode = $("export-mode").value;
-  const rows = (mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified") : included);
-  const itemColumn = !(isHidden("Item") && isHidden("Room / Area"));
-  const columns = `${isHidden("code") ? " no-code" : ""}${itemColumn ? "" : " no-item"}`;
-  let markup = "", section = "";
-  rows.slice(0, PREVIEW_ROWS).forEach((row, index) => {
-    if (!isHidden("Section") && row.Section !== section) { section = row.Section; markup += `<div class="sheet-section">${esc(section || "Other")}</div>`; }
-    // the schedule prints the link after the description, so the paper preview shows it there too
-    const link = isUrl(row["Product URL"]) && !isHidden("Product URL") ? ` – <a class="product-link" href="${esc(row["Product URL"])}" target="_blank" rel="noopener noreferrer">Product Link</a>` : "";
-    const item = [isHidden("Item") ? "" : esc(row.Item), isHidden("Room / Area") ? "" : esc(row["Room / Area"] || "")].filter(Boolean).join("<br>");
-    markup += `<div class="sheet-row${columns}">${isHidden("code") ? "" : `<span>${esc(prefix)}-${String(index + 1).padStart(2, "0")}</span>`}${itemColumn ? `<strong>${item}</strong>` : ""}<em>${esc(rowDescription(row))}${link}</em></div>`;
-  });
-  if (rows.length > PREVIEW_ROWS) markup += `<div class="sheet-more">+ ${rows.length - PREVIEW_ROWS} more selection${rows.length - PREVIEW_ROWS === 1 ? "" : "s"} in the download</div>`;
-  $("preview-rows").innerHTML = markup || '<div class="sheet-more">Add selections to this project to see them here.</div>';
-}
-
 function render() {
   if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
   const data = state.data;
@@ -184,7 +103,6 @@ function render() {
   const verified = rows.filter((r) => r["Lookup Status"] === "Verified").length;
   const stale = rows.filter((r) => r._stale).length;
   const linked = rows.filter((r) => isUrl(r["Product URL"])).length;
-  const included = rows.filter((r) => r["Include in Lookbook"].toLowerCase() !== "no");
   const bare = state.view === "spec";   // the spec sheet stands on its own
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
   $("project-summary").hidden = !project || state.view === "manufacturers" || bare;
@@ -245,46 +163,30 @@ function render() {
   // the spec sheet is the standard specification, so it is not labelled with one project
   $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
     ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
-  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", presentation: "From your workbook to the client’s finish schedule.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
-  // the spec sheet edits the same rows the schedule prints, so name the home it belongs to
-  if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]} — these line items are what the client schedule prints.`;
+  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
+  // the spec sheet edits the same rows the exports print, so name the home it belongs to
+  if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]} — these line items are what the exports print.`;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
   $("add-selection").disabled = !project || state.busy;
-  $("find-links").disabled = !project || state.busy;
-  const oldSection = $("section-filter").value;
+  const oldSection = $("section-filter").value, oldLocation = $("location-filter").value;
   $("section-filter").innerHTML = '<option value="">All categories</option>' + [...new Set([...data.sections, ...rows.map((r) => r.Section).filter(Boolean)])].map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
   $("section-filter").value = oldSection;
-  $("selection-count").textContent = rows.length;
+  $("location-filter").innerHTML = '<option value="">All locations</option>' + [...new Set([...(data.locations || []), ...rows.map((r) => r.Location).filter(Boolean)])].map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  $("location-filter").value = oldLocation;
   renderTable();
   renderSpec();
-  $("export-title").placeholder = scheduleDefaults().title || "Selections";
-  $("export-prefix").placeholder = scheduleDefaults().code_prefix || "EX";
-  renderHideGrid("export-hide-grid");
-  renderHideGrid("schedule-hide-grid", "schedule");
-  renderPreview(project, included);
-  const mode = $("export-mode").value;
-  const count = mode === "verified" ? included.filter((r) => r["Lookup Status"] === "Verified").length : included.length;
-  const pending = included.filter((r) => r["Lookup Status"] !== "Verified").length;
-  $("export-summary").textContent = `${count} selections will be included. ${rows.length - included.length} hidden from presentations.` + (mode === "verified" ? ` ${pending} unverified selections will be omitted.` : pending ? ` ${pending} still need review${mode === "final" ? " — final export is blocked until verified" : "; draft labels will be shown"}.` : " All included links are verified.");
-  const automaticPending = included.some((r) => r._auto_phase);
-  if (automaticPending && mode !== "verified") $("export-summary").textContent += " Export waits for automatic lookup so stale product links cannot be included.";
-  if (stale) $("export-summary").textContent += ` ${stale} verified link${stale === 1 ? " is" : "s are"} over 6 months old — worth a re-check before presenting.`;
-  $("export-pdf").disabled = !project || !count || state.busy || (mode === "final" && pending > 0) || (mode !== "verified" && automaticPending);
-  $("export-more").disabled = !project || state.busy;
   $("manufacturer-grid").innerHTML = data.manufacturers.map((m, index) => `<article class="manufacturer-card"><h3>${esc(m.Manufacturer)}</h3><p>${esc(m["Official Domain"])}</p><p>${esc(m.Notes || "Official product source")}</p><button class="text-button" data-manufacturer="${index}">Edit manufacturer ↗</button></article>`).join("") || '<div class="empty-state"><h3>Add your first manufacturer</h3><p>Enter the brand and its official website domain.</p></div>';
-  $("workbook-name").textContent = data.workbook;
-  $("provider-status").textContent = data.provider.ready ? `${data.provider.name} is configured. Live requests may use paid API quota.` : `Search is not configured. Required: ${data.provider.key_name}. You can still manage selections, enter links manually, and export presentations.`;
   attachImageErrors();
   restoreFocus();
 }
 
 function renderTable() {
-  const query = $("search").value.trim().toLowerCase(), category = $("section-filter").value, status = $("status-filter").value;
-  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
+  const query = $("search").value.trim().toLowerCase(), category = $("section-filter").value, location = $("location-filter").value, status = $("status-filter").value;
+  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!location || r.Location === location) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], r.Location, ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small>${esc([r.Section, r["Room / Area"]].filter(Boolean).join(" / "))}${r["Include in Lookbook"].toLowerCase() === "no" ? " · Hidden" : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"], r._auto_phase)}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"])}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -312,8 +214,8 @@ function specGroups(rows) {
   const groups = new Map();
   for (const row of rows) groups.set(row[key] || (key === "Section" ? "Other" : "Unassigned"), []);
   for (const row of rows) groups.get(row[key] || (key === "Section" ? "Other" : "Unassigned")).push(row);
-  if (key === "Section") {
-    const order = state.data.sections;
+  const order = key === "Section" ? state.data.sections : key === "Location" ? state.data.locations || [] : null;
+  if (order) {
     return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
   }
   return [...groups];
@@ -324,10 +226,10 @@ function renderSpec() {
   document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
-  const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Room / Area"], r.Section, r["Client Notes"]].join(" ").toLowerCase().includes(query));
+  const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Room / Area"], r.Section, r.Location, r["Client Notes"]].join(" ").toLowerCase().includes(query));
   const groups = specGroups(rows);
   $("spec-summary").textContent = all.length
-    ? `${groups.length} ${state.specGroup === "Section" ? "categories" : "rooms"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
+    ? `${groups.length} ${{ "Section": "categories", "Location": "locations" }[state.specGroup] || "rooms"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
     : "";
   $("spec-summary").hidden = state.view !== "spec" || !all.length;
   $("spec-add").disabled = !selectedProject() || state.busy;
@@ -346,9 +248,9 @@ function renderSpec() {
       const value = String(edited ? pending[c.field] : r[c.field] ?? "");
       // a saved address shows the words "Product Link", never the raw URL; the pencil reopens the input
       if (c.link && isUrl(value) && !state.specLinkEdit.has(r._row)) {
-        return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Product Link ↗</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address"${r._auto_phase ? " disabled" : ""}>✎</button></div></td>`;
+        return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Product Link ↗</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address">✎</button></div></td>`;
       }
-      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}${r._auto_phase ? " disabled" : ""}></td>`;
+      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}></td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
@@ -459,8 +361,8 @@ function finishSpecDrop(target, after, card) {
       await api("/api/selections/order", payload);
     } catch (error) {
       if (error.status !== 409) { await refresh().catch(() => {}); throw error; }
-      // AutoLookup may have saved between the last poll and this drop; the same
-      // swap is still valid against the new revision, so refresh and retry once.
+      // Someone (or an Excel save) may have landed between the last poll and this drop; the
+      // same swap is still valid against the new revision, so refresh and retry once.
       await refresh();
       await api("/api/selections/order", payload);
     }
@@ -542,10 +444,10 @@ async function saveCell(input) {
   input.classList.add("dirty");
   state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
   try {
-    const result = await api("/api/selections", { row, values: { [field]: value } });
+    await api("/api/selections", { row, values: { [field]: value } });
     dropHeldSpecEdit(row, field);
     await refresh();
-    toast(result.queued ? "Saved. Automatic product lookup is queued for this change." : "Saved.");
+    toast("Saved.");
   } catch (error) {
     state.focusSelector = null;
     holdSpecEdit(input);   // a failed save stays held so Save can retry it
@@ -607,10 +509,10 @@ function openEditor(kind, record, prefill = {}) {
   const r = record || prefill;
   if (kind === "project") {
     fields = field("Project ID", r["Project ID"], { required: true, readonly: !!record, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
-    note = record ? "Cover Image accepts an uploaded image, a public image URL, or a local file path, and opens the exported schedule. Each project gets its own presentation."
+    note = record ? "Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
       : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.";
   } else if (kind === "selection") {
-    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
+    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Location", r.Location, { choices: [...new Set(["", ...(state.data.locations || []), r.Location].filter((v) => v != null))] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
     if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
@@ -633,8 +535,7 @@ async function deleteEditorRecord() {
   if (!record || state.busy) return;
   const label = { selection: `selection “${record.Item}”`, project: `project “${record["Project Name"]}”`, manufacturer: `manufacturer “${record.Manufacturer}”` }[kind];
   const owned = kind === "project" ? state.data.selections.filter((r) => r["Project ID"] === record["Project ID"]).length : 0;
-  const extra = owned ? ` Its ${owned} line item${owned === 1 ? "" : "s"} will be deleted too.`
-    : kind === "manufacturer" ? " Selections using this brand lose their official-domain search boost." : "";
+  const extra = owned ? ` Its ${owned} line item${owned === 1 ? "" : "s"} will be deleted too.` : "";
   if (!confirm(`Delete ${label}? The row is removed from the workbook; a backup is kept.${extra}`)) return;
   $("editor-error").hidden = true;
   setBusy(true, "Deleting…");
@@ -668,7 +569,6 @@ async function saveEditor(event) {
     $("editor").close();
     await refresh();
     toast(result.seeded ? `Project created with ${result.seeded} standard line items ready to specify.`
-      : result.queued ? "Selection saved. Automatic product lookup is queued; results will appear when ready."
       : "Project details saved. A backup was preserved.");
   } catch (error) {
     $("editor-error").textContent = error.message;
@@ -683,157 +583,7 @@ async function verify(row) {
   try {
     await api("/api/selections", { row, values: { "Lookup Status": "Verified" }, confirm_verified: true });
     await refresh();
-    toast("Selection verified. Automatic lookup will not overwrite it.");
-  } finally { setBusy(false); }
-}
-
-async function lookup(row) {
-  if (!state.data.provider.ready) { $("setup-dialog").showModal(); return; }
-  const items = row ? projectRows().filter((r) => r._row === row) : projectRows().filter((r) => !r._auto_phase && !r["Product URL"] && r.Manufacturer && r["Model #"] && r["Lookup Status"] !== "Verified" && r["Include in Lookbook"].toLowerCase() !== "no");
-  if (!items.length) { toast("No eligible selections. Add a manufacturer and model, or review existing links."); return; }
-  if (!confirm(`Search ${items.length} selection${items.length === 1 ? "" : "s"} using ${state.data.provider.name}?\n\nManufacturer and model numbers will be sent to the search provider. API charges may apply.${row && items[0]["Product URL"] ? " A new match may replace the current unverified link." : ""}`)) return;
-  state.cancel = false;
-  $("cancel-lookup").textContent = "Stop after this item";
-  setBusy(true, "Starting product search…");
-  $("cancel-lookup").hidden = false;
-  let completed = 0;
-  try {
-    for (const r of items) {
-      if (state.cancel) break;
-      $("busy-message").textContent = `Finding product ${completed + 1} of ${items.length}: ${r.Manufacturer} ${r["Model #"]}…`;
-      await api(`/api/selections/${r._row}/lookup`, {});
-      completed++;
-      await refresh();
-      if (!state.cancel && completed < items.length) await new Promise((resolve) => setTimeout(resolve, 1100));
-    }
-    toast(`${completed} selection${completed === 1 ? "" : "s"} checked. Review the matches before sharing.`);
-  } finally {
-    $("cancel-lookup").hidden = true;
-    setBusy(false);
-  }
-}
-
-async function addFromLink() {
-  const url = prompt("Paste a product page link to prefill a new selection:");
-  if (!url || !url.trim()) return;
-  setBusy(true, "Reading the product page…");
-  let details;
-  try {
-    details = (await api("/api/selections/parse-link", { url: url.trim() })).details;
-  } finally {
-    setBusy(false);
-  }
-  if (details) openEditor("selection", null, details);
-}
-
-function scheduleDetails() {
-  // Client details live in the spec-sheet header, saved to the project itself.
-  const values = Object.fromEntries(new FormData($("schedule-form")));
-  const defaults = scheduleDefaults();
-  return {
-    title: values.title.trim() || defaults.title || "Selections",
-    prefix: (values.prefix.trim() || defaults.code_prefix || "EX").toUpperCase(),
-    hidden: [...state.hidden],
-  };
-}
-
-function openScheduleDialog(format) {
-  const project = selectedProject();
-  if (!project) { toast("Choose a project first.", true); return; }
-  const defaults = scheduleDefaults();
-  state.scheduleFormat = format;
-  $("schedule-dialog-title").textContent = { pdf: "Download finish schedule", form: "Download fillable schedule" }[format];
-  const form = $("schedule-form");
-  form.title.value = $("export-title").value.trim() || defaults.title || "";
-  form.prefix.value = $("export-prefix").value.trim() || defaults.code_prefix || "";
-  renderHideGrid("schedule-hide-grid", "schedule");
-  $("schedule-error").hidden = true;
-  $("schedule-frame").removeAttribute("src");
-  $("schedule-dialog").showModal();
-  refreshSchedulePreview();
-}
-
-let previewUrl = null;
-
-async function refreshSchedulePreview() {
-  const hint = $("schedule-hint");
-  hint.textContent = "Building the preview…";
-  hint.hidden = false;
-  $("schedule-error").hidden = true;
-  try {
-    const response = await api("/api/presentation", {
-      project: state.project, mode: $("export-mode").value, format: state.scheduleFormat,
-      preview: true, ...scheduleDetails() }, true);
-    const blob = await response.blob();
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = URL.createObjectURL(blob);
-    $("schedule-frame").src = previewUrl;
-    hint.textContent = "Every page of the document, exactly as it will download.";
-  } catch (error) {
-    $("schedule-frame").removeAttribute("src");
-    hint.hidden = true;
-    $("schedule-error").textContent = error.message;
-    $("schedule-error").hidden = false;
-  }
-}
-
-async function downloadSchedule(event) {
-  event.preventDefault();
-  if (state.busy) return;
-  $("schedule-error").hidden = true;
-  setBusy(true, "Building your finish schedule…");
-  try {
-    await exportPresentation(state.scheduleFormat, { ...scheduleDetails() });
-    $("schedule-dialog").close();
-  } catch (error) {
-    $("schedule-error").textContent = error.message;
-    $("schedule-error").hidden = false;
-  } finally { setBusy(false); }
-}
-
-const FORMAT_LABELS = { pdf: "PDF", docx: "Word", pptx: "PowerPoint", form: "fillable", "form-docx": "fillable Word" };
-const FORMAT_EXTENSIONS = { pdf: "pdf", docx: "docx", pptx: "pptx", form: "pdf", "form-docx": "docx" };
-
-async function exportPresentation(format, extra = {}) {
-  const { title, prefix, hidden: columns } = scheduleOptions();
-  const label = FORMAT_LABELS[format];
-  const quiet = Object.keys(extra).length > 0;   // the dialog shows its own progress
-  if (!quiet) setBusy(true, `Building your ${label} finish schedule…`);
-  try {
-    const response = await api("/api/presentation", { project: state.project, mode: $("export-mode").value, format, title, prefix, hidden: columns, ...extra }, true);
-    const blob = await response.blob(), url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const filename = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/);
-    link.href = url;
-    link.download = filename ? filename[1] : `${state.project}_${title.replace(/[^A-Za-z0-9]+/g, "_")}.${FORMAT_EXTENSIONS[format] || "pdf"}`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    await refresh();
-    toast("Finish schedule downloaded. Review the layout and branding before sharing with your client.");
-  } finally { if (!quiet) setBusy(false); }
-}
-
-async function importScheduleForm(file) {
-  if (!file) return;
-  const project = selectedProject();
-  if (!project) { toast("Choose a project first.", true); return; }
-  if (file.size > 8 * 1024 * 1024) throw new Error("Choose a file smaller than 8 MB.");
-  if (!confirm(`Apply “${file.name}” to “${project["Project Name"]}”?\n\nClient details are updated, edited descriptions are saved for the client schedule, and any line you ticked Remove is deleted. A backup is kept.`)) return;
-  const data = new FormData();
-  data.append("file", file);
-  data.append("project", state.project);
-  data.append("revision", state.data.revision);
-  setBusy(true, "Reading the filled schedule…");
-  try {
-    const result = await api("/api/schedule/form", data);
-    await refresh();
-    const parts = [];
-    if (result.details.length) parts.push(`${result.details.length} client detail${result.details.length === 1 ? "" : "s"} updated`);
-    if (result.described) parts.push(`${result.described} description${result.described === 1 ? "" : "s"} saved`);
-    if (result.removed) parts.push(`${result.removed} line${result.removed === 1 ? "" : "s"} removed`);
-    toast(parts.length ? `${parts.join(", ")}.` : "Nothing had changed in that form.");
+    toast("Selection verified.");
   } finally { setBusy(false); }
 }
 
@@ -855,27 +605,14 @@ async function importSpecCsv(file) {
   } finally { setBusy(false); }
 }
 
-async function importWorkbook(file) {
-  if (!file) return;
-  if (file.size > 8 * 1024 * 1024) throw new Error("Choose a workbook smaller than 8 MB.");
-  if (!confirm(`Replace the current master workbook with “${file.name}”?\n\nThis replaces ALL projects and selections, not just the selected project. A timestamped backup will be kept. Close Excel before continuing.`)) return;
-  const data = new FormData();
-  data.append("file", file);
-  data.append("revision", state.data.revision);
-  data.append("confirm", "replace-with-backup");
-  setBusy(true, "Validating and importing the workbook…");
-  try { await api("/api/workbook/import", data); await refresh(); toast("Workbook imported. The previous version is in the backups folder."); }
-  finally { setBusy(false); }
-}
-
 let polling = false;
 setInterval(async () => {
-  if (polling || state.busy || specDrag || $("editor").open || !state.data?.automation?.enabled || document.hidden) return;
+  if (polling || state.busy || specDrag || $("editor").open || document.hidden) return;
   if (document.activeElement?.classList?.contains("cell")) return;   // never redraw a cell being edited
   polling = true;
   try {
     const data = await api("/api/state");
-    if (!state.busy && !$("editor").open && (data.revision !== state.data.revision || JSON.stringify(data.automation) !== JSON.stringify(state.data.automation))) {
+    if (!state.busy && !$("editor").open && data.revision !== state.data.revision) {
       state.data = data;
       if (!selectedProject()) state.project = data.projects[0]?.["Project ID"] || "";
       $("load-error").hidden = true;
@@ -900,11 +637,6 @@ function setSidebar(collapsed) {
 try { if (localStorage.getItem("uh-sidebar") === "collapsed") setSidebar(true); } catch {}
 $("sidebar-toggle").addEventListener("click", () => setSidebar(!document.body.classList.contains("sidebar-collapsed")));
 
-$("retry-automation").addEventListener("click", () => action(async () => {
-  await api("/api/automation/retry", {});
-  await refresh();
-  toast("Automatic lookup will retry eligible selections.");
-}));
 $("add-custom-field").addEventListener("click", () => { if (!state.busy) addCustomField(); });
 $("project-save-details").addEventListener("click", () => action(async () => {
   const project = selectedProject();
@@ -942,26 +674,16 @@ $("editor-verify").addEventListener("click", () => { const { record } = state.ed
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
-$("add-from-link").addEventListener("click", () => action(addFromLink));
 $("spec-filter").addEventListener("input", renderSpec);
-// Word downloads skip the details dialog: its preview is an iframe, which cannot show a .docx.
-const specQuery = () => `?project=${encodeURIComponent(state.project)}&hide=${encodeURIComponent([...state.hidden].join(","))}`;
+// The download carries the spec sheet as it is on screen, under the same group headings.
+const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(state.specGroup)}`;
 const FILE_ACTIONS = {
-  pdf: () => openScheduleDialog("pdf"),
-  docx: () => action(() => exportPresentation("docx")),
-  form: () => openScheduleDialog("form"),
-  "form-docx": () => action(() => exportPresentation("form-docx")),
-  pptx: () => action(() => exportPresentation("pptx")),
   csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
   "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
   "spec-pdf": () => { window.location.href = `/api/selections/pdf${specQuery()}`; },
-  workbook: () => { window.location.href = "/api/workbook"; },
   "import-csv": () => $("spec-import-file").click(),
-  "import-form": () => $("form-import-file").click(),
-  "import-workbook": () => $("import-file").click(),
 };
-const NEEDS_PROJECT = new Set(["pdf", "docx", "form", "form-docx", "pptx", "csv", "spec-docx",
-                               "spec-pdf", "import-csv", "import-form"]);
+const NEEDS_PROJECT = new Set(["csv", "spec-docx", "spec-pdf", "import-csv"]);
 
 $("files-button").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
 $("files-dialog").addEventListener("click", (event) => {
@@ -1095,89 +817,23 @@ $("cover-file").addEventListener("change", (event) => {
   action(() => uploadCover(file));
 });
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
-function whenText(iso) {
-  const when = new Date(iso);
-  const today = new Date(new Date().toDateString());
-  const day = new Date(new Date(when).toDateString());
-  const days = Math.round((today - day) / 86400000);
-  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (days === 0) return `Today at ${time}`;
-  if (days === 1) return `Yesterday at ${time}`;
-  return `${when.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })} at ${time}`;
-}
-
-async function renderBackups() {
-  const list = $("backup-list");
-  try {
-    const { backups } = await api("/api/backups");
-    list.innerHTML = backups.length
-      ? backups.map((backup) => `<div class="backup-row"><time datetime="${esc(backup.when)}">${esc(whenText(backup.when))}</time><small>${Math.round(backup.size / 1024)} KB</small><button class="text-button" data-restore="${esc(backup.name)}">Restore this</button></div>`).join("")
-      : '<p class="muted">No earlier versions yet. One is saved each time something changes.</p>';
-  } catch (error) {
-    list.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
-  }
-}
-
-$("setup-button").addEventListener("click", () => { $("setup-dialog").showModal(); renderBackups(); });
-$("restore-file").addEventListener("click", () => { if (state.data && !state.busy) $("import-file").click(); });
-$("backup-list").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-restore]");
-  if (!button || state.busy) return;
-  const when = button.closest(".backup-row").querySelector("time").textContent;
-  action(async () => {
-    if (!confirm(`Go back to the version saved ${when}?\n\nEverything in every project returns to how it was then. The current version is saved first, so you can come back.`)) return;
-    setBusy(true, "Restoring that version…");
-    try {
-      await api("/api/backups/restore", { name: button.dataset.restore });
-      await refresh();
-      await renderBackups();
-      toast(`Restored the version from ${when}. The version you replaced was saved too.`);
-    } finally { setBusy(false); }
-  });
-});
-$("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workbook refreshed."); }));
+$("setup-button").addEventListener("click", () => $("setup-dialog").showModal());
+$("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workspace refreshed."); }));
 // Only rendered on the hosted workspace, where there is a session to end.
 $("sign-out")?.addEventListener("click", () => action(async () => {
   await api("/api/logout", {});
   window.location.assign("/login");
 }));
-$("find-links").addEventListener("click", () => action(() => lookup()));
-$("cancel-lookup").addEventListener("click", () => { state.cancel = true; $("cancel-lookup").textContent = "Stopping after this item…"; });
-document.querySelectorAll(".hide-grid").forEach((grid) => grid.addEventListener("change", (event) => {
-  const box = event.target.closest("[data-hide]");
-  if (box) toggleHidden(box.dataset.hide, !box.checked);
-}));
-$("export-hide-clear").addEventListener("click", () => { state.hidden.clear(); render(); });
-$("schedule-hide-clear").addEventListener("click", () => { state.hidden.clear(); render(); });
-$("export-pdf").addEventListener("click", () => openScheduleDialog("pdf"));
-$("export-more").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
-$("schedule-form").addEventListener("submit", downloadSchedule);
-$("schedule-refresh").addEventListener("click", () => action(refreshSchedulePreview));
-$("schedule-dialog").addEventListener("close", () => {
-  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
-  $("schedule-frame").removeAttribute("src");
-});
-
-$("form-import-file").addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  event.target.value = "";
-  action(() => importScheduleForm(file));
-});
-$("export-mode").addEventListener("change", render);
-$("export-title").addEventListener("input", render);
-$("export-prefix").addEventListener("input", render);
-
-$("import-file").addEventListener("change", (event) => { const file = event.target.files[0]; event.target.value = ""; action(() => importWorkbook(file)); });
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
 $("next-page").addEventListener("click", () => { state.page++; renderTable(); });
-for (const id of ["search", "section-filter", "status-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
+for (const id of ["search", "section-filter", "location-filter", "status-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.classList.contains("close-dialog")) { button.closest("dialog").close(); return; }
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
-  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; render(); }
+  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; $("location-filter").value = ""; render(); }
   if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
@@ -1186,8 +842,7 @@ document.addEventListener("click", (event) => {
   }
   if (button.dataset.specAdd !== undefined) {
     const name = button.dataset.specAdd;   // placeholder group names are not real values
-    const prefill = ["Other", "Unassigned"].includes(name) ? {}
-      : state.specGroup === "Section" ? { Section: name } : { "Room / Area": name };
+    const prefill = ["Other", "Unassigned"].includes(name) ? {} : { [state.specGroup]: name };
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));

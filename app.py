@@ -1,6 +1,5 @@
 import csv
 import datetime as dt
-import importlib
 import io
 import json
 import os
@@ -18,14 +17,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import auth
 import build_lookbook
 import common
-import find_urls
 import spec_template
 import supabase_store
-from auto_lookup import AutoLookup
 from workbook_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
                             PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES,
                             ValidationError, WorkbookStore, delete_record, ensure_selection_columns,
-                            http_url, hyperlink_formula, next_row, parse_hyperlink, put, records,
+                            hyperlink_formula, next_row, parse_hyperlink, put, records,
                             stale_check, validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
@@ -79,7 +76,6 @@ EXPORT_LOCK = threading.Lock()
 THROTTLE = auth.Throttle()
 # Reachable without a session: the sign-in page and the assets and health check it needs.
 OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz"}
-automation = None
 
 
 def csrf_token():
@@ -213,39 +209,18 @@ def asset(name):
     return send_file(BASE / name)
 
 
-def provider_info():
-    provider = os.getenv("SEARCH_PROVIDER", "brave").lower()
-    keys = {"brave": ["BRAVE_API_KEY"], "serpapi": ["SERPAPI_KEY", "SERPAPI_API_KEY"],
-            "claude": ["ANTHROPIC_API_KEY"]}.get(provider, [])
-    return {"name": provider, "ready": any(os.getenv(key) for key in keys),
-            "key_name": keys[0] if keys else "SEARCH_PROVIDER"}
-
-
 @app.get("/api/state")
 def state():
     with store.lock:
         wb, revision = store.snapshot()
         rows = detailed_records(wb, "Selections")
-        if automation:
-            automation.observe(wb)
-            rows = automation.display_rows(rows)
         rows = [{**row, "_stale": stale_check(row)} for row in rows]
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
+                       locations=common.location_order(wb),
                        statuses=STATUSES, client_statuses=CLIENT_STATUSES, stale_days=180,
-                       hideable=[{"key": key, "label": label, "documents": list(documents)}
-                                 for key, label, documents in build_lookbook.HIDEABLE_COLUMNS],
-                       revision=revision, provider=provider_info(),
-                       automation=automation.status() if automation else {"enabled": False, "pending": [], "message": ""},
+                       revision=revision,
                        workbook=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
-
-
-@app.post("/api/automation/retry")
-def retry_automation():
-    current(payload())
-    if automation:
-        automation.retry()
-    return jsonify(ok=True)
 
 
 def payload():
@@ -259,8 +234,6 @@ def current(data):
     wb, revision = store.snapshot()
     if data["revision"] != revision:
         raise ConflictError("The workbook changed. Refresh before saving your changes.")
-    if automation:
-        automation.observe(wb)
     return wb, revision
 
 
@@ -282,8 +255,6 @@ def save_project():
                 delete_record(wb, "Selections", row)
             delete_record(wb, "Projects", existing["_row"])
             store.save(wb, revision, f"delete project {existing['Project ID']} (-{len(owned)} line items)")
-            if automation and owned:
-                automation.observe(wb)
             return jsonify(ok=True, deleted=True, removed=len(owned))
         if data.get("create") and existing:
             raise ValidationError("That Project ID already exists. Choose a unique ID.")
@@ -298,14 +269,12 @@ def save_project():
         if not existing:
             # A new home starts from the standard room-by-room specification.
             _, template = spec_template.load()
-            spec_template.register_sections(wb, [section for section, _ in template])
+            spec_template.register_locations(wb, [location for location, _ in template])
             seeded, _ = spec_template.apply(wb, values["Project ID"], template)
             from openpyxl.utils import get_column_letter
             selections = wb["Selections"]
             selections.auto_filter.ref = f"A1:{get_column_letter(selections.max_column)}{selections.max_row}"
         store.save(wb, revision, f"project {values.get('Project ID')}" + (f" (+{seeded} line items)" if seeded else ""))
-        if automation and seeded:
-            automation.observe(wb)
     return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded)
 
 
@@ -352,15 +321,6 @@ def project_cover(name):
                      mimetype=COVER_MIME.get(Path(name).suffix, "image/png"))
 
 
-def cover_bytes(value):
-    """A Cover Image value -> bytes for the export. Uploads come through the storage backend;
-    web addresses and file paths resolve exactly as they do for the command-line builder."""
-    value = common.clean(value)
-    if value.startswith(COVER_PREFIX):
-        return store.read_cover(value[len(COVER_PREFIX):])
-    return build_lookbook.resolve_cover(value)
-
-
 @app.post("/api/selections/order")
 def reorder_selections():
     data = payload()
@@ -393,8 +353,6 @@ def reorder_selections():
                 cell = sheet.ws.cell(pos, sheet.cols[h])
                 cell.value, cell.hyperlink = value, link
         store.save(wb, revision, f"reorder selections in {project}")
-        if automation:
-            automation.observe(wb)
     return jsonify(ok=True)
 
 
@@ -404,8 +362,6 @@ def merge_selection(old, values, confirm_verified, row=None):
     merged.update(values)
     if not merged["Project ID"] or not merged["Item"]:
         raise ValidationError("Project and item name are required.")
-    if automation and row is not None and str(row) in automation.active() and values.get("Lookup Status") == "Verified":
-        raise ValidationError("Automatic lookup is pending for this changed product. Wait for the result or save a new manual link before verifying.")
     merged["Client Status"] = merged.get("Client Status") or "Proposed"
     if old and any(merged[k] != old[k] for k in IDENTITY_FIELDS):
         if merged["Client Status"] in {"Presented", "Approved"}:
@@ -446,8 +402,6 @@ def save_selection():
                 raise ConflictError("This selection no longer exists. Refresh the page.")
             delete_record(wb, "Selections", old["_row"])
             store.save(wb, revision, f"delete selection row {old['_row']} ({old['Item']})")
-            if automation:
-                automation.observe(wb)
             return jsonify(ok=True, deleted=True)
         if data.get("batch"):
             sheet = ensure_selection_columns(wb)
@@ -465,8 +419,6 @@ def save_selection():
                 put(sheet, row, merged)
                 applied.append(row)
             store.save(wb, revision, f"batch edit {len(applied)} selection rows")
-            if automation:
-                automation.observe(wb)
             return jsonify(ok=True, applied=applied)
         old = None
         if data.get("row") is not None:
@@ -482,10 +434,7 @@ def save_selection():
         if "custom_fields" in data:
             set_custom_fields(wb, "Selections", row, data["custom_fields"])
         store.save(wb, revision, f"selection row {row}")
-        if automation:
-            automation.observe(wb)
-        queued = bool(automation and str(row) in automation.active())
-    return jsonify(ok=True, row=row, queued=queued)
+    return jsonify(ok=True, row=row)
 
 
 @app.post("/api/manufacturers")
@@ -512,144 +461,10 @@ def save_manufacturer():
     return jsonify(ok=True)
 
 
-@app.post("/api/selections/<int:row>/lookup")
-def lookup_selection(row):
-    data = payload()
-    info = provider_info()
-    if not info["ready"]:
-        raise ValidationError(f"Product search is not configured. Add {info['key_name']} to your local .env file and restart the app. Do not paste keys into the workbook or chat.")
-    wb, revision = current(data)
-    record = next((r for r in records(wb, "Selections") if r["_row"] == row), None)
-    if not record:
-        raise ValidationError("Selection not found.")
-    if automation and str(row) in automation.active():
-        raise ConflictError("Automatic lookup is already queued for this product. Check its progress or use Retry automatic lookup.")
-    if record["Lookup Status"] == "Verified":
-        return jsonify(ok=True, skipped=True)
-    if not record["Manufacturer"] or not record["Model #"]:
-        raise ValidationError("Add both a manufacturer and model number before searching.")
-    domain = common.manufacturer_domains(wb).get(record["Manufacturer"].lower(), "")
-    result = find_urls.lookup(find_urls.PROVIDERS[info["name"]], record["Manufacturer"], record["Model #"], domain,
-                              product_name=record["Product Name"] or record["Item"])
-    if result["status"] == "Search error":
-        return jsonify(error=result["notes"]), 502
-    if len(result.get("url", "")) > 4000:
-        raise ValidationError("The returned product URL is too long. Review this product manually.")
-    updates = {"Lookup Status": result["status"], "Lookup Notes": result.get("notes", ""), "Checked On": dt.date.today().isoformat()}
-    if result.get("url"):
-        updates["Product URL"] = result["url"]
-        updates["Product Name"] = result.get("name", "")
-        if not record["Image URL"] or record["Image URL"].startswith("http"):
-            updates["Image URL"] = result.get("image", "")
-    elif record["Product URL"]:
-        updates["Lookup Notes"] += " Existing link retained for manual review; it was not confirmed."
-    with store.lock:
-        put(common.Sheet(wb["Selections"]), row, updates)
-        store.save(wb, revision, f"lookup row {row}")
-        if automation:
-            automation.acknowledge(wb, row)
-    return jsonify(ok=True, result=result)
-
-
-@app.post("/api/selections/parse-link")
-def parse_link():
-    data = payload()
-    current(data)
-    url = common.clean(data.get("url"))
-    if not http_url(url) or len(url) > 4000:
-        raise ValidationError("Enter a full HTTP or HTTPS product link.")
-    details = find_urls.describe_page(url)
-    if not details or not details.get("Product Name"):
-        raise ValidationError("That page could not be read as a product page. Enter the details manually.")
-    return jsonify(ok=True, details=details)
-
-
-# The band's project/lot field combines two columns, so it is read-only on the form.
-BAND_TO_PROJECT = {"client": "Client Name", "address": "Address", "date": "Presentation Date"}
-
-
-def normalise_date(value):
-    """Accept an ISO date or the printed form, and store ISO."""
-    text = common.clean(value)
-    if not text:
-        return ""
-    for fmt in ("%Y-%m-%d", "%B %d, %Y", "%d/%m/%Y", "%m/%d/%Y"):
-        try:
-            return dt.datetime.strptime(text, fmt).date().isoformat()
-        except ValueError:
-            continue
-    raise ValidationError(f"'{text}' is not a date the schedule understands. Use YYYY-MM-DD.")
-
-
-@app.post("/api/schedule/form")
-def import_schedule_form():
-    """Apply a filled fillable schedule, PDF or Word: client details, line descriptions and removals."""
-    upload = request.files.get("file")
-    name = (upload.filename or "").lower() if upload else ""
-    if not name.endswith((".pdf", ".docx")):
-        raise ValidationError("Choose the fillable schedule PDF or Word document you downloaded and filled in.")
-    # Both copies name their fields the same way, so one reader swaps in for the other.
-    reader = importlib.import_module("build_word" if name.endswith(".docx") else "build_form")
-    project_id = common.clean(request.form.get("project"))
-    try:
-        details, lines, form_hidden = reader.read(io.BytesIO(upload.read()))
-    except Exception:
-        raise ValidationError("That file could not be read as a fillable schedule. Download a fresh copy and fill that in.") from None
-    if not lines and not details:
-        raise ValidationError("That file has no schedule fields. Use the fillable copy, not the client document.")
-
-    with store.lock:
-        wb, revision = current({"revision": request.form.get("revision", "")})
-        project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
-        if not project:
-            raise ValidationError("Choose a valid project.")
-        sheet = ensure_selection_columns(wb)
-        owned = {r["_row"]: r for r in records(wb, "Selections") if r["Project ID"] == project_id}
-        foreign = [row for row in lines if row not in owned]
-        if foreign:
-            raise ValidationError("That form belongs to a different project or an older version of it. Download a fresh copy.")
-
-        updates = {}
-        for key, field in BAND_TO_PROJECT.items():
-            value, stored = details.get(key, ""), common.clean(project.get(field, ""))
-            if field == "Presentation Date":
-                value, stored = normalise_date(value), stored[:10]
-            if value and value != stored:
-                updates[field] = value
-        if updates:
-            updates = validate_values(updates, PROJECT_FIELDS)
-            put(common.Sheet(wb["Projects"]), project["_row"], updates)
-
-        removed = described = 0
-        for row, entry in lines.items():
-            record = owned[row]
-            if entry.get("remove"):
-                removed += 1
-                continue
-            typed = entry.get("description", "")
-            # Unedited fields still read back transliterated, and a copy printed without some
-            # columns reads back without them too, so compare like for like.
-            generated = reader.form_text(build_lookbook.description({**record, "Description Override": ""},
-                                                                    hidden=form_hidden))
-            override = "" if typed in {"", generated} else typed
-            if override != record.get("Description Override", ""):
-                put(sheet, row, validate_values({"Description Override": override},
-                                                SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS))
-                described += 1
-        for row in sorted((row for row, entry in lines.items() if entry.get("remove")), reverse=True):
-            delete_record(wb, "Selections", row)
-        if removed or described or updates:
-            store.save(wb, revision, f"schedule form {project_id} (-{removed}/~{described})")
-            if automation:
-                automation.observe(wb)
-    return jsonify(ok=True, removed=removed, described=described, details=sorted(updates))
-
-
 PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-SPEC_CSV_FIELDS = ["Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
+SPEC_CSV_FIELDS = ["Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
                    "Qty", "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
                    "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
@@ -671,7 +486,8 @@ def csv_fields(hidden):
 
 
 def spec_key(row):
-    return (common.clean(row.get("Section")), common.clean(row.get("Room / Area")), common.clean(row.get("Item")))
+    return (common.clean(row.get("Location")), common.clean(row.get("Room / Area")),
+            common.clean(row.get("Item")))
 
 
 def csv_values(entry, headers):
@@ -696,9 +512,8 @@ def export_spec_csv():
         project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
         if not project:
             raise ValidationError("Choose a valid project.")
-        order = common.section_order(wb)
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
-    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    common.schedule_sort(rows, wb)
     fields = csv_fields(hidden)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
@@ -711,6 +526,14 @@ def export_spec_csv():
                      download_name=f"{name}_spec_sheet.csv", mimetype="text/csv")
 
 
+def group_option(value):
+    """The heading the spec sheet is grouped by, as chosen by the view's group-by chips."""
+    group = common.clean(value) or "Location"
+    if group not in build_lookbook.SPEC_GROUPS:
+        raise ValidationError(f"Group the spec sheet by one of: {', '.join(build_lookbook.SPEC_GROUPS)}.")
+    return group
+
+
 def spec_export_rows():
     """The requested project's line items in spec-sheet order for a document export."""
     project_id = common.clean(request.args.get("project"))
@@ -719,11 +542,10 @@ def spec_export_rows():
         project = next((p for p in records(wb, "Projects") if p["Project ID"] == project_id), None)
         if not project:
             raise ValidationError("Choose a valid project.")
-        order = common.section_order(wb)
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
     if not rows:
         raise ValidationError("This project has no line items to export.")
-    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
+    common.schedule_sort(rows, wb)
     return project_id, project, rows
 
 
@@ -732,9 +554,11 @@ def export_spec_docx():
     """The same line items as the CSV, as a Word document to read, print and mark up."""
     import build_word
     hidden = hidden_option(request.args.get("hide", ""))
+    group = group_option(request.args.get("group"))
     project_id, project, rows = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
-        output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder), hidden=hidden)
+        output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder),
+                                       hidden=hidden, group=group)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=DOCX_MIME)
 
@@ -743,9 +567,11 @@ def export_spec_docx():
 def export_spec_pdf():
     """The spec sheet as a printable PDF: the same columns as the Word copy."""
     hidden = hidden_option(request.args.get("hide", ""))
+    group = group_option(request.args.get("group"))
     project_id, project, rows = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
-        output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder), hidden=hidden)
+        output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder),
+                                           hidden=hidden, group=group)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=PDF_MIME)
 
@@ -822,182 +648,7 @@ def import_spec_csv():
         from openpyxl.utils import get_column_letter
         sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
         store.save(wb, revision, f"spec csv import {project_id} (+{added}/~{updated})")
-        if automation:
-            automation.observe(wb)
     return jsonify(ok=True, added=added, updated=updated)
-
-
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
-@app.get("/api/workbook")
-def export_workbook():
-    raw = store.read_bytes()
-    name = store.name
-    if request.args.get("backup"):
-        name = f"{Path(name).stem}_backup_{dt.date.today().isoformat()}.xlsx"
-    return send_file(io.BytesIO(raw), as_attachment=True, download_name=name, mimetype=XLSX_MIME)
-
-
-@app.get("/api/backups")
-def list_backups():
-    """Earlier copies kept automatically before each save, newest first."""
-    return jsonify(backups=store.backups())
-
-
-@app.post("/api/backups/restore")
-def restore_backup():
-    data = payload()
-    name = common.clean(data.get("name"))
-    with store.lock:
-        current(data)
-        # import_bytes validates the copy and backs up the live workbook before replacing it
-        store.import_bytes(store.read_backup(name), data["revision"])
-        if automation:
-            automation.observe(store.snapshot()[0])
-    return jsonify(ok=True, name=name)
-
-
-@app.post("/api/workbook/import")
-def import_workbook():
-    if request.form.get("confirm") != "replace-with-backup":
-        raise ValidationError("Confirm replacement of the master workbook first.")
-    upload = request.files.get("file")
-    if not upload or not upload.filename.lower().endswith(".xlsx"):
-        raise ValidationError("Choose an .xlsx workbook exported from this app or using the same template.")
-    with store.lock:
-        store.import_bytes(upload.read(), request.form.get("revision", ""))
-        if automation:
-            automation.observe(store.snapshot()[0])
-    return jsonify(ok=True)
-
-
-BAND_INPUTS = {"client": "Client Name", "project_lot": "Project / Lot", "address": "Address", "date": "Date"}
-
-
-def band_overrides(data):
-    """Client details typed for this download, replacing the project's own for the band."""
-    details = data.get("details")
-    if details is None:
-        return {}
-    if not isinstance(details, dict) or set(details) - set(BAND_INPUTS):
-        raise ValidationError("Unexpected client detail fields.")
-    out = {}
-    for key, label in BAND_INPUTS.items():
-        value = common.clean(details.get(key))
-        if any(ord(character) < 32 for character in value) or len(value) > 200:
-            raise ValidationError(f"Enter {label} as a single line of up to 200 characters.")
-        if key == "date" and value:
-            value = normalise_date(value)
-        out[key] = value
-    return out
-
-
-def with_details(project, overrides):
-    if not overrides:
-        return project
-    shown = dict(project)
-    if overrides.get("client"):
-        shown["Client Name"] = overrides["client"]
-    if overrides.get("project_lot"):
-        # the band composes name and plan, so a typed value replaces the pair outright
-        shown["Project Name"], shown["Plan / Elevation"] = overrides["project_lot"], ""
-    if overrides.get("address"):
-        shown["Address"] = overrides["address"]
-    if overrides.get("date"):
-        shown["Presentation Date"] = overrides["date"]
-    return shown
-
-
-def schedule_options(data):
-    """Per-export title, item code prefix and hidden columns, falling back to the branding defaults."""
-    title, prefix = common.clean(data.get("title")), common.clean(data.get("prefix"))
-    if len(title) > 80 or any(ord(character) < 32 for character in title):
-        raise ValidationError("Enter a schedule title of up to 80 characters on one line.")
-    if prefix and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,5}", prefix):
-        raise ValidationError("The item code prefix must be 1-6 letters, numbers, or hyphens, such as EX.")
-    return title or None, prefix or None, hidden_option(data.get("hidden"))
-
-
-# Download format -> (module, builder, mime). The builders are imported on demand so a local
-# run only pays for the one it is asked for.
-PRESENTATION_FORMATS = {
-    "pdf": ("build_lookbook", "build", PDF_MIME),
-    "docx": ("build_word", "build", DOCX_MIME),
-    "pptx": ("build_powerpoint", "build", PPTX_MIME),
-    "form": ("build_form", "build", PDF_MIME),
-    "form-docx": ("build_word", "build_fillable", DOCX_MIME),
-}
-FILLABLE_FORMATS = {"form", "form-docx"}
-
-
-@app.post("/api/presentation")
-def presentation():
-    data = payload()
-    wb, revision = current(data)
-    project = next((p for p in detailed_records(wb, "Projects") if p["Project ID"] == data.get("project")), None)
-    if not project:
-        raise ValidationError("Choose a valid project.")
-    mode, kind = data.get("mode", "draft"), data.get("format", "pdf")
-    if mode not in {"draft", "verified", "final"} or kind not in PRESENTATION_FORMATS:
-        raise ValidationError("Invalid presentation options.")
-    title, prefix, hidden = schedule_options(data)
-    overrides = band_overrides(data)
-    rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"] and r["Include in Lookbook"].lower() != "no"]
-    if automation:
-        with store.lock:
-            pending_rows = automation.active()
-        if mode == "verified":
-            rows = [r for r in rows if str(r["_row"]) not in pending_rows]
-        elif any(str(r["_row"]) in pending_rows for r in rows):
-            raise ConflictError("This project has changed products awaiting automatic lookup. Close Excel and wait for the results, save manual links, or export verified selections only.")
-    if mode == "final" and any(r["Lookup Status"] != "Verified" for r in rows):
-        raise ValidationError("Some included selections are not verified. Review them, export a draft, or choose verified selections only.")
-    if mode == "verified":
-        rows = [r for r in rows if r["Lookup Status"] == "Verified"]
-    if not rows:
-        raise ValidationError("No selections match these export options.")
-    order = common.section_order(wb)
-    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order), r["Section"], r["_row"]))
-    preview = bool(data.get("preview"))
-    note = f"export {project['Project ID']} {kind} {mode}"
-    with store.lock:
-        marked, saved = [], []
-        if not preview:
-            if data.get("save_details") and overrides:
-                # only the unambiguous columns; the band's project/lot merges two of them
-                changed = {}
-                for key, field in {"client": "Client Name", "address": "Address", "date": "Presentation Date"}.items():
-                    value, stored = overrides.get(key, ""), common.clean(project.get(field, ""))
-                    if field == "Presentation Date":
-                        stored = stored[:10]
-                    if value and value != stored:
-                        changed[field] = value
-                saved = validate_values(changed, PROJECT_FIELDS)
-                if saved:
-                    put(common.Sheet(wb["Projects"]), project["_row"], saved)
-            if mode != "draft":
-                sheet = ensure_selection_columns(wb)
-                marked = [r for r in rows if common.clean(r.get("Client Status")) in {"", "Proposed"}]
-                for r in marked:
-                    put(sheet, r["_row"], {"Client Status": "Presented"})
-            if marked or saved:
-                store.save(wb, revision, note)
-            else:
-                store.log(note)
-        rev = store.count_notes(f"export {project['Project ID']} ")
-    shown = with_details(project, overrides)
-    module, builder, mime = PRESENTATION_FORMATS[kind]
-    build_schedule = getattr(importlib.import_module(module), builder)
-    # A working copy is neither watermarked nor numbered: it is filled in and brought back.
-    extra = {} if kind in FILLABLE_FORMATS else {"draft": mode == "draft", "rev": None if preview else rev}
-    if kind == "pdf":
-        extra["cover"] = cover_bytes(shown.get("Cover Image"))
-    with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_presentation_") as folder:
-        output = build_schedule(project["Project ID"], shown, rows, output_dir=Path(folder),
-                                title=title, prefix=prefix, hidden=hidden, **extra)
-        raw = output.read_bytes()
-    return send_file(io.BytesIO(raw), as_attachment=not preview, download_name=output.name, mimetype=mime)
 
 
 def check_exposure():
@@ -1019,27 +670,15 @@ def check_exposure():
                          "which a redeploy would discard. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.")
 
 
-def start_automation():
-    """Begin watching for product changes. Call once per process, after the store is ready."""
-    global automation
-    automation = AutoLookup(store, provider_info)
-    automation.observe(store.snapshot()[0])
-    automation.start()
-    return automation
-
-
 check_exposure()
 
 if __name__ == "__main__":
     import argparse
-    import atexit
     parser = argparse.ArgumentParser(description="Run the UH Homes selection tracker.")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "5000")))
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535.")
-    atexit.register(start_automation().stop)
-    print("Automatic lookup watches saved app and Excel edits while this process is running.")
     print(f"UH Homes Selections: http://{HOST}:{args.port}")
     if store.remote:
         print("Workbook stored in Supabase. Sign-in required." if REQUIRE_LOGIN else "Workbook stored in Supabase.")

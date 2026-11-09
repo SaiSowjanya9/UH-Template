@@ -49,7 +49,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             SIGN_H, SIGN_W, SIGN_X, SPEC_COLUMNS, SPEC_TITLE, band_values, clean,
                             code_prefix, description, fit, group_sections, hidden_columns,
                             load_data, numbered, presentation_details, product_link, row_widths,
-                            schedule_title, spaced_caps)
+                            schedule_title, spaced_caps, spec_groups)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -533,8 +533,8 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
     return out
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=()):
-    """The internal spec sheet: every priced line item, landscape, grouped by section."""
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Location"):
+    """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
     document = new_document(SPEC_TITLE, landscape=True)
     width = content_width(document)
     band(document, band_values(project), width)
@@ -543,7 +543,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=()):
     if not columns:
         columns = [("Item", 1)]
     widths = [width * share / sum(share for _, share in columns) for _, share in columns]
-    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
+    for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
             heading(document, section, width, first=index == 0)
         table = grid(document, widths, pad_y=4)

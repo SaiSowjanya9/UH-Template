@@ -9,18 +9,20 @@ import sys
 
 import requests
 
+from workbook_store import infer_category
+
 BASE = "https://uh-selections.onrender.com"
 EMAIL = "saisowjanya218@gmail.com"
 PASSWORD = os.environ["UH_IMPORT_PASSWORD"]
 PROJECT = "UH-103"
 
-# (Section, Room / Area, Item, Manufacturer, Model #, Finish / Color, Qty, Client Notes)
+# (Location, Room / Area, Item, Manufacturer, Model #, Finish / Color, Qty, Client Notes)
 R = []
 
 def row(section, room, item, mfr="", model="", finish="", qty="", notes=""):
-    R.append({"Section": section, "Room / Area": room, "Item": item, "Manufacturer": mfr,
-              "Model #": model, "Finish / Color": finish, "Qty": qty,
-              "Client Notes": notes, "Include in Lookbook": "Yes"})
+    R.append({"Location": section, "Section": infer_category(room, item), "Room / Area": room,
+              "Item": item, "Manufacturer": mfr, "Model #": model, "Finish / Color": finish,
+              "Qty": qty, "Client Notes": notes, "Include in Lookbook": "Yes"})
 
 # ---------------- Whole-house specs (room = Whole House) ----------------
 W = "Whole House"
@@ -197,7 +199,7 @@ row("Kitchen", "Butler Pantry", "Kitchen faucet", mfr="Kohler", model="22972-2MB
 row("Kitchen", "Butler Pantry", "Disposal", mfr="ISE", model="80926A", qty="1", notes="Disposer with cord · EA")
 row("Kitchen", "Butler Pantry", "Disposal stopper flange", mfr="Kohler", model="K-11352-2I", finish="Vibrant Brushed Moderne Brass", qty="1", notes="EA")
 
-FIELDS = ["Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
+FIELDS = ["Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
           "Qty", "Client Notes", "Include in Lookbook"]
 
 

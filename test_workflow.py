@@ -9,7 +9,6 @@ from unittest.mock import patch
 from openpyxl import load_workbook
 
 import common
-import find_urls
 import build_powerpoint
 
 
@@ -22,90 +21,6 @@ def docx_text(raw):
     parts += [paragraph.text for section in document.sections
               for story in (section.header, section.footer) for paragraph in story.paragraphs]
     return "\n".join(parts)
-
-
-def docx_tags(raw):
-    """Every content control in a Word document, as {tag: text}."""
-    from docx import Document
-    from docx.oxml.ns import qn
-    import build_word
-    found = {}
-    for sdt in Document(io.BytesIO(raw)).element.body.iter(qn("w:sdt")):
-        tag = sdt.find(f'{qn("w:sdtPr")}/{qn("w:tag")}')
-        if tag is not None:
-            found[tag.get(qn("w:val"))] = build_word.control_text(sdt)
-    return found
-
-
-def fill_word_form(raw, values):
-    """Type into a filled copy's content controls and tick its boxes, the way Word would."""
-    from docx import Document
-    from docx.oxml.ns import qn
-    document = Document(io.BytesIO(raw))
-    for sdt in document.element.body.iter(qn("w:sdt")):
-        properties = sdt.find(qn("w:sdtPr"))
-        tag = properties.find(qn("w:tag")) if properties is not None else None
-        name = tag.get(qn("w:val")) if tag is not None else None
-        if name not in values:
-            continue
-        checked = properties.find(f'{qn("w14:checkbox")}/{qn("w14:checked")}')
-        if checked is not None:
-            checked.set(qn("w14:val"), "1" if values[name] else "0")
-            continue
-        runs = list(sdt.find(qn("w:sdtContent")).iter(qn("w:t")))
-        runs[0].text = values[name]
-        for spare in runs[1:]:
-            spare.text = ""
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
-
-
-class MatchingTests(unittest.TestCase):
-    def test_model_boundaries(self):
-        self.assertTrue(find_urls.exact_model("Model K-596-VS", "k596vs"))
-        self.assertTrue(find_urls.exact_model("Model K596VS", "k596vs"))
-        self.assertFalse(find_urls.exact_model("Model K-596-VS2", "k596vs"))
-        self.assertFalse(find_urls.exact_model("Model 17594ESRS", "7594esrs"))
-
-    def test_category_page_is_not_product_match(self):
-        html = '<html><title>All faucets</title><body>K-596-VS and many more</body></html>'
-        with patch("find_urls.fetch_html", return_value=(html, "https://example.com/category")):
-            self.assertEqual(find_urls.inspect_page("https://example.com/category", "k596vs"), (False, "", ""))
-
-    def test_structured_category_is_not_a_product_page(self):
-        html = '<script type="application/ld+json">[{"@type":"Product","sku":"K-596-VS"},{"@type":"Product","sku":"K-597-VS"}]</script>'
-        with patch("find_urls.fetch_html", return_value=(html, "https://example.com/category")):
-            self.assertEqual(find_urls.inspect_page("https://example.com/category", "k596vs"), (False, "", ""))
-
-    def test_model_does_not_match_hyphenated_variant_or_prefix(self):
-        self.assertFalse(find_urls.exact_model("K-596-VS-2", "k596vs"))
-        self.assertFalse(find_urls.exact_model("PREFIX-K-596-VS", "k596vs"))
-
-    def test_structured_product_match(self):
-        html = '<script type="application/ld+json">{"@type":"Product","sku":"K-596-VS","name":"Kitchen faucet","image":"/faucet.jpg"}</script>'
-        with patch("find_urls.fetch_html", return_value=(html, "https://example.com/faucet")):
-            self.assertEqual(find_urls.inspect_page("https://example.com/faucet", "k596vs"),
-                             (True, "Kitchen faucet", "https://example.com/faucet.jpg"))
-
-    def test_fallback_after_unconfirmed_official_hit(self):
-        queries = []
-        def search(q):
-            queries.append(q)
-            return [{"url": "https://brand.example/category" if len(queries) == 1 else "https://shop.example/product", "title": "", "snippet": ""}]
-        def inspect(url, model):
-            return ("shop.example" in url, "Product", "")
-        with patch("find_urls.inspect_page", side_effect=inspect):
-            result = find_urls.lookup(search, "Brand", "ABC123", "brand.example")
-        self.assertEqual(len(queries), 2)
-        self.assertEqual(result["status"], "Found - retailer")
-
-    def test_provider_errors_do_not_expose_keys(self):
-        def search(q):
-            raise RuntimeError("https://provider.example?api_key=secret-value")
-        result = find_urls.lookup(search, "Brand", "ABC123", "")
-        self.assertNotIn("secret-value", result["notes"])
-        self.assertEqual(result["status"], "Search error")
 
 
 class AppTests(unittest.TestCase):
@@ -145,14 +60,15 @@ class AppTests(unittest.TestCase):
         self.assertTrue(ids)
         self.assertTrue(all(r["Project ID"] in ids for r in state["selections"]))
         self.assertNotIn("token", state)
-        self.assertEqual(set(state["provider"]), {"name", "ready", "key_name"})
 
     def test_excel_edits_flow_into_the_interface_and_the_schedule(self):
         """Excel stays the source of truth: sheet edits appear in state and on the deliverable."""
+        from workbook_store import ensure_location_list, location_list
         wb, revision = self.store.snapshot()
+        column = ensure_location_list(wb)
         lists = wb["Lists"]
-        used = len([r for r in lists.iter_rows(min_row=2, max_col=1) if common.clean(r[0].value)])
-        lists.cell(used + 2, 1, "Specialty Finishes")     # a new category, last in print order
+        _, existing = location_list(lists)
+        lists.cell(len(existing) + 2, column, "Specialty Finishes")   # a new location, last in print order
         project = wb["Projects"].cell(2, 1).value
         sheet = common.Sheet(wb["Selections"])
         row = sheet.ws.max_row + 1
@@ -163,22 +79,30 @@ class AppTests(unittest.TestCase):
         self.store.save(wb, revision)
 
         state = self.state()
-        self.assertEqual(state["sections"][-1], "Specialty Finishes")
-        self.assertTrue(any(r["Item"] == "Pergola" and r["Section"] == "Specialty Finishes" for r in state["selections"]))
-        response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
-        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
+        self.assertEqual(state["locations"][-1], "Specialty Finishes")
+        # a location name entered as a Section migrates onto Location, with the category re-inferred
+        record = next(r for r in state["selections"] if r["Item"] == "Pergola")
+        self.assertEqual(record["Location"], "Specialty Finishes")
+        self.assertEqual(record["Section"], "Other")
+        import build_lookbook
+        from workbook_store import detailed_records
+        wb, _ = self.store.snapshot()
+        rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project]
+        common.schedule_sort(rows, wb)
+        project_record = next(p for p in detailed_records(wb, "Projects") if p["Project ID"] == project)
+        output = build_lookbook.build(project, project_record, rows, True, Path(self.folder.name))
         try:
             from pypdf import PdfReader
         except ImportError:
             return
-        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        text = "\n".join(page.extract_text() for page in PdfReader(str(output)).pages)
         self.assertIn("S P E C I A L T Y   F I N I S H E S", text)
         self.assertIn("Test Brand Matte Black", text)
-        # headings follow the order of the Lists sheet, whatever categories the project uses
-        spaced = {section: "   ".join(" ".join(word) for word in section.upper().split()) for section in state["sections"]}
-        found = [(text.index(heading), section) for section, heading in spaced.items() if heading in text]
-        self.assertEqual([section for _, section in sorted(found)],
-                         [section for section in state["sections"] if spaced[section] in text])
+        # headings follow the order of the Lists sheet's Locations, whatever the project uses
+        spaced = {location: "   ".join(" ".join(word) for word in location.upper().split()) for location in state["locations"]}
+        found = [(text.index(heading), location) for location, heading in spaced.items() if heading in text]
+        self.assertEqual([location for _, location in sorted(found)],
+                         [location for location in state["locations"] if spaced[location] in text])
         self.assertEqual(sorted(found)[-1][1], "Specialty Finishes")
 
     def test_create_project_and_selection_preserve_text_models(self):
@@ -242,108 +166,15 @@ class AppTests(unittest.TestCase):
         sheet = common.Sheet(wb["Selections"])
         self.assertEqual(sheet.ws.cell(row, sheet.cols["Client Notes"]).data_type, "s")
 
-    def test_missing_api_key_is_actionable(self):
-        row = self.state()["selections"][0]["_row"]
-        with patch.dict("os.environ", {"SEARCH_PROVIDER": "brave", "BRAVE_API_KEY": ""}):
-            response = self.post(f"/api/selections/{row}/lookup", {})
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("BRAVE_API_KEY", response.json["error"])
-
-    def test_lookup_writes_candidate_but_not_verified(self):
-        row = self.state()["selections"][0]["_row"]
-        result = {"url": "https://example.com/product", "name": "Candidate", "image": "", "status": "Found - verify", "notes": ""}
-        with patch.dict("os.environ", {"SEARCH_PROVIDER": "brave", "BRAVE_API_KEY": "test-only"}), patch("find_urls.lookup", return_value=result):
-            response = self.post(f"/api/selections/{row}/lookup", {})
-        self.assertEqual(response.status_code, 200, response.json)
-        current = next(r for r in self.state()["selections"] if r["_row"] == row)
-        self.assertEqual(current["Lookup Status"], "Found - verify")
-        self.assertEqual(current["Product URL"], result["url"])
-
-    def test_verified_rows_are_not_looked_up(self):
-        row = self.state()["selections"][0]["_row"]
-        self.post("/api/selections", {"row": row, "values": {"Product URL": "https://example.com/product"}})
-        self.post("/api/selections", {"row": row, "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
-        with patch.dict("os.environ", {"SEARCH_PROVIDER": "brave", "BRAVE_API_KEY": "test-only"}), patch("find_urls.lookup") as lookup:
-            response = self.post(f"/api/selections/{row}/lookup", {})
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json["skipped"])
-        lookup.assert_not_called()
-
-    def test_final_export_rejects_unverified_selections(self):
-        project = self.state()["projects"][0]["Project ID"]
-        response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "final"})
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("not verified", response.json["error"])
-
-    def test_pdf_and_powerpoint_exports(self):
-        from pptx import Presentation
-        data = self.state()
-        project = data["projects"][0]
-        other = data["projects"][1]
-        options = {"project": project["Project ID"], "mode": "draft", "title": "Exterior Selections", "prefix": "EX"}
-        pdf = self.post("/api/presentation", {**options, "format": "pdf"})
-        pptx = self.post("/api/presentation", {**options, "format": "pptx"})
-        self.assertEqual(pdf.status_code, 200, pdf.json if pdf.is_json else "")
-        self.assertTrue(pdf.data.startswith(b"%PDF-"))
-        self.assertGreater(len(pdf.data), 5000)
-        try:
-            from pypdf import PdfReader
-        except ImportError:
-            PdfReader = None
-        if PdfReader:
-            reader = PdfReader(io.BytesIO(pdf.data))
-            text = "\n".join(page.extract_text() for page in reader.pages)
-            self.assertIn(project["Project Name"], text)
-            self.assertNotIn(other["Project Name"], text)
-            for expected in ["FINISH SCHEDULE", "Exterior Selections", "EX-01", "Client Signature", "DRAFT"]:
-                self.assertIn(expected, text)
-        self.assertEqual(pptx.status_code, 200, pptx.json if pptx.is_json else "")
-        presentation = Presentation(io.BytesIO(pptx.data))
-        self.assertEqual((presentation.slide_width, presentation.slide_height), (7772400, 10058400))
-        text = "\n".join(shape.text for slide in presentation.slides for shape in slide.shapes if shape.has_text_frame)
-        self.assertIn(project["Project Name"], text)
-        self.assertNotIn(other["Project Name"], text)
-        for expected in ["Exterior Selections", "EX-01", "Client Signature", "DRAFT"]:
-            self.assertIn(expected, text)
-
     def test_hidden_columns_are_left_out_of_every_export(self):
-        """Columns chosen before an export are absent from the PDF, the deck and the spec sheet."""
+        """Columns chosen before an export are absent from the spec sheet downloads."""
         import csv as csvlib
-        from pptx import Presentation
         from pypdf import PdfReader
         row = next(r for r in self.state()["selections"] if r["Manufacturer"] and r["Finish / Color"])
-        self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "4", "Unit Price": "1234.5"}})
+        self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "4", "Unit Price": "1234.5", "Location": "1st Floor"}})
+        row = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         project = row["Project ID"]
-        hidden = ["code", "Section", "Manufacturer", "Qty", "Unit Price"]
-        options = {"project": project, "mode": "draft", "prefix": "EX", "hidden": hidden}
-
-        pdf = self.post("/api/presentation", {**options, "format": "pdf"})
-        self.assertEqual(pdf.status_code, 200, pdf.json if pdf.is_json else "")
-        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages)
-        self.assertIn(row["Item"], text)                      # the item itself still prints
-        self.assertIn(row["Finish / Color"], text)            # and so does a column left shown
-        self.assertNotIn(row["Manufacturer"], text)
-        self.assertNotIn("EX-01", text)
-        self.assertNotIn("Qty 4", text)
-        self.assertNotIn(" ".join(row["Section"].upper()), text)   # the letter-spaced heading
-
-        deck = self.post("/api/presentation", {**options, "format": "pptx"})
-        self.assertEqual(deck.status_code, 200, deck.json if deck.is_json else "")
-        text = "\n".join(s.text for slide in Presentation(io.BytesIO(deck.data)).slides
-                         for s in slide.shapes if s.has_text_frame)
-        self.assertIn(row["Item"], text)
-        self.assertNotIn(row["Manufacturer"], text)
-        self.assertNotIn("EX-01", text)
-
-        word = self.post("/api/presentation", {**options, "format": "docx"})
-        self.assertEqual(word.status_code, 200, word.json if word.is_json else "")
-        text = docx_text(word.data)
-        self.assertIn(row["Item"], text)
-        self.assertIn(row["Finish / Color"], text)
-        self.assertNotIn(row["Manufacturer"], text)
-        self.assertNotIn("EX-01", text)
-        self.assertNotIn("Qty 4", text)
-        self.assertNotIn(" ".join(row["Section"].upper()), text)
+        hidden = ["code", "Section", "Location", "Manufacturer", "Qty", "Unit Price"]
 
         word_sheet = self.client.get(f"/api/selections/docx?project={project}&hide={','.join(hidden)}")
         self.assertEqual(word_sheet.status_code, 200)
@@ -375,83 +206,7 @@ class AppTests(unittest.TestCase):
         # hiding nothing is the default, and an unknown column is refused rather than ignored
         everything = self.client.get(f"/api/selections/csv?project={project}")
         self.assertIn("Manufacturer", csvlib.DictReader(io.StringIO(everything.data.decode("utf-8-sig"))).fieldnames)
-        for invalid in [{"hidden": ["Nonsense"]}, {"hidden": "Nonsense"}, {"hidden": {"a": 1}}]:
-            response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft", **invalid})
-            self.assertEqual(response.status_code, 400, invalid)
         self.assertEqual(self.client.get(f"/api/selections/csv?project={project}&hide=Nonsense").status_code, 400)
-
-    def test_hidden_columns_do_not_become_description_overrides(self):
-        """A fillable copy printed without columns must not save its shorter text as an edit."""
-        from pypdf import PdfReader, PdfWriter
-        row = next(r for r in self.state()["selections"] if r["Manufacturer"])
-        project = row["Project ID"]
-        download = self.post("/api/presentation", {"project": project, "format": "form", "mode": "draft",
-                                                   "hidden": ["Manufacturer"]})
-        self.assertEqual(download.status_code, 200, download.json if download.is_json else "")
-        reader = PdfReader(io.BytesIO(download.data))
-        self.assertNotIn(row["Manufacturer"], str(reader.get_fields()[f"row{row['_row']}_desc"].get("/V")))
-
-        writer = PdfWriter(clone_from=reader)
-        raw = io.BytesIO()
-        writer.write(raw)
-        applied = self.client.post("/api/schedule/form", data={
-            "file": (io.BytesIO(raw.getvalue()), "filled.pdf"),
-            "project": project, "revision": self.state()["revision"]}, headers=self.headers)
-        self.assertEqual(applied.status_code, 200, applied.json)
-        self.assertEqual(applied.json["described"], 0)
-        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertEqual(current.get("Description Override", ""), "")
-
-    def test_schedule_title_and_prefix_are_validated(self):
-        project = self.state()["projects"][0]["Project ID"]
-        for invalid in [{"title": "x" * 81}, {"prefix": "way-too-long"}, {"prefix": "EX 1"}, {"title": "Line\nbreak"}]:
-            response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft", **invalid})
-            self.assertEqual(response.status_code, 400, invalid)
-        response = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft",
-                                                   "title": "Interior Selections", "prefix": "in"})
-        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
-        self.assertIn("Interior_Selections", response.headers["Content-Disposition"])
-        try:
-            from pypdf import PdfReader
-        except ImportError:
-            return
-        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
-        self.assertIn("IN-01", text)
-        self.assertNotIn("EX-01", text)
-
-    def test_verified_only_export_omits_pending_and_hidden_rows(self):
-        from pptx import Presentation
-        data = self.state()
-        row = data["selections"][0]
-        self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/product"}})
-        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
-        response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "verified"})
-        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
-        prs = Presentation(io.BytesIO(response.data))
-        text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if shape.has_text_frame)
-        self.assertIn(row["Item"], text)
-        self.assertNotIn("DRAFT", text)
-        unverified = next(r for r in self.state()["selections"] if r["Project ID"] == row["Project ID"] and r["_row"] != row["_row"])
-        self.assertNotIn(unverified["Item"], text)
-        self.post("/api/selections", {"row": row["_row"], "values": {"Include in Lookbook": "No"}})
-        response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pptx", "mode": "verified"})
-        self.assertEqual(response.status_code, 400)
-
-    def test_import_validates_before_replacement(self):
-        before = self.path.read_bytes()
-        response = self.client.post("/api/workbook/import", data={"file": (io.BytesIO(b"not an Excel file"), "broken.xlsx"), "revision": self.state()["revision"], "confirm": "replace-with-backup"}, headers=self.headers)
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.path.read_bytes(), before)
-        self.assertFalse((self.path.parent / "backups").exists())
-
-    def test_import_export_roundtrip(self):
-        original = self.state()
-        exported = self.client.get("/api/workbook")
-        self.assertEqual(exported.status_code, 200)
-        response = self.client.post("/api/workbook/import", data={"file": (io.BytesIO(exported.data), "tracker.xlsx"), "revision": original["revision"], "confirm": "replace-with-backup"}, headers=self.headers)
-        self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(self.state()["selections"], original["selections"])
-        self.assertTrue(list((self.path.parent / "backups").glob("*.xlsx")))
 
     def test_invalid_project_and_missing_fields_are_rejected(self):
         self.assertEqual(self.post("/api/projects", {"values": {"Project ID": "../outside", "Project Name": "Invalid"}}).status_code, 400)
@@ -540,24 +295,6 @@ class AppTests(unittest.TestCase):
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         self.assertEqual(current["Client Status"], "Changed")
         self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": {"Client Status": "Bogus"}}).status_code, 400)
-        # a non-draft export marks proposed selections as presented
-        self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/p", "Client Status": "Proposed"}})
-        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
-        response = self.post("/api/presentation", {"project": row["Project ID"], "format": "pdf", "mode": "verified"})
-        self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
-        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertEqual(current["Client Status"], "Presented")
-        self.assertIn("_R", response.headers["Content-Disposition"])
-
-    def test_export_revisions_increment_per_project(self):
-        project = self.state()["projects"][0]["Project ID"]
-        first = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
-        second = self.post("/api/presentation", {"project": project, "format": "pdf", "mode": "draft"})
-        self.assertIn("_R1_", first.headers["Content-Disposition"])
-        self.assertIn("_R2_", second.headers["Content-Disposition"])
-        other = self.state()["projects"][1]["Project ID"]
-        fresh = self.post("/api/presentation", {"project": other, "format": "pptx", "mode": "draft"})
-        self.assertIn("_R1_", fresh.headers["Content-Disposition"])
 
     def test_stale_verified_links_are_flagged(self):
         from workbook_store import put
@@ -573,22 +310,6 @@ class AppTests(unittest.TestCase):
         self.store.save(wb, revision)
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         self.assertFalse(current["_stale"])
-
-    def test_parse_link_prefills_a_selection(self):
-        html = ('<html><head><meta property="og:title" content="Trinsic Faucet">'
-                '<meta property="og:image" content="/faucet.jpg">'
-                '<script type="application/ld+json">{"@type":"Product","sku":"559LF-PP","brand":{"name":"Delta"}}</script>'
-                '</head></html>')
-        with patch("find_urls.fetch_html", return_value=(html, "https://delta.example/faucet")):
-            response = self.post("/api/selections/parse-link", {"url": "https://delta.example/faucet"})
-        self.assertEqual(response.status_code, 200, response.json)
-        details = response.json["details"]
-        self.assertEqual(details["Model #"], "559LF-PP")
-        self.assertEqual(details["Manufacturer"], "Delta")
-        self.assertEqual(details["Product Name"], "Trinsic Faucet")
-        self.assertEqual(details["Image URL"], "https://delta.example/faucet.jpg")
-        self.assertEqual(details["Lookup Status"], "Found - verify")
-        self.assertEqual(self.post("/api/selections/parse-link", {"url": "file:///etc/passwd"}).status_code, 400)
 
     def test_price_schedule_groups_every_selection_and_totals(self):
         from price_schedule import SHEET
@@ -629,12 +350,12 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(response.json["seeded"], len(expected))
         state = self.state()
-        self.assertEqual(state["sections"][-5:], [section for section, _ in template])
+        self.assertEqual(state["locations"][-5:], [location for location, _ in template])
         self.assertEqual(len(state["selections"]), before + len(expected))
         rows = [r for r in state["selections"] if r["Project ID"] == "TEST-T"]
-        for section, room, item in expected[:: max(1, len(expected) // 20)]:
-            self.assertTrue(any(r["Section"] == section and r["Room / Area"] == room and r["Item"] == item for r in rows),
-                            f"{section} / {room} / {item} missing")
+        for location, room, item in expected[:: max(1, len(expected) // 20)]:
+            self.assertTrue(any(r["Location"] == location and r["Room / Area"] == room and r["Item"] == item for r in rows),
+                            f"{location} / {room} / {item} missing")
         seeded = next(r for r in rows if r["Room / Area"] == "Master Bathroom")
         self.assertEqual((seeded["Lookup Status"], seeded["Include in Lookbook"], seeded["Client Status"]),
                          ("Not run", "Yes", "Proposed"))
@@ -668,7 +389,7 @@ class AppTests(unittest.TestCase):
         self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
         _, lines = self.exported_spec_csv(project)
         target = next(index for index, line in enumerate(lines)
-                      if (line["Section"], line["Room / Area"], line["Item"]) == (row["Section"], row["Room / Area"], row["Item"]))
+                      if (line["Location"], line["Room / Area"], line["Item"]) == (row["Location"], row["Room / Area"], row["Item"]))
         self.assertEqual(lines[target]["Product Link"], '=HYPERLINK("https://example.com/p","Product Link")')
         self.assertTrue(all(line["Product Link"] == "" for index, line in enumerate(lines) if index != target))
 
@@ -712,7 +433,7 @@ class AppTests(unittest.TestCase):
         # the exported file is sorted by category, so find the verified line by its identity
         def index_of(record):
             return next(i for i, line in enumerate(lines)
-                        if (line["Section"], line["Room / Area"], line["Item"]) == (record["Section"], record["Room / Area"], record["Item"]))
+                        if (line["Location"], line["Room / Area"], line["Item"]) == (record["Location"], record["Room / Area"], record["Item"]))
         target = index_of(row)
 
         # a price edit plus a brand-new line
@@ -739,127 +460,11 @@ class AppTests(unittest.TestCase):
             "project": project, "revision": self.state()["revision"]}, headers=self.headers)
         self.assertEqual(bad.status_code, 400)
 
-    def test_download_asks_for_client_details_and_previews(self):
-        from pypdf import PdfReader
-        project = self.state()["projects"][0]
-        pid = project["Project ID"]
-        details = {"client": "Typed At Download", "project_lot": "Lot 42 scheme", "address": "7 Typed Street", "date": "2027-04-05"}
-
-        # a preview renders the typed details, inline, without touching the workbook
-        before = self.path.read_bytes()
-        preview = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
-                                                  "preview": True, "details": details})
-        self.assertEqual(preview.status_code, 200, preview.json if preview.is_json else "")
-        self.assertNotIn("attachment", preview.headers["Content-Disposition"])
-        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(preview.data)).pages)
-        for typed in ["Typed At Download", "Lot 42 scheme", "7 Typed Street", "April 5, 2027"]:
-            self.assertIn(typed, text)
-        self.assertNotIn(project["Client Name"], text)
-        self.assertEqual(self.path.read_bytes(), before)   # previews never write
-
-        # downloading without save_details leaves the project's own details alone
-        download = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft", "details": details})
-        self.assertEqual(download.status_code, 200)
-        self.assertIn("attachment", download.headers["Content-Disposition"])
-        unchanged = next(p for p in self.state()["projects"] if p["Project ID"] == pid)
-        self.assertEqual(unchanged["Client Name"], project["Client Name"])
-
-        # with save_details the unambiguous columns are written back
-        saved = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
-                                                "details": details, "save_details": True})
-        self.assertEqual(saved.status_code, 200)
-        stored = next(p for p in self.state()["projects"] if p["Project ID"] == pid)
-        self.assertEqual(stored["Client Name"], "Typed At Download")
-        self.assertEqual(stored["Address"], "7 Typed Street")
-        self.assertEqual(stored["Presentation Date"][:10], "2027-04-05")
-        self.assertEqual(stored["Project Name"], project["Project Name"])   # the merged band field is not guessed at
-
-        for invalid in [{"client": "x" * 201}, {"date": "not a date"}, {"nonsense": "x"}]:
-            response = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft",
-                                                       "details": {**details, **invalid}})
-            self.assertEqual(response.status_code, 400, invalid)
-
-    def test_fillable_schedule_round_trip(self):
-        import build_form
-        from pypdf import PdfReader, PdfWriter
-        project = self.state()["projects"][0]
-        pid = project["Project ID"]
-        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid][:3]
-
-        download = self.post("/api/presentation", {"project": pid, "format": "form", "mode": "draft"})
-        self.assertEqual(download.status_code, 200, download.json if download.is_json else "")
-        self.assertIn("FILLABLE", download.headers["Content-Disposition"])
-        reader = PdfReader(io.BytesIO(download.data))
-        fields = reader.get_fields() or {}
-        # the client band and one pair of fields per line
-        for name in ["client", "project_lot", "address", "date"]:
-            self.assertIn(name, fields)
-        for row in rows:
-            self.assertIn(f"row{row['_row']}_desc", fields)
-            self.assertIn(f"row{row['_row']}_remove", fields)
-        text = "\n".join(page.extract_text() for page in reader.pages)
-        for expected in ["FINISH SCHEDULE", "CLIENT", "Client Signature", "REMOVE"]:
-            self.assertIn(expected, text)
-
-        def send(values):
-            writer = PdfWriter(clone_from=io.BytesIO(download.data))
-            for page in writer.pages:
-                writer.update_page_form_field_values(page, values)
-            buffer = io.BytesIO()
-            writer.write(buffer)
-            return self.client.post("/api/schedule/form", data={
-                "file": (io.BytesIO(buffer.getvalue()), "filled.pdf"),
-                "project": pid, "revision": self.state()["revision"]}, headers=self.headers)
-
-        # an untouched form changes nothing
-        response = send({})
-        self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual((response.json["removed"], response.json["described"], response.json["details"]), (0, 0, []))
-
-        # client details, a reworded line, and a removal
-        target, doomed = rows[0], rows[1]
-        response = send({"client": "Mrs. Imported", "address": "9 New Road",
-                         f"row{target['_row']}_desc": "Hand written client wording",
-                         f"row{doomed['_row']}_remove": "/Yes"})
-        self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(response.json["removed"], 1)
-        self.assertEqual(response.json["described"], 1)
-        state = self.state()
-        updated = next(p for p in state["projects"] if p["Project ID"] == pid)
-        self.assertEqual((updated["Client Name"], updated["Address"]), ("Mrs. Imported", "9 New Road"))
-        self.assertFalse(any(r["_row"] == doomed["_row"] and r["Item"] == doomed["Item"] for r in state["selections"]))
-        kept = next(r for r in state["selections"] if r["Item"] == target["Item"] and r["Project ID"] == pid)
-        self.assertEqual(kept["Description Override"], "Hand written client wording")
-        # the override is what the client schedule prints
-        pdf = self.post("/api/presentation", {"project": pid, "format": "pdf", "mode": "draft"})
-        self.assertIn("Hand written client wording",
-                      "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages))
-        # the client PDF never gains form fields
-        self.assertFalse(PdfReader(io.BytesIO(pdf.data)).get_fields())
-
-        # a form from another project is refused
-        other = self.state()["projects"][1]["Project ID"]
-        wrong = self.client.post("/api/schedule/form", data={
-            "file": (io.BytesIO(download.data), "filled.pdf"),
-            "project": other, "revision": self.state()["revision"]}, headers=self.headers)
-        self.assertEqual(wrong.status_code, 400)
-
     def test_word_exports(self):
-        """The Word schedule and spec sheet carry the same content as their siblings."""
+        """The spec sheet downloads carry every column header and line item."""
         data = self.state()
-        project, other = data["projects"][0], data["projects"][1]
+        project = data["projects"][0]
         pid = project["Project ID"]
-        options = {"project": pid, "title": "Exterior Selections", "prefix": "EX"}
-        final = self.post("/api/presentation", {**options, "format": "docx", "mode": "draft"})
-        self.assertEqual(final.status_code, 200, final.json if final.is_json else "")
-        self.assertTrue(final.data.startswith(b"PK"))
-        self.assertIn(".docx", final.headers["Content-Disposition"])
-        text = docx_text(final.data)
-        self.assertIn(project["Project Name"], text)
-        self.assertNotIn(other["Project Name"], text)
-        for expected in ["FINISH SCHEDULE", "Exterior Selections", "EX-01", "Client Signature", "DRAFT"]:
-            self.assertIn(expected, text)
-        self.assertFalse(docx_tags(final.data))        # the client copy has no fillable controls
 
         sheet = self.client.get(f"/api/selections/docx?project={pid}")
         self.assertEqual(sheet.status_code, 200)
@@ -878,87 +483,58 @@ class AppTests(unittest.TestCase):
         self.assertIn("UNIT PRICE", text)
         self.assertEqual(self.client.get("/api/selections/pdf?project=nope").status_code, 400)
 
-    def test_fillable_word_round_trip(self):
-        """A Word working copy reads back through the same route as the fillable PDF."""
-        pid = self.state()["projects"][0]["Project ID"]
-        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid][:3]
-        download = self.post("/api/presentation", {"project": pid, "format": "form-docx", "mode": "draft"})
-        self.assertEqual(download.status_code, 200, download.json if download.is_json else "")
-        self.assertIn("FILLABLE", download.headers["Content-Disposition"])
-        tags = docx_tags(download.data)
-        for name in ["client", "address", "date"]:
-            self.assertIn(name, tags)
-        self.assertNotIn("project_lot", tags)          # printed, but never editable
-        for row in rows:
-            self.assertIn(f"row{row['_row']}_desc", tags)
-            self.assertIn(f"row{row['_row']}_remove", tags)
-        self.assertIn("REMOVE", docx_text(download.data))
-
-        def send(values, raw=None):
-            return self.client.post("/api/schedule/form", data={
-                "file": (io.BytesIO(raw if raw is not None else fill_word_form(download.data, values)), "filled.docx"),
-                "project": pid, "revision": self.state()["revision"]}, headers=self.headers)
-
-        untouched = send({})
-        self.assertEqual(untouched.status_code, 200, untouched.json)
-        self.assertEqual((untouched.json["removed"], untouched.json["described"]), (0, 0))
-
-        target, doomed = rows[0], rows[1]
-        applied = send({"client": "Mrs. Imported", "address": "9 New Road",
-                        f"row{target['_row']}_desc": "Typed into Word",
-                        f"row{doomed['_row']}_remove": True})
-        self.assertEqual(applied.status_code, 200, applied.json)
-        self.assertEqual((applied.json["removed"], applied.json["described"]), (1, 1))
-        state = self.state()
-        updated = next(p for p in state["projects"] if p["Project ID"] == pid)
-        self.assertEqual((updated["Client Name"], updated["Address"]), ("Mrs. Imported", "9 New Road"))
-        self.assertFalse(any(r["_row"] == doomed["_row"] and r["Item"] == doomed["Item"] for r in state["selections"]))
-        kept = next(r for r in state["selections"] if r["Item"] == target["Item"] and r["Project ID"] == pid)
-        self.assertEqual(kept["Description Override"], "Typed into Word")
-
-        other = self.state()["projects"][1]["Project ID"]
-        wrong = self.client.post("/api/schedule/form", data={
-            "file": (io.BytesIO(download.data), "filled.docx"),
-            "project": other, "revision": self.state()["revision"]}, headers=self.headers)
-        self.assertEqual(wrong.status_code, 400)
-        # the client Word copy carries no fields, so it cannot be mistaken for a working one
-        client_copy = self.post("/api/presentation", {"project": pid, "format": "docx", "mode": "draft"})
-        self.assertEqual(send({}, raw=client_copy.data).status_code, 400)
-
-    def test_hidden_columns_survive_the_word_round_trip(self):
-        """A Word copy printed without a column must not save its shorter text as an edit."""
-        row = next(r for r in self.state()["selections"] if r["Manufacturer"])
-        pid = row["Project ID"]
-        download = self.post("/api/presentation", {"project": pid, "format": "form-docx", "mode": "draft",
-                                                   "hidden": ["Manufacturer"]})
-        self.assertEqual(download.status_code, 200, download.json if download.is_json else "")
-        tags = docx_tags(download.data)
-        self.assertNotIn(row["Manufacturer"], tags[f"row{row['_row']}_desc"])
-        self.assertEqual(tags["schedule_hidden"], "Manufacturer")
-        applied = self.client.post("/api/schedule/form", data={
-            "file": (io.BytesIO(download.data), "filled.docx"),
-            "project": pid, "revision": self.state()["revision"]}, headers=self.headers)
-        self.assertEqual(applied.status_code, 200, applied.json)
-        self.assertEqual(applied.json["described"], 0)
-
-    def test_prices_never_reach_client_documents(self):
+    def test_spec_exports_carry_every_on_screen_column_and_line_item(self):
+        """The download mirrors the spec-sheet view: its columns, its headings, every row."""
         from pypdf import PdfReader
-        from pptx import Presentation
+        pid = self.state()["projects"][0]["Project ID"]
+        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
+        shown = ["ITEM", "MANUFACTURER", "MODEL #", "FINISH / COLOR", "PRODUCT LINK",
+                 "QTY", "UNIT PRICE", "MARKUP %"]
+        absent = ["CLIENT STATUS", "CLIENT NOTES", "INCLUDE IN LOOKBOOK", "PRODUCT NAME"]
+
+        pdf = self.client.get(f"/api/selections/pdf?project={pid}")
+        self.assertEqual(pdf.status_code, 200)
+        text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
+        for column in shown:
+            self.assertIn(column, text, column)
+        for column in absent:
+            self.assertNotIn(column, text, column)
+        for row in rows:
+            self.assertIn(row["Item"], text, row["Item"])
+
+        word = self.client.get(f"/api/selections/docx?project={pid}")
+        self.assertEqual(word.status_code, 200)
+        text = " ".join(docx_text(word.data).split())
+        for column in shown:
+            self.assertIn(column, text, column)
+        for column in absent:
+            self.assertNotIn(column, text, column)
+        for row in rows:
+            self.assertIn(row["Item"], text, row["Item"])
+
+    def test_spec_exports_group_the_way_the_view_does(self):
+        from pypdf import PdfReader
+        row = next(r for r in self.state()["selections"] if r["Section"] and r["Location"])
+        pid = row["Project ID"]
+
+        def headings(group):
+            response = self.client.get(f"/api/selections/pdf?project={pid}&group={group}")
+            self.assertEqual(response.status_code, 200, group)
+            text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+            return " ".join(text.split())
+
+        # the heading is letter-spaced on the page, exactly as the schedule's are
+        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        self.assertIn(spaced(row["Section"]), headings("Section"))
+        self.assertIn(spaced(row["Location"]), headings("Location"))
+        self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&group=Nonsense").status_code, 400)
+        self.assertEqual(self.client.get(f"/api/selections/docx?project={pid}&group=Nonsense").status_code, 400)
+
+    def test_spec_exports_show_pricing(self):
+        """The spec sheet is the internal document, so its downloads carry prices."""
+        from pypdf import PdfReader
         row = self.state()["selections"][0]
         self.post("/api/selections", {"row": row["_row"], "values": {"Unit Price": "4321.99"}})
-        for kind in ["pdf", "docx", "pptx"]:
-            response = self.post("/api/presentation", {"project": row["Project ID"], "format": kind, "mode": "draft"})
-            self.assertEqual(response.status_code, 200, response.json if response.is_json else "")
-            if kind == "pdf":
-                self.assertNotIn(b"4321.99", response.data)
-                text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
-            elif kind == "docx":
-                text = docx_text(response.data)
-            else:
-                text = "\n".join(s.text for slide in Presentation(io.BytesIO(response.data)).slides
-                                 for s in slide.shapes if s.has_text_frame)
-            self.assertNotIn("4321", text)
-        # the spec sheet is the internal document, so there the price is meant to show
         sheet = self.client.get(f"/api/selections/docx?project={row['Project ID']}")
         self.assertIn("4321.99", docx_text(sheet.data))
         sheet_pdf = self.client.get(f"/api/selections/pdf?project={row['Project ID']}")
@@ -970,23 +546,20 @@ class AppTests(unittest.TestCase):
         original = row["Item"]
         self.post("/api/selections", {"row": row["_row"], "values": {"Item": "Before the mistake"}})
         self.post("/api/selections", {"row": row["_row"], "values": {"Item": "The mistake"}})
-        listed = self.client.get("/api/backups").json["backups"]
+        listed = self.store.backups()
         self.assertGreaterEqual(len(listed), 2)
         self.assertEqual(listed, sorted(listed, key=lambda b: b["when"], reverse=True))   # newest first
         self.assertTrue(all(b["size"] > 0 and b["name"].endswith(".xlsx") for b in listed))
 
         # the newest copy was taken just before the latest save, so it still holds the earlier name
-        restored = self.post("/api/backups/restore", {"name": listed[0]["name"]})
-        self.assertEqual(restored.status_code, 200, restored.json)
+        _, revision = self.store.snapshot()
+        self.store.import_bytes(self.store.read_backup(listed[0]["name"]), revision)
         self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Item"],
                          "Before the mistake")
         # restoring kept a copy of what it replaced, so the mistake is still recoverable
         self.assertTrue(any(b["name"] not in {entry["name"] for entry in listed}
-                            for b in self.client.get("/api/backups").json["backups"]))
+                            for b in self.store.backups()))
         self.assertNotEqual(original, "The mistake")
-
-        for bad in ["../UH_Homes_Selections_Tracker.xlsx", "missing_20200101_000000_0.xlsx", "evil.xlsx"]:
-            self.assertEqual(self.post("/api/backups/restore", {"name": bad}).status_code, 400, bad)
 
     def test_backups_are_pruned_and_logged(self):
         with patch("workbook_store.BACKUP_KEEP", 2):
@@ -1003,7 +576,7 @@ class AppTests(unittest.TestCase):
         folder.mkdir(exist_ok=True)
         for micro in ["9", "100000", "20000"]:
             (folder / f"{self.path.stem}_20250101_120000_{micro}.xlsx").write_bytes(b"copy")
-        listed = [entry["name"] for entry in self.client.get("/api/backups").json["backups"]]
+        listed = [entry["name"] for entry in self.store.backups()]
         self.assertEqual(listed, [f"{self.path.stem}_20250101_120000_{micro}.xlsx"
                                   for micro in ["100000", "20000", "9"]])
 
@@ -1198,8 +771,8 @@ class ScheduleTests(unittest.TestCase):
         template = Path("brand_assets/finish_schedule_template.pdf")
         if not template.exists():
             self.skipTest("Reference template PDF is not available.")
-        rows = [{**{key: "" for key in SELECTION_FIELDS}, "Section": section, "Item": item,
-                 "Client Notes": note, "Lookup Status": "Verified"} for section, item, note in TEMPLATE_ROWS]
+        rows = [{**{key: "" for key in SELECTION_FIELDS}, "Section": section, "Location": section,
+                 "Item": item, "Client Notes": note, "Lookup Status": "Verified"} for section, item, note in TEMPLATE_ROWS]
         with tempfile.TemporaryDirectory() as folder:
             pdf = build_lookbook.build("UH-000", {"Project Name": ""}, rows, False, Path(folder),
                                        title="Exterior Selections", prefix="EX")
@@ -1282,8 +855,9 @@ class ScheduleTests(unittest.TestCase):
         from pypdf import PdfReader
         project = {"Project ID": "SCHED", "Project Name": "Template home", "Client Name": "Test client",
                    "Address": "1 Test Way", "Plan / Elevation": "Plan 1", "Presentation Date": "2026-10-01"}
-        rows = self.rows(2, Manufacturer="Test", **{"Product URL": "https://example.com/product",
-                                                    "Image URL": "https://example.com/image.jpg"})
+        rows = self.rows(2, Manufacturer="Test", Location="Roofing",
+                         **{"Product URL": "https://example.com/product",
+                            "Image URL": "https://example.com/image.jpg"})
         with tempfile.TemporaryDirectory() as folder:
             pdf = build_lookbook.build("SCHED", project, rows, False, Path(folder), title="Exterior Selections", prefix="EX")
             reader = PdfReader(str(pdf))

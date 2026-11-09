@@ -34,7 +34,7 @@ class BrowserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "custom.xlsx"
             shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+            with patch.object(app, "store", WorkbookStore(workbook)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -105,7 +105,7 @@ class BrowserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "spec.xlsx"
             shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+            with patch.object(app, "store", WorkbookStore(workbook)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -171,7 +171,7 @@ class BrowserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "link.xlsx"
             shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)), patch.object(app, "automation", None):
+            with patch.object(app, "store", WorkbookStore(workbook)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -214,76 +214,11 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
-    def test_automatic_app_and_excel_edit_workflow(self):
-        from auto_lookup import AutoLookup
-        from unittest.mock import Mock
-        from workbook_store import put
-        with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "test.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            store = WorkbookStore(workbook)
-            info = {"name": "brave", "ready": True, "key_name": "BRAVE_API_KEY"}
-            search = Mock(side_effect=lambda provider, manufacturer, model, domain, **kwargs: {
-                "url": f"https://example.com/products/{model}", "name": "Matched fixture", "image": "", "status": "Found - verify", "notes": ""})
-            engine = AutoLookup(store, lambda: info, search=search)
-            engine.observe(store.snapshot()[0])
-            with patch.object(app, "store", store), patch.object(app, "automation", engine), patch("app.provider_info", return_value=info):
-                server = make_server("127.0.0.1", 0, app.app, threaded=True)
-                thread = threading.Thread(target=server.serve_forever, daemon=True)
-                thread.start()
-                engine.start()
-                try:
-                    with sync_playwright() as playwright:
-                        browser = playwright.chromium.launch(channel="msedge", headless=True)
-                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                        errors = []
-                        page.on("pageerror", lambda error: errors.append(str(error)))
-                        page.goto(f"http://127.0.0.1:{server.server_port}")
-                        expect(page.locator("#selection-rows tr").first).to_be_attached()
-                        page.get_by_role("button", name="Edit Siding", exact=True).click()
-                        editor = page.locator("#editor")
-                        editor.get_by_label("Model #", exact=True).fill("AUTO-ONE")
-                        editor.get_by_label("Product Name", exact=True).fill("Automatic fixture")
-                        editor.get_by_role("button", name="Save changes").click()
-                        expect(editor).not_to_be_visible()
-                        expect(page.locator('#selection-rows a[href="https://example.com/products/AUTO-ONE"]')).to_be_visible(timeout=20000)
-                        self.assertEqual(search.call_count, 1)
-                        self.assertEqual(search.call_args.kwargs["product_name"], "Automatic fixture")
-                        with patch.object(engine, "excel_open", return_value=True):
-                            with store.lock:
-                                wb, revision = store.snapshot()
-                                put(app.common.Sheet(wb["Selections"]), 2, {"Model #": "AUTO-TWO"})
-                                store.save(wb, revision)
-                            expect(page.locator("#selection-rows")).to_contain_text("Close Excel", timeout=20000)
-                            expect(page.locator('#selection-rows a[href="https://example.com/products/AUTO-ONE"]')).to_have_count(0)
-                            page.locator('[data-view="presentation"]').click()
-                            expect(page.locator("#export-pdf")).to_be_disabled()
-                            self.assertEqual(search.call_count, 1)
-                        expect(page.locator("#export-pdf")).to_be_enabled(timeout=20000)
-                        page.locator("#export-pdf").click()   # the PDF now goes through the details dialog
-                        expect(page.locator("#schedule-dialog")).to_be_visible()
-                        with page.expect_download(timeout=30000) as download_info:
-                            page.locator("#schedule-download").click()
-                        path = Path(folder) / "automatic.pdf"
-                        download_info.value.save_as(path)
-                        from pypdf import PdfReader
-                        schedule = "\n".join(page.extract_text() for page in PdfReader(str(path)).pages)
-                        self.assertIn("AUTO-TWO", schedule)
-                        self.assertNotIn("AUTO-ONE", schedule)
-                        self.assertEqual(search.call_count, 2)
-                        self.assertEqual(errors, [])
-                        browser.close()
-                finally:
-                    engine.stop()
-                    server.shutdown()
-                    thread.join(timeout=5)
-                    server.server_close()
-
     def test_project_selection_review_and_download_flow(self):
         with tempfile.TemporaryDirectory() as folder:
             workbook = Path(folder) / "test.xlsx"
             shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)), patch("app.provider_info", return_value={"name": "brave", "ready": False, "key_name": "BRAVE_API_KEY"}):
+            with patch.object(app, "store", WorkbookStore(workbook)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -303,15 +238,6 @@ class BrowserTests(unittest.TestCase):
                         ratio = page.locator(".brand-wordmark").evaluate("img => (img.getBoundingClientRect().width / img.getBoundingClientRect().height) / (img.naturalWidth / img.naturalHeight)")
                         self.assertAlmostEqual(ratio, 1, places=2)
                         page.screenshot(path=str(output / "studio-desktop.png"), full_page=True)
-                        page.locator('[data-view="presentation"]').click()
-                        expect(page.locator(".sheet-head img")).to_be_visible()
-                        expect(page.locator("#preview-rows")).to_contain_text("EX-01")
-                        page.locator("#export-title").fill("Interior Selections")
-                        page.locator("#export-prefix").fill("IN")
-                        expect(page.locator("#preview-title")).to_have_text("Interior Selections")
-                        expect(page.locator("#preview-rows")).to_contain_text("IN-01")
-                        page.screenshot(path=str(output / "studio-presentation.png"), full_page=True)
-                        page.locator('[data-view="selections"]').click()
                         page.get_by_role("button", name="Add project", exact=True).click()
                         editor = page.locator("#editor")
                         editor.get_by_label("Project ID").fill("BROWSER-TEST")
@@ -335,7 +261,6 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#selection-rows")).to_contain_text("00123-VS")
                         page.locator("#setup-button").click()   # the review view is gone; setup opens from the sidebar
                         expect(page.locator("#setup-dialog")).to_be_visible()
-                        expect(page.locator("#provider-status")).to_contain_text("not configured")
                         page.locator("#setup-dialog").get_by_role("button", name="Close dialog").click()
                         page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         editor.get_by_label("Product URL", exact=True).fill("https://example.com/product")
@@ -345,27 +270,21 @@ class BrowserTests(unittest.TestCase):
                         page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         page.locator("#editor-verify").click()
                         expect(page.locator("#selection-rows")).to_contain_text("Verified")
-                        page.locator('[data-view="presentation"]').click()
-                        # "final" would demand every seeded template row be verified too
-                        page.locator("#export-mode").select_option("verified")
-                        page.locator("#export-pdf").click()
-                        expect(page.locator("#schedule-dialog")).to_be_visible()
+                        # the spec sheet is the deliverable now, downloaded from the files dialog
+                        page.locator("#files-button").click()
                         with page.expect_download(timeout=30000) as download_info:
-                            page.locator("#schedule-download").click()
+                            page.locator('#files-dialog [data-file="spec-pdf"]').click()
                         download = download_info.value
                         self.assertTrue(download.suggested_filename.endswith(".pdf"))
-                        self.assertIn("Interior_Selections", download.suggested_filename)
+                        self.assertIn("Spec_Sheet", download.suggested_filename)
                         download.save_as(Path(folder) / "download.pdf")
-                        expect(page.locator("#schedule-dialog")).not_to_be_visible()   # the dialog closes once the file lands
-                        page.locator("#export-more").click()   # PowerPoint moved into the files dialog
+                        page.locator("#files-button").click()
                         with page.expect_download(timeout=30000) as download_info:
-                            page.locator('#files-dialog [data-file="pptx"]').click()
+                            page.locator('#files-dialog [data-file="csv"]').click()
                         download = download_info.value
-                        self.assertTrue(download.suggested_filename.endswith(".pptx"))
-                        self.assertIn("Interior_Selections", download.suggested_filename)
-                        download.save_as(Path(folder) / "download.pptx")
+                        self.assertTrue(download.suggested_filename.endswith(".csv"))
+                        download.save_as(Path(folder) / "download.csv")
                         expect(page.locator("#busy-banner")).not_to_be_visible()
-                        page.locator('[data-view="selections"]').click()
                         page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         editor.get_by_label("Model #", exact=True).fill("NEW-00123")
                         editor.get_by_role("button", name="Save changes").click()

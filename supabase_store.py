@@ -9,7 +9,6 @@ Only the service key reaches this module, and it never appears in responses or l
 import datetime as dt
 import hashlib
 import io
-import json
 import os
 import re
 import time
@@ -22,7 +21,6 @@ TIMEOUT = (5, 30)
 STATE = "uh_workbook_state"
 VERSIONS = "uh_workbook_versions"
 HISTORY = "uh_history"
-LOOKUP_STATE = "uh_lookup_state"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -103,27 +101,6 @@ class Supabase:
                                       headers={"Prefer": "return=representation",
                                                "Content-Type": "application/json"}, timeout=TIMEOUT)
         return self._check(response, f"update {table}").json()
-
-
-class RemoteState:
-    """The automatic lookup history as one Postgres row."""
-
-    def __init__(self, api, key):
-        self.api, self.key = api, key
-
-    def read(self):
-        rows = self.api.select(LOOKUP_STATE, {"key": f"eq.{self.key}", "select": "content"})
-        return rows[0]["content"] if rows else None
-
-    def write(self, content):
-        self.api.insert(LOOKUP_STATE, {"key": self.key, "content": content,
-                                       "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}, upsert=True)
-
-    def set_aside(self):
-        self.api.insert(LOOKUP_STATE, {"key": f"{self.key}-corrupt-{dt.datetime.now():%Y%m%d%H%M%S}",
-                                       "content": self.read() or ""})
-        self.api.update(LOOKUP_STATE, {"key": f"eq.{self.key}"},
-                        {"content": json.dumps({"entries": {}, "pending": {}})})
 
 
 class SupabaseBackend:
@@ -245,10 +222,6 @@ class SupabaseBackend:
         except RuntimeError:
             raise ValidationError("That cover image is no longer in storage. Upload it again.") from None
 
-    def state(self):
-        key = hashlib.sha256(f"{self.config['bucket']}/{self.name}".encode("utf-8")).hexdigest()[:16]
-        return RemoteState(self.api, key)
-
 
 def push(source):
     """Seed the hosted workbook from a local file, replacing whatever revision is current."""
@@ -297,7 +270,7 @@ def check():
 
     api = Supabase(config)
     tables_ok = True
-    for table in (STATE, VERSIONS, HISTORY, LOOKUP_STATE):
+    for table in (STATE, VERSIONS, HISTORY):
         try:
             api.select(table, {"select": "*", "limit": 1})
             note(True, f"Table {table} exists.")

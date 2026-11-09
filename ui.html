@@ -15,13 +15,12 @@
     <nav aria-label="Workspace navigation">
       <button class="nav-item active" data-view="selections" title="Selection tracker"><span class="nav-symbol">▦</span> Selection tracker</button>
       <button class="nav-item" data-view="spec" title="Spec sheet"><span class="nav-symbol">▤</span> Spec sheet</button>
-      <button class="nav-item" data-view="presentation" title="Client presentations"><span class="nav-symbol">▤</span> Client presentations</button>
     </nav>
     <div class="project-label"><span>PROJECTS</span><button id="new-project" class="icon-button" aria-label="Add project">+</button></div>
     <div id="project-list" class="project-list"><span class="muted">Loading projects…</span></div>
     <div class="sidebar-bottom">
       <button class="nav-item" data-view="manufacturers" title="Manufacturers"><span class="nav-symbol">◫</span> Manufacturers</button>
-      <button id="setup-button" class="nav-item" title="Setup &amp; workbook"><span class="nav-symbol">⚙</span> Setup &amp; workbook</button>
+      <button id="setup-button" class="nav-item" title="Setup"><span class="nav-symbol">⚙</span> Setup</button>
       <div class="local-note"><span class="status-dot"></span><div>Project workspace<small>{% if workspace == "HOSTED" %}Hosted workspace · Saved to Supabase{% else %}Local preview · Hosting not configured{% endif %}</small>{% if user %}<small>{{ user }}</small>{% endif %}</div></div>
       {% if can_sign_out %}<button id="sign-out" class="text-button">Sign out</button>{% endif %}
     </div>
@@ -30,7 +29,7 @@
     <header class="topbar"><button id="sidebar-toggle" class="icon-button sidebar-toggle" aria-label="Collapse navigation" aria-expanded="true" title="Collapse navigation">☰</button><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-name">Project selections</strong></div><div class="topbar-actions"><button id="refresh" class="text-button">↻ Refresh</button><span class="avatar"><img src="/brand/symbol.png" alt="UH Homes workspace"></span></div></header>
     <main>
       <div id="load-error" class="notice error" hidden></div>
-      <div id="busy-banner" class="notice" role="status" hidden><span id="busy-message"></span><button id="cancel-lookup" class="text-button" hidden>Stop after this item</button></div>
+      <div id="busy-banner" class="notice" role="status" hidden><span id="busy-message"></span></div>
       <section class="page-heading"><div><div class="eyebrow">A HOME, THOUGHTFULLY YOURS.</div><h1 id="page-title">Project selections</h1><p id="page-subtitle">Every material. Every finish. All in one place.</p></div><div class="heading-actions"><span id="spec-summary" class="spec-summary" hidden></span><button id="files-button" class="button secondary">⇅ Import / Export</button></div></section>
       <section id="project-summary" class="project-summary" hidden>
         <div class="project-emblem" id="project-emblem"><svg viewBox="0 0 100 100" fill="none" aria-hidden="true"><path d="M13 48 50 17 87 48M23 41v42h54V41M42 83V58h16v25M29 48h7v10h-7M64 48h7v10h-7" stroke="currentColor" stroke-width="1.5"/><path d="M10 87h80M63 27V17h10v19" stroke="currentColor"/></svg></div>
@@ -44,13 +43,13 @@
       </section>
       <section id="stats" class="stats" aria-label="Project statistics"></section>
       <section id="selections-view" class="view">
-        <div class="section-heading"><div><h2>Selections schedule <span id="selection-count" class="count-pill">0</span></h2><p>The source of truth for your client’s home.</p></div><div class="heading-actions"><button id="find-links" class="button secondary">Find missing product links</button><button id="add-from-link" class="button secondary">Add from link</button><button id="add-selection" class="button primary">+ Add selection</button></div></div>
-        <div class="table-panel"><div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Search selections" placeholder="Search items, brands, model numbers…"></label><select id="section-filter" aria-label="Filter by category"><option value="">All categories</option></select><select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="review">Needs review</option><option value="Verified">Verified</option><option value="missing">Missing links</option></select></div>
+        <div class="section-heading"><div><h2>Selections schedule</h2><p>The source of truth for your client’s home.</p></div><div class="heading-actions"><button id="add-selection" class="button primary">+ Add selection</button></div></div>
+        <div class="table-panel"><div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Search selections" placeholder="Search items, brands, model numbers…"></label><select id="section-filter" aria-label="Filter by category"><option value="">All categories</option></select><select id="location-filter" aria-label="Filter by location"><option value="">All locations</option></select><select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="review">Needs review</option><option value="Verified">Verified</option><option value="missing">Missing links</option></select></div>
           <div class="table-scroll"><table><thead><tr><th>ITEM / LOCATION</th><th>MANUFACTURER / MODEL</th><th>FINISH / QTY</th><th>PRODUCT LINK</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="selection-rows"></tbody></table></div>
           <div id="table-empty" class="empty-state" hidden><div class="empty-icon">◇</div><h3>No selections here yet</h3><p>Add your first selection, import a workbook, or adjust your filters.</p></div>
           <div class="table-footer"><span id="table-summary"></span><div><button id="previous-page" class="text-button">← Previous</button><button id="next-page" class="text-button">Next →</button></div></div>
         </div>
-        <div class="workflow-note"><span class="note-icon">i</span><p><strong>A little review makes all the difference.</strong> Saved product edits automatically queue a search. Check the exact manufacturer, model, and finish before marking a selection verified.</p></div>
+        <div class="workflow-note"><span class="note-icon">i</span><p><strong>A little review makes all the difference.</strong> Check the exact manufacturer, model, and finish on the product page before marking a selection verified.</p></div>
       </section>
       <section id="spec-view" class="view" hidden>
         <div id="spec-client-panel" class="spec-client" hidden>
@@ -64,75 +63,38 @@
         </div>
         <div class="spec-toolbar">
           <label class="search-field"><span aria-hidden="true">⌕</span><input id="spec-filter" type="search" aria-label="Filter line items" placeholder="Filter items, brands, finishes…"></label>
-          <div class="chip-group" role="group" aria-label="Group line items by"><button class="chip" data-group="Room / Area">By room</button><button class="chip" data-group="Section">By category</button></div>
+          <div class="chip-group" role="group" aria-label="Group line items by"><button class="chip" data-group="Location">By location</button><button class="chip" data-group="Room / Area">By room</button><button class="chip" data-group="Section">By category</button></div>
           <div class="heading-actions"><button id="spec-expand" class="text-button">Expand all</button><button id="spec-collapse" class="text-button">Collapse all</button><span class="toolbar-divider" aria-hidden="true"></span><span id="spec-save-status" class="save-status" role="status"></span><button id="spec-save" class="button secondary">Save</button><button id="spec-add" class="button primary">+ Add line item</button></div>
         </div>
         <div id="spec-groups" class="spec-groups"></div>
         <div class="spec-total"><span>Estimated total <small>priced line items only</small></span><strong id="spec-total">—</strong></div>
       </section>
-      <section id="presentation-view" class="view" hidden>
-        <div class="presentation-layout"><div class="template-preview">
-          <div class="sheet-head"><img src="/brand/wordmark-print.png" alt="UH Homes"><div class="sheet-title"><span id="preview-eyebrow">FINISH SCHEDULE</span><strong id="preview-title">Exterior Selections</strong></div></div>
-          <dl class="sheet-band" id="preview-band"></dl>
-          <div class="sheet-rows" id="preview-rows"></div>
-          <p class="sheet-note" id="preview-note"></p>
-          <div class="sheet-sign" id="preview-sign"></div>
-          <div class="sheet-foot"><span id="preview-contact"></span><span>Page 1</span></div>
-        </div>
-        <div class="export-panel"><div class="eyebrow">FROM SCHEDULE TO SIGN-OFF</div><h2>Ready for the reveal.</h2><p>Your project’s Excel selections become the approved UH Homes finish schedule, without copying and pasting.</p><ul class="feature-list"><li>Client, project, address and date band</li><li>Ruled category headings in workbook order</li><li>Coded rows with plain-English descriptions</li><li>Client note and signature block</li><li>The same page, editable, in Word or PowerPoint</li></ul><div class="export-fields"><label class="field">Schedule title<input id="export-title" type="text" maxlength="80" autocomplete="off" spellcheck="false"></label><label class="field">Item code prefix<input id="export-prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label></div><label class="field">Presentation content<select id="export-mode"><option value="draft">Draft — all included selections</option><option value="final">Final — all included selections must be verified</option><option value="verified">Final — verified selections only</option></select></label><details class="hide-fields"><summary>Hide columns<span id="export-hide-count"></span></summary><div id="export-hide-grid" class="hide-grid"></div><p id="export-hide-note" class="muted"></p><button type="button" id="export-hide-clear" class="text-button">Show every column</button></details><p id="export-summary" class="export-summary"></p><button id="export-pdf" class="button primary full">Download PDF ↗</button><button id="export-more" class="button secondary full">Other formats &amp; imports ⇅</button><small class="muted">The preview shows this project’s first rows. Every format uses the same layout; Word reflows as you edit it, and PowerPoint keeps every value in an editable text box. Descriptions come from the workbook’s manufacturer, model, finish, quantity and client notes.</small></div></div>
-      </section>
-      <section id="manufacturers-view" class="view" hidden><div class="section-heading"><div><h2>The brands behind the details.</h2><p>Official domains help the lookup prioritize the manufacturer’s own product pages.</p></div><button id="add-manufacturer" class="button primary">+ Add manufacturer</button></div><div id="manufacturer-grid" class="manufacturer-grid"></div></section>
+      <section id="manufacturers-view" class="view" hidden><div class="section-heading"><div><h2>The brands behind the details.</h2><p>Keep each manufacturer’s official website with their products.</p></div><button id="add-manufacturer" class="button primary">+ Add manufacturer</button></div><div id="manufacturer-grid" class="manufacturer-grid"></div></section>
       <footer class="main-footer"><span class="footer-brand"><img src="/brand/symbol.png" alt="">UH HOMES <span class="footer-separator">/</span> STUDIO</span><span>Thoughtful details. Beautiful homes.</span></footer>
     </main>
   </div>
   <dialog id="editor"><form id="editor-form"><div class="dialog-heading"><div><div class="eyebrow" id="editor-eyebrow">PROJECT DETAILS</div><h2 id="editor-title">New project</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div id="editor-fields" class="form-grid"></div><section id="custom-fields-editor" class="custom-fields-editor" hidden><div class="custom-fields-heading"><h3>Additional fields</h3><button id="add-custom-field" type="button" class="button secondary">+ Add field</button></div><p class="muted">Fields apply only to this record and appear in its client presentation. Up to 30 fields; use a unique name for each.</p><div id="custom-field-rows"></div></section><p id="editor-note" class="form-note"></p><p id="editor-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" id="editor-delete" class="text-button" hidden>Delete</button><button type="button" id="editor-verify" class="text-button" hidden>Mark verified</button><button type="button" class="button secondary close-dialog">Cancel</button><button id="editor-save" type="submit" class="button primary">Save changes</button></div></form></dialog>
-  <dialog id="setup-dialog"><div class="dialog-heading"><div><div class="eyebrow">LOCAL WORKSPACE</div><h2>Settings</h2></div><button class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div class="setup-content"><h3>Backup &amp; restore</h3>
-    <p>A copy of everything is saved automatically before each change, so you can go back to how things were. The most recent copies are listed below.</p>
-    <div class="setup-actions"><a class="button secondary" href="/api/workbook?backup=1">↓ Save a backup to my computer</a><button id="restore-file" class="button secondary">↑ Restore from a file</button></div>
-    <div id="backup-list" class="backup-list"><p class="muted">Loading earlier versions…</p></div>
-    <h3>Master workbook</h3><p id="workbook-name"></p><p>Excel is the source of truth. Close the workbook in Excel before making changes here. The app backs it up before each save, and detects conflicting edits. While the app is running, saved Excel edits are detected automatically. Close Excel to allow the updated links to be written back. Product-name, item-name, manufacturer, model, and finish changes trigger lookup; quantity and notes changes do not.</p><h3>Product search</h3><div id="provider-status" class="notice"></div><button id="retry-automation" type="button" class="text-button">Retry automatic lookup</button><p>Copy <code>.env.example</code> to <code>.env</code> in the project folder. Set <code>SEARCH_PROVIDER=brave</code> and add your own <code>BRAVE_API_KEY</code>, then restart the app. SerpAPI and Claude are also supported by the existing lookup script.</p><p>Keep API keys only in your local <code>.env</code> file. Automatic search sends the manufacturer, model number, and product/item name to the provider, not client details. Provider charges may apply after saved product edits. Existing unchanged selections are not searched on first launch. Failed requests retry up to three times, then wait for a manual retry.</p><h3>Presentation branding</h3><p>Your supplied UH Homes wordmark and gold symbol are installed. Edit <code>lookbook_config.json</code> to adjust contact details or brand settings, then restart the app. The starter contact information is a placeholder—replace it before sending final presentations.</p><h3>Excel import</h3><p>Import replaces the master workbook after confirmation, preserving a timestamped copy in <code>backups/</code>. Use the same Projects, Selections, Manufacturers, and Lists sheets as the exported template. Maximum upload: 8 MB.</p><div class="notice">This version is for local use on one computer. It does not include accounts, shared hosting, or multi-user collaboration.</div></div></dialog>
-  <input type="file" id="import-file" accept=".xlsx" hidden>
+  <dialog id="setup-dialog"><div class="dialog-heading"><div><div class="eyebrow">WORKSPACE</div><h2>Settings</h2></div><button class="icon-button close-dialog" aria-label="Close dialog">×</button></div><div class="setup-content">
+    <p>Changes save automatically, and a copy of the workspace is kept before each save.</p>
+    <h3>Document branding</h3><p>Your supplied UH Homes wordmark and gold symbol are installed. Edit <code>lookbook_config.json</code> to adjust contact details or brand settings, then restart the app. The starter contact information is a placeholder—replace it before sharing documents.</p><div class="notice">This version is for local use on one computer. It does not include accounts, shared hosting, or multi-user collaboration.</div></div></dialog>
   <input type="file" id="cover-file" accept="image/png,image/jpeg,image/webp" hidden>
   <input type="file" id="spec-import-file" accept=".csv" hidden>
-  <input type="file" id="form-import-file" accept=".pdf,.docx" hidden>
   <dialog id="cover-lightbox" class="cover-lightbox" aria-label="Cover image preview"><img id="cover-lightbox-img" alt="Cover image"></dialog>
   <dialog id="files-dialog">
     <div class="dialog-heading"><div><div class="eyebrow">THIS PROJECT</div><h2>Import &amp; export</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
     <div class="file-columns">
       <section>
         <h3>Send out</h3>
-        <button class="file-choice" data-file="pdf"><strong>Finish schedule · PDF</strong><small>The client document. Asks for the client details and previews every page.</small></button>
-        <button class="file-choice" data-file="docx"><strong>Finish schedule · Word</strong><small>The same page, written as Word paragraphs and tables, to edit and reflow.</small></button>
-        <button class="file-choice" data-file="form"><strong>Fillable schedule · PDF</strong><small>Same page with form fields and a remove box, to mark up and import back.</small></button>
-        <button class="file-choice" data-file="form-docx"><strong>Fillable schedule · Word</strong><small>Same working copy using Word content controls and tick boxes.</small></button>
-        <button class="file-choice" data-file="pptx"><strong>Finish schedule · PowerPoint</strong><small>The editable twin, for wording changes without rebuilding.</small></button>
         <button class="file-choice" data-file="csv"><strong>Spec sheet · CSV</strong><small>Line items for Excel or Sheets, to price up and bring back.</small></button>
         <button class="file-choice" data-file="spec-docx"><strong>Spec sheet · Word</strong><small>The same line items laid out to read and print. Internal: it shows pricing.</small></button>
         <button class="file-choice" data-file="spec-pdf"><strong>Spec sheet · PDF</strong><small>Every line item and column as a printable PDF. Internal: it shows pricing.</small></button>
-        <button class="file-choice" data-file="workbook"><strong>Master workbook · Excel</strong><small>Every sheet, including the price schedule.</small></button>
       </section>
       <section>
         <h3>Bring in</h3>
         <button class="file-choice" data-file="import-csv"><strong>Spec sheet · CSV</strong><small>Updates matching line items and adds new ones. Nothing is removed.</small></button>
-        <button class="file-choice" data-file="import-form"><strong>Filled schedule · PDF or Word</strong><small>Applies client details, reworded descriptions and ticked removals.</small></button>
-        <button class="file-choice danger" data-file="import-workbook"><strong>Master workbook · Excel</strong><small>Replaces every project and selection. A backup is kept.</small></button>
       </section>
     </div>
-    <p class="form-note">Downloads and imports apply to the project selected in the sidebar, except the master workbook, which covers everything.</p>
-  </dialog>
-  <dialog id="schedule-dialog" class="wide-dialog">
-    <div class="dialog-heading"><div><div class="eyebrow">FINISH SCHEDULE</div><h2 id="schedule-dialog-title">Download schedule</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
-    <div class="schedule-dialog-body">
-      <form id="schedule-form" class="schedule-fields">
-        <p class="muted">Client details come from the Spec sheet header and print in the band at the top of the schedule.</p>
-        <label class="field">Schedule title<input name="title" type="text" maxlength="80" autocomplete="off"></label>
-        <label class="field">Item code prefix<input name="prefix" type="text" maxlength="6" autocomplete="off" spellcheck="false"></label>
-        <details class="hide-fields"><summary>Hide columns<span id="schedule-hide-count"></span></summary><div id="schedule-hide-grid" class="hide-grid"></div><p id="schedule-hide-note" class="muted"></p><button type="button" id="schedule-hide-clear" class="text-button">Show every column</button></details>
-        <p id="schedule-error" class="form-error" role="alert" hidden></p>
-        <div class="schedule-actions"><button type="button" id="schedule-refresh" class="button secondary">Refresh preview</button><button type="submit" id="schedule-download" class="button primary">Download ↓</button></div>
-      </form>
-      <div class="schedule-preview"><iframe id="schedule-frame" title="Finish schedule preview"></iframe><p id="schedule-hint" class="muted">Building the preview…</p></div>
-    </div>
+    <p class="form-note">Downloads and imports apply to the project selected in the sidebar.</p>
   </dialog>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>

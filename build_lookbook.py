@@ -42,7 +42,7 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
                                 PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
-from common import BASE_DIR, WORKBOOK, Sheet, clean, open_workbook, section_order
+from common import BASE_DIR, WORKBOOK, Sheet, clean, open_workbook, location_order, schedule_sort
 from workbook_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
@@ -94,15 +94,15 @@ SPEC_CELL_STYLE = style("spec_cell", 8, 10.5, C["body"])
 SPEC_NOTE_STYLE = style("spec_note", 6.5, 9, C["muted"])
 
 SPEC_TITLE = "Spec Sheet"
-# Internal column dump; Section becomes the heading and the lookbook flag a note under the
+# Internal column dump; Location becomes the heading and the lookbook flag a note under the
 # item. (column, width share, the hideable key that drops it); shares are rescaled to what
 # is shown. build_word.build_spec lays the same registry out in Word.
-SPEC_COLUMNS = [("Room / Area", 68, "Room / Area"), ("Item", 100, "Item"),
-                ("Manufacturer", 78, "Manufacturer"), ("Model #", 66, "Model #"),
-                ("Finish / Color", 80, "Finish / Color"), ("Qty", 28, "Qty"),
-                ("Unit Price", 46, "Unit Price"), ("Markup %", 42, "Markup %"),
-                ("Client Status", 54, "Client Status"), (PRODUCT_LINK, 52, "Product URL"),
-                ("Client Notes", 84, "Client Notes")]
+# The printed spec sheet mirrors the app's spec-sheet table, column for column, so the
+# download carries exactly the line items and headings on screen.
+SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
+                ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
+                (PRODUCT_LINK, 60, "Product URL"), ("Qty", 30, "Qty"),
+                ("Unit Price", 50, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
@@ -125,7 +125,7 @@ def fmt_date(value):
 
 def load_data(verified_only):
     wb = open_workbook(data_only=True)
-    order = section_order(wb)
+    order = location_order(wb)
     projects = OrderedDict()
     for _, data in Sheet(wb["Projects"]).rows():
         pid = clean(data.get("Project ID"))
@@ -146,8 +146,8 @@ def load_data(verified_only):
         items.setdefault(pid, []).append(record)
 
     def sort_key(record):
-        section = record.get("Section", "")
-        return (order.index(section) if section in order else len(order), section, record["_row"])
+        location = record.get("Location", "")
+        return (order.index(location) if location in order else len(order), location, record["_row"])
 
     for pid in items:
         items[pid].sort(key=sort_key)
@@ -162,7 +162,8 @@ def load_data(verified_only):
 # the PDF, the PowerPoint twin and the fillable copy; 'sheet' is the spec sheet CSV.
 HIDEABLE_COLUMNS = [
     ("code", "Item code", ("schedule",)),
-    ("Section", "Category headings", ("schedule", "sheet")),
+    ("Location", "Location headings", ("schedule", "sheet")),
+    ("Section", "Category", ("sheet",)),
     ("Item", "Item name", ("schedule", "sheet")),
     ("Room / Area", "Room / area", ("schedule", "sheet")),
     ("Manufacturer", "Manufacturer", ("schedule", "sheet")),
@@ -201,12 +202,29 @@ def hidden_columns(value):
 
 
 def group_sections(rows, hidden=()):
-    """Rows under their printed section heading, or all together under '' when headings are hidden."""
-    if "Section" in hidden:
+    """Rows under their printed location heading, or all together under '' when headings are hidden."""
+    if "Location" in hidden:
         return OrderedDict([("", list(rows))])
     groups = OrderedDict()
     for row in rows:
-        groups.setdefault(clean(row.get("Section")) or "Other", []).append(row)
+        groups.setdefault(clean(row.get("Location")) or "Other", []).append(row)
+    return groups
+
+
+# The spec sheet's group-by chips, as the app offers them.
+SPEC_GROUPS = ("Location", "Room / Area", "Section")
+
+
+def spec_groups(rows, group="Location", hidden=()):
+    """Rows under the heading the spec sheet is grouped by on screen."""
+    if group not in SPEC_GROUPS:
+        raise ValueError(f"Group the spec sheet by one of: {', '.join(SPEC_GROUPS)}.")
+    if group in hidden:
+        return OrderedDict([("", list(rows))])
+    placeholder = "Other" if group == "Section" else "Unassigned"
+    groups = OrderedDict()
+    for row in rows:
+        groups.setdefault(clean(row.get(group)) or placeholder, []).append(row)
     return groups
 
 
@@ -693,14 +711,14 @@ def spec_table(items, columns, widths, hidden):
     ]))
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=()):
-    """The internal spec sheet: every priced line item, landscape, grouped by section."""
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Location"):
+    """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
     columns = [(column, share) for column, share, key in SPEC_COLUMNS if key not in hidden]
     if not columns:
         columns = [("Item", 1)]
     widths = [LAND_CONTENT_W * share / sum(share for _, share in columns) for _, share in columns]
     story = [Band(band_values(project), LAND_CONTENT_W), Spacer(0, BAND_GAP)]
-    for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
+    for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
         if section:
@@ -728,12 +746,10 @@ def build_spec(pid, project, rows, output_dir=None, hidden=()):
 
 def spec_rows(wb, pid):
     """Every line item of a project in spec-sheet order; the lookbook flag is a note, not a filter."""
-    order = section_order(wb)
     rows = [{**{k: clean(v) for k, v in data.items()}, "_row": row}
             for row, data in Sheet(wb["Selections"]).rows()
             if clean(data.get("Project ID")) == pid]
-    rows.sort(key=lambda r: (order.index(r["Section"]) if r["Section"] in order else len(order),
-                             r["Section"], r["_row"]))
+    schedule_sort(rows, wb)
     return rows
 
 

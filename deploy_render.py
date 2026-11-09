@@ -25,8 +25,7 @@ START = "waitress-serve --listen=0.0.0.0:$PORT --threads=8 wsgi:application"
 
 # Copied from .env when present. Anything empty is skipped rather than sent blank.
 COPIED = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY", "SUPABASE_BUCKET",
-          "UH_WORKBOOK_NAME", "UH_SECRET_KEY", "SEARCH_PROVIDER", "SERPAPI_API_KEY",
-          "SERPAPI_KEY", "BRAVE_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_MODEL"]
+          "UH_WORKBOOK_NAME", "UH_SECRET_KEY"]
 # Without these the app would either refuse to start or have nothing to serve.
 REQUIRED = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY", "UH_SECRET_KEY"]
 

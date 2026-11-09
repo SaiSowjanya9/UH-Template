@@ -14,6 +14,7 @@ BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 SECTIONS = ["Exterior", "Roofing", "Windows & Doors", "Kitchen", "Appliances",
             "Bathrooms", "Flooring", "Lighting", "Paint", "Interior Doors & Trim",
             "Hardware", "Other"]
+LOCATIONS = ["1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
 STATUSES = ["Not run", "Found - verify", "Found - retailer", "Multiple matches",
             "Not found", "Verified"]
 
@@ -27,9 +28,9 @@ lines = [
     ("", False, 10),
     ("How this workbook works", True, 12),
     ("1. Add each project once on the Projects sheet (one row per project, unique Project ID).", False, 10),
-    ("2. Add every selection on the Selections sheet. Yellow columns are yours to fill; grey columns are filled by find_urls.py.", False, 10),
-    ("3. Run:  python find_urls.py   - fills Product URL, Product Name, Image URL, Lookup Status, Checked On, Lookup Notes.", False, 10),
-    ("4. Review every row. When a link is confirmed correct, set Lookup Status to 'Verified'. Verified rows are never overwritten.", False, 10),
+    ("2. Add every selection on the Selections sheet. Yellow columns are yours to fill; grey columns hold the product-link details.", False, 10),
+    ("3. Paste each product page address into Product URL, with Product Name, Image URL and Lookup Notes as needed.", False, 10),
+    ("4. Review every row. When a link is confirmed correct, set Lookup Status to 'Verified'.", False, 10),
     ("5. Run:  python build_lookbook.py --project UH-101   (or --all) - creates the client finish schedule PDF in /output.", False, 10),
     ("", False, 10),
     ("Legend", True, 12),
@@ -37,7 +38,8 @@ lines = [
     ("Grey cell = filled by the scripts (you may edit by hand; set status to Verified to lock it)", False, 10),
     ("", False, 10),
     ("Rules", True, 12),
-    ("- Section values come from the Lists sheet; schedule headings appear in the order listed there.", False, 10),
+    ("- Section is the trade category (Kitchen, Flooring...); Location is where in the home it goes (1st Floor...).", False, 10),
+    ("- The schedule groups by Location; headings appear in the order on the Lists sheet's Locations column.", False, 10),
     ("- Add each brand's official website on the Manufacturers sheet - the lookup searches that site first.", False, 10),
     ("- Image URL may be a web link or a local file path (e.g. images/front-door.jpg) to override the found image.", False, 10),
     ("- Include in Lookbook = No hides a row from the client PDF without deleting it.", False, 10),
@@ -99,25 +101,26 @@ pj["H1"].comment = Comment("Formulas - count rows on Selections for this Project
 sl = wb.create_sheet("Selections")
 scols = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #",
          "Finish / Color", "Qty", "Product URL", "Product Name", "Image URL",
-         "Lookup Status", "Checked On", "Lookup Notes", "Client Notes", "Include in Lookbook"]
-header(sl, scols, [11, 18, 16, 22, 18, 18, 18, 6, 40, 30, 30, 16, 12, 30, 26, 11])
+         "Lookup Status", "Checked On", "Lookup Notes", "Client Notes", "Include in Lookbook",
+         "Location"]
+header(sl, scols, [11, 18, 16, 22, 18, 18, 18, 6, 40, 30, 30, 16, 12, 30, 26, 11, 16])
 examples = [
-    ["UH-101", "Exterior", "Front Elevation", "Siding", "James Hardie", "HardiePlank Lap", "Arctic White", "", "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-101", "Windows & Doors", "Front Entry", "Entry Door", "Therma-Tru", "S4108", "Black", 1, "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-101", "Kitchen", "Kitchen", "Kitchen Faucet", "Moen", "7594ESRS", "Spot Resist Stainless", 1, "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-101", "Bathrooms", "Primary Bath", "Vanity Faucet", "Delta", "559LF-PP", "Chrome", 2, "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-101", "Paint", "Whole House", "Wall Paint", "Sherwin-Williams", "SW 7005", "Pure White", "", "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-102", "Kitchen", "Kitchen", "Kitchen Sink", "Kohler", "K-5540", "White", 1, "", "", "", "Not run", "", "", "", "Yes"],
-    ["UH-102", "Lighting", "Dining Room", "Chandelier", "Kichler", "", "Olde Bronze", 1, "", "", "", "Not run", "", "", "Model TBD", "Yes"],
+    ["UH-101", "Exterior", "Front Elevation", "Siding", "James Hardie", "HardiePlank Lap", "Arctic White", "", "", "", "", "Not run", "", "", "", "Yes", ""],
+    ["UH-101", "Windows & Doors", "Front Entry", "Entry Door", "Therma-Tru", "S4108", "Black", 1, "", "", "", "Not run", "", "", "", "Yes", "1st Floor"],
+    ["UH-101", "Kitchen", "Kitchen", "Kitchen Faucet", "Moen", "7594ESRS", "Spot Resist Stainless", 1, "", "", "", "Not run", "", "", "", "Yes", "1st Floor"],
+    ["UH-101", "Bathrooms", "Primary Bath", "Vanity Faucet", "Delta", "559LF-PP", "Chrome", 2, "", "", "", "Not run", "", "", "", "Yes", "2nd Floor"],
+    ["UH-101", "Paint", "Whole House", "Wall Paint", "Sherwin-Williams", "SW 7005", "Pure White", "", "", "", "", "Not run", "", "", "", "Yes", ""],
+    ["UH-102", "Kitchen", "Kitchen", "Kitchen Sink", "Kohler", "K-5540", "White", 1, "", "", "", "Not run", "", "", "", "Yes", "1st Floor"],
+    ["UH-102", "Lighting", "Dining Room", "Chandelier", "Kichler", "", "Olde Bronze", 1, "", "", "", "Not run", "", "", "Model TBD", "Yes", "1st Floor"],
 ]
 NS = 500
 for r, row in enumerate(examples, start=2):
     for c, v in enumerate(row, start=1):
         sl.cell(row=r, column=c, value=v)
-style_block(sl, NS, len(scols), input_cols=[1, 2, 3, 4, 5, 6, 7, 8, 15, 16], auto_cols=[9, 10, 11, 12, 13, 14])
+style_block(sl, NS, len(scols), input_cols=[1, 2, 3, 4, 5, 6, 7, 8, 15, 16, 17], auto_cols=[9, 10, 11, 12, 13, 14])
 sl["F1"].comment = Comment("Type the model / SKU exactly as the manufacturer lists it.", "Tracker")
-sl["L1"].comment = Comment("Set to 'Verified' after you confirm the link. Verified rows are never overwritten by find_urls.py.", "Tracker")
-sl.auto_filter.ref = f"A1:P{NS + 1}"
+sl["L1"].comment = Comment("Set to 'Verified' after you confirm the link.", "Tracker")
+sl.auto_filter.ref = f"A1:Q{NS + 1}"
 
 # ---------- Manufacturers ----------
 mf = wb.create_sheet("Manufacturers")
@@ -140,13 +143,15 @@ style_block(mf, 100, 3, input_cols=[1, 2, 3], auto_cols=[])
 
 # ---------- Lists ----------
 ls = wb.create_sheet("Lists")
-header(ls, ["Sections (lookbook order)", "Lookup Status", "Yes / No"], [26, 20, 10])
+header(ls, ["Sections (lookbook order)", "Lookup Status", "Yes / No", "", "Locations"], [26, 20, 10, 4, 18])
 for i, s in enumerate(SECTIONS, start=2):
     ls.cell(row=i, column=1, value=s)
 for i, s in enumerate(STATUSES, start=2):
     ls.cell(row=i, column=2, value=s)
 ls["C2"], ls["C3"] = "Yes", "No"
-style_block(ls, 30, 3, input_cols=[1], auto_cols=[])
+for i, s in enumerate(LOCATIONS, start=2):
+    ls.cell(row=i, column=5, value=s)
+style_block(ls, 30, 5, input_cols=[1, 5], auto_cols=[])
 
 # ---------- Validations ----------
 def dv(ws, formula, rng):
@@ -155,6 +160,7 @@ def dv(ws, formula, rng):
     ws.add_data_validation(v)
     v.add(rng)
 dv(sl, "=Lists!$A$2:$A$31", f"B2:B{NS + 1}")
+dv(sl, "=Lists!$E$2:$E$31", f"Q2:Q{NS + 1}")
 dv(sl, "=Lists!$B$2:$B$7", f"L2:L{NS + 1}")
 dv(sl, "=Lists!$C$2:$C$3", f"P2:P{NS + 1}")
 dv(sl, f"=Projects!$A$2:$A${NP + 1}", f"A2:A{NS + 1}")

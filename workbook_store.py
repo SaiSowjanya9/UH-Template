@@ -30,7 +30,12 @@ BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location"]
+# Where in the home a selection belongs - the schedule's grouping. Kept out of Section so
+# Section stays a pure trade category; the seeded list lives on Lists under "Locations".
+LOCATIONS = ["1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
+LOCATIONS_HEADER = "Locations"
+MAX_LOCATIONS = 30          # the Location dropdown covers Lists!E2:E31
 # Generated Selections column: the clickable face of Product URL, rebuilt on every save.
 # The header and the words inside the cell are deliberately the same, so a reader
 # clicks "Product Link" under "Product Link" instead of reading a raw address.
@@ -60,6 +65,7 @@ PROJECT_FORMULAS = {
 LIST_VALIDATIONS = {
     "Project ID": "Projects!$A$2:$A$51",
     "Section": "Lists!$A$2:$A$31",
+    "Location": "Lists!$E$2:$E$31",
     "Lookup Status": "Lists!$B$2:$B$8",
     "Include in Lookbook": "Lists!$C$2:$C$3",
     "Client Status": "Lists!$D$2:$D$6",
@@ -205,7 +211,7 @@ def presentation_details(project, rows):
         fields = row.get("custom_fields", read_custom_fields(row.get("Custom Fields"), SELECTION_FIELDS))
         if fields:
             heading = f"Selection {index}: {row.get('Item', '')}"
-            context = " / ".join(filter(None, [row.get("Section"), row.get("Room / Area"), row.get("Model #")]))
+            context = " / ".join(filter(None, [row.get("Location"), row.get("Room / Area"), row.get("Model #")]))
             groups.append((heading + (f" — {context}" if context else ""), fields))
     return groups
 
@@ -374,6 +380,121 @@ def ensure_product_links(wb):
         cell.font = Font(name=origin.font.name, size=origin.font.size, color=LINK_COLOR, underline="single")
 
 
+def infer_category(room, item):
+    """Best-effort trade category for a row that was filed under a floor or zone.
+
+    Used when migrating location-style Sections onto the Location field and when the spec
+    template seeds line items, so both paths land on the same category names. Anything the
+    rules cannot place falls back to "Other".
+    """
+    text = clean(item).lower()
+
+    def has(*words):
+        return any(word in text for word in words)
+
+    if has("flooring"):
+        return "Flooring"
+    if has("paint"):
+        return "Paint"
+    if has("light", "chandelier", "pendant", "sconce"):
+        return "Lighting"
+    if has("roof"):
+        return "Roofing"
+    if has("landscap", "masonry", "garage door", "balcony", "siding", "porch column"):
+        return "Exterior"
+    if has("window", "exterior door", "front door", "door - exterior", "doors - exterior"):
+        return "Windows & Doors"
+    if has("stopper", "knob", "hinge", "hardware") or ("pull" in text and "pullout" not in text and "pull-out" not in text):
+        return "Hardware"
+    if has("door", "staircase", "baseboard", "trim", "bookcase", "mud bench", "millwork", "wine cellar"):
+        return "Interior Doors & Trim"
+    if has("cooktop", "range", "oven", "microwave", "dishwasher", "venthood", "vent hood",
+           "refrigerator", "exhaust fan", "washer", "dryer", "freezer"):
+        return "Appliances"
+    if has("kitchen", "coffee bar", "trash pullout"):
+        return "Kitchen"
+    if has("toilet", "towel", "vanity", "shower", "tub", "bath"):
+        return "Bathrooms"
+    # Ambiguous fixtures - sinks, faucets, countertops, backsplash, cabinets - follow the room.
+    area = clean(room).lower()
+    if any(word in area for word in ("kitchen", "pantry", "coffee")):
+        return "Kitchen"
+    if any(word in area for word in ("bath", "powder", "laundry")):
+        return "Bathrooms"
+    return "Other"
+
+
+def location_list(ws):
+    """The Lists column headed 'Locations', as (column, names in order)."""
+    column = next((cell.column for cell in ws[1] if clean(cell.value) == LOCATIONS_HEADER), None)
+    if column is None:
+        return None, []
+    names = [clean(row[0]) for row in ws.iter_rows(min_row=2, min_col=column, max_col=column, values_only=True)]
+    return column, [name for name in names if name]
+
+
+def ensure_location_list(wb):
+    """Seed the 'Locations' column on Lists so the Location dropdown has values.
+
+    Like the sections column, the list belongs to the user afterwards: existing entries are
+    never rewritten or removed here.
+    """
+    ws = wb["Lists"]
+    column, names = location_list(ws)
+    if column is not None and names:
+        return column
+    if column is None:
+        column = ws.max_column + 1
+        if column > 50:
+            raise ValidationError("The Lists sheet has no space for the Locations column.")
+        cell = ws.cell(1, column, LOCATIONS_HEADER)
+        cell._style = copy(ws.cell(1, 1)._style)
+        ws.column_dimensions[get_column_letter(column)].width = max(
+            ws.column_dimensions[get_column_letter(column)].width or 0, 20)
+    for index, name in enumerate(LOCATIONS, start=2):
+        if clean(ws.cell(index, column).value) != name:
+            ws.cell(index, column, name)
+    return column
+
+
+def ensure_locations(wb):
+    """Move floor/zone Sections onto the Location column and re-categorise those rows.
+
+    A Section that names a Locations entry is a location, not a trade category: the row's
+    Location takes the value (unless it already has one) and its Section is re-inferred from
+    the room and item. Location names are also stripped from the sections list so the
+    Section dropdown stops offering them. Runs on every save, so workbooks edited directly
+    in Excel migrate the same way.
+    """
+    ensure_location_list(wb)
+    ws = wb["Lists"]
+    _, locations = location_list(ws)
+    names = set(locations) | set(LOCATIONS)
+
+    # Repack the sections column without the location names, preserving user order.
+    sections = [clean(row[0]) for row in ws.iter_rows(min_row=2, max_col=1, values_only=True)]
+    kept = [name for name in sections if name and name not in names]
+    if len(kept) != len([name for name in sections if name]):
+        for index, name in enumerate(kept, start=2):
+            ws.cell(index, 1, name)
+        for index in range(len(kept) + 2, len(sections) + 2):
+            ws.cell(index, 1).value = None   # ws.cell(..., None) does not write
+
+    sheet = ensure_selection_columns(wb)
+    if "Location" not in sheet.cols:
+        return
+    section_col, location_col = sheet.cols["Section"], sheet.cols["Location"]
+    room_col, item_col = sheet.cols["Room / Area"], sheet.cols["Item"]
+    for row in range(2, sheet.ws.max_row + 1):
+        section = clean(sheet.ws.cell(row, section_col).value)
+        if section not in names:
+            continue
+        if not clean(sheet.ws.cell(row, location_col).value):
+            sheet.ws.cell(row, location_col, section)
+        sheet.ws.cell(row, section_col, infer_category(
+            sheet.ws.cell(row, room_col).value, sheet.ws.cell(row, item_col).value))
+
+
 def ensure_list_values(wb):
     """Keep the status columns on Lists complete, so Excel's dropdowns offer every valid value.
 
@@ -439,29 +560,6 @@ def delete_record(wb, name, row):
 
 def history_entry(note):
     return {"ts": dt.datetime.now().isoformat(timespec="seconds"), "note": note or "save"}
-
-
-class FileState:
-    """A small JSON side-file, written atomically (the automatic lookup history)."""
-
-    def __init__(self, path):
-        self.path = Path(path)
-
-    def read(self):
-        return self.path.read_text(encoding="utf-8") if self.path.exists() else None
-
-    def write(self, content):
-        self.path.parent.mkdir(exist_ok=True)
-        handle, name = tempfile.mkstemp(suffix=".json", dir=self.path.parent)
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as output:
-                output.write(content)
-            os.replace(name, self.path)
-        finally:
-            Path(name).unlink(missing_ok=True)
-
-    def set_aside(self):
-        self.path.rename(self.path.with_name(f"{self.path.name}.corrupt-{dt.datetime.now():%Y%m%d_%H%M%S}"))
 
 
 class LocalBackend:
@@ -574,10 +672,6 @@ class LocalBackend:
             raise ValidationError("That cover image is no longer on disk. Upload it again.")
         return path.read_bytes()
 
-    def state(self):
-        key = hashlib.sha256(str(self.path.resolve()).encode("utf-8")).hexdigest()[:16]
-        return FileState(self.path.parent / "lookup_state" / f"{key}.json")
-
 
 class WorkbookStore:
     """Validation, repair and compare-and-swap around whichever backend holds the workbook."""
@@ -606,14 +700,13 @@ class WorkbookStore:
     def locked_elsewhere(self):
         return self.backend.locked_elsewhere()
 
-    def state(self):
-        return self.backend.state()
-
     def snapshot(self):
         with self.lock:
             raw, revision = self.backend.read()
             wb = load_workbook(io.BytesIO(raw), keep_links=False)
             validate_workbook(wb)
+            # Views and exports see location data even before the next save migrates the file.
+            ensure_locations(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -625,6 +718,7 @@ class WorkbookStore:
                 raise PermissionError("The workbook is open in another program.")
             self.backend.backup()
             ensure_selection_columns(wb)
+            ensure_locations(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)

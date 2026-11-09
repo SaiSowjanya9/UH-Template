@@ -1,6 +1,6 @@
-# UH Homes – Selections Tracker & Finish Schedule Generator
+# UH Homes – Selections Tracker & Spec Sheet Generator
 
-One Excel workbook holds every project's exterior and interior selections. The local web app manages projects, finds candidate product links for your own review, and generates the approved UH Homes **finish schedule** for each project as a PDF, an editable Word document and an editable PowerPoint.
+One Excel workbook holds every project's exterior and interior selections. The local web app manages projects and their line items, and downloads each project's **spec sheet** — every column header and every line item exactly as you see them on screen — as a PDF, a Word document or a CSV.
 
 ## Start the web app (Windows)
 
@@ -15,30 +15,26 @@ Open **http://127.0.0.1:5000**. By default the app runs only on this computer, w
 If another service occupies port 5000, run `.venv\Scripts\python.exe app.py --port 5001` and open **http://127.0.0.1:5001** instead. The app remains bound to loopback on either port.
 
 1. Add a project, then add its selections (manufacturer, model, finish, room, and quantity).
-2. Save a new selection or edit its item/product name, manufacturer, model, or finish. **Automatic lookup** queues that selection and writes its candidate URL back to Excel. Live lookup needs a search-provider API key; see **Setup & workbook**. The manual **Find missing product links** button is still available for unchanged existing rows.
-3. Use **Review matches** to open candidate pages and verify the exact manufacturer, model, and finish.
-4. Open **Client presentations**, check the live preview, set the **Schedule title** (for example `Exterior Selections`) and **Item code prefix** (`EX` → EX-01, EX-02 …), then download the PDF, the editable Word document or the editable PowerPoint. Draft exports add a DRAFT mark and a status column. Final exports require verified selections; the verified-only option explicitly omits pending items.
-5. **Export Excel** downloads the entire master workbook. **Import Excel** validates and replaces it only after confirmation, with a timestamped backup in `backups/`.
+2. Open **Spec sheet** to fill in the line items: brand, model, finish, the product link, quantity, unit price and markup. Paste each product page address into the **PRODUCT LINK** column; the cell then shows the words "Product Link" and the pencil reopens the address. Edits save themselves, and **Save** retries anything a dropped connection held back.
+3. Enter the client details at the top of the Spec sheet — client, plan / lot, address and date. They are saved to the project and print in the band at the top of every download.
+4. Group the sheet **by location**, **by room** or **by category**, then use **Import / Export** to download the spec sheet as a **PDF**, a **Word** document or a **CSV**. Each one carries the same columns, the same group headings and every line item shown on screen.
+5. Bring a priced-up **CSV** back in from the same dialog: matching line items are updated, new ones are added, and nothing is removed.
 
-Close Excel before saving through the app. Every workbook write creates a backup and checks for conflicting changes. While `app.py` is running, a background watcher detects edits saved directly in Excel, invalidates the changed product's old links and verification, and queues a lookup. Close Excel to let the watcher write the results back. The browser refreshes lookup progress automatically without overwriting an open edit form.
+Close Excel before saving through the app. Every workbook write creates a backup in `backups/` and checks for conflicting changes. Edits you save directly in Excel appear in the app, and changing a product's item name, manufacturer, model or finish clears that row's old link and verification, because they no longer describe the product.
 
-Automatic lookup applies to item/product name, manufacturer, model number, and finish changes, not quantity or client notes. It uses manufacturer + model, with the product/item name as supporting context. A newly typed product name is retained. Existing unchanged rows are not searched on the first launch; subsequent changes and pending work survive restarts through `lookup_state/`. Keep that folder with this workspace. Row insertions and reordering do not recheck unchanged selections.
+Product links are typed or pasted by you — there is no automated search. **Lookup Status** is your own record of whether a link has been checked: set it to **Verified** once you have opened the page and confirmed the exact manufacturer, model and finish. Verified links older than six months are flagged **Re-check**.
 
-Changed selections cannot contribute stale product details to app-generated schedules: drafts and full final exports wait for pending lookups; verified-only exports omit pending rows. Other projects remain available. Missing matches leave the URL blank for manual review. Missing API keys leave the queue waiting; provider failures retry up to three attempts, then pause until **Retry automatic lookup** is clicked. After saving product changes, you may save a new manual URL to replace a pending lookup, then verify it.
-
-Provider requests can incur charges after saved product edits. Keep the app running for Excel monitoring, and generate a new PDF, Word or PowerPoint copy after the lookup completes; previously downloaded files are not rewritten automatically.
-
-The supplied projects and contact details are examples. Replace the branding/contact placeholders in `lookbook_config.json` and restart the app before preparing client deliverables. Every format uses the same letter-portrait schedule layout. Word builds the page from real paragraphs and tables, so it reflows and repaginates as you edit it; PowerPoint keeps every value in an editable text box. Either lets you adjust wording without rebuilding from the workbook.
+The supplied projects and contact details are examples. Replace the branding/contact placeholders in `lookbook_config.json` and restart the app before preparing client deliverables.
 
 ## Project and selection custom fields
 
 The Selection tracker shows the selected project's complete standard details. Use **Project details → Add field** to enter an additional field name and value, then save. Use **Edit details** to rename, update, or remove existing custom fields. Fields belong only to that project, not to every project.
 
-For an individual selection, choose **Edit → Additional fields → Add field**. Saved fields can be expanded under that item in the selections schedule and are included in selection searches. Custom-field-only changes do not start a product search or reset verification.
+For an individual selection, choose **Edit → Additional fields → Add field**. Saved fields can be expanded under that item in the selections schedule and are included in selection searches. Custom-field-only changes never reset a row's verification.
 
-Each record supports up to 30 custom fields, with unique names of up to 80 characters and text values of up to 2,000 characters (subject to the combined workbook-cell limit). Custom fields appear on the schedule's **Additional details** rows, after the categories and before the sign-off block; do not put internal-only information there if you do not intend to share it.
+Each record supports up to 30 custom fields, with unique names of up to 80 characters and text values of up to 2,000 characters (subject to the combined workbook-cell limit).
 
-Excel import/export is now under **Data tools**. Custom data is preserved in an optional `Custom Fields` JSON column on each relevant sheet. Keep this column with the rest of the row when sorting or importing. Use the web forms to edit custom fields rather than manually editing their JSON. Existing workbooks without this column remain compatible.
+Custom data is preserved in an optional `Custom Fields` JSON column on each relevant sheet. Keep this column with the rest of the row when sorting or importing. Use the web forms to edit custom fields rather than manually editing their JSON. Existing workbooks without this column remain compatible.
 
 ## Hosting it for your team
 
@@ -78,15 +74,13 @@ the app itself needs a host such as Render (`render.yaml` is included).
    current `.env` values. Use `--plan starter` to avoid the free plan's sleeping, and
    `--region` to match your Supabase project.
 
-**It must run as exactly one process.** Automatic lookup is a background thread and the workbook
-is saved whole, so a second worker would run a second lookup thread and race the first's saves.
-`wsgi.py` is the entry point and `waitress-serve --threads=8` is the start command; scale with
-threads, never with instances.
+**It must run as exactly one process.** The workbook is saved whole, so a second worker would
+race the first's saves. `wsgi.py` is the entry point and `waitress-serve --threads=8` is the
+start command; scale with threads, never with instances.
 
 **Running it free.** Both Render's free web service and Supabase's free plan work, with two
 behaviours to know about. Render sleeps the service after 15 minutes idle and takes about a
-minute to wake; nothing is lost, because the workbook *and* the pending-lookup queue live in
-Supabase, but automatic lookup only progresses while someone has the app open. Supabase pauses a
+minute to wake; nothing is lost, because the workbook lives in Supabase. Supabase pauses a
 free project after a week with no database activity — it is restorable from the dashboard, but
 if the team will go quiet for longer than that, open the app (or the Supabase dashboard) once a
 week. Upgrading the Render service to Starter removes the sleeping; upgrading Supabase to Pro
@@ -104,89 +98,108 @@ win a save, and earlier objects are the saved copies the app offers to restore. 
 disk is attached to the host, and a redeploy cannot lose data. The last 30 versions are kept.
 
 Two limitations worth knowing. Excel cannot open the hosted workbook directly — use
-**Export Excel** / **Import Excel**, or `supabase_store.py pull`, which also means the
-Excel-edit watcher only applies to the local mode. And because the whole workbook is written on
+`supabase_store.py pull` and `push`, which also means direct Excel editing only applies to the
+local mode. And because the whole workbook is written on
 every save, two people editing the same project at the same time will see
 *"Someone else saved first"*; the app is built for taking turns, and moving selections into
 Postgres rows is what would lift that.
 
 ## Optional command-line workflow
 
-The original scripts are also available. Use the web app for the automatic workflow and its pending-lookup export safeguards; these standalone scripts do not run the watcher. Do not run the standalone URL writer concurrently with the app's automatic lookup:
+The generators also run as scripts, against the workbook directly. The client finish-schedule,
+fillable and PowerPoint builders are command-line only — the app itself downloads the spec sheet:
 
 | Step | What you do | Command |
 |---|---|---|
-| 1 | Add the project on **Projects**, then its items on **Selections** (Manufacturer + Model # are enough) | — |
-| 2 | Find product links, names and images automatically | `python find_urls.py` |
-| 3 | Review the **Lookup Status** column; set correct rows to **Verified** | — |
-| 4 | Generate the client finish schedule | `python build_lookbook.py --project UH-101` |
-| 5 | Or the editable Word version | `python build_word.py --project UH-101` |
-| 6 | Or the editable PowerPoint version | `python build_powerpoint.py --project UH-101` |
+| 1 | Add the project on **Projects**, then its items on **Selections** | — |
+| 2 | Paste each product page address into **Product URL** | — |
+| 3 | Review each link, then set correct rows to **Verified** | — |
+| 4 | Generate the internal spec sheet (PDF, or `build_word.py --spec` for Word) | `python build_lookbook.py --project UH-101 --spec` |
+| 5 | Generate the client finish schedule | `python build_lookbook.py --project UH-101` |
+| 6 | Or the editable Word version | `python build_word.py --project UH-101` |
+| 7 | Or the editable PowerPoint version | `python build_powerpoint.py --project UH-101` |
 
 ## Setup (once)
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # then add one search API key
 ```
 
-Close the workbook in Excel before running `find_urls.py` (Excel locks the file).
+Close the workbook in Excel before running any script that writes to it.
 
 ## The workbook
 
 - **Projects** – one row per project. Total / Links Found / Verified / Needs Review are formulas.
   *Cover Image* (optional) = a rendering or photo for the cover (web link or local path).
-- **Selections** – one row per item. Yellow columns are typed; grey columns are filled by the lookup.
+- **Selections** – one row per item. Yellow columns are typed; grey columns hold the product-link details.
   *Include in Lookbook = No* hides a row from the schedule without deleting it.
   The client description of each row is built from *Manufacturer*, *Product Name* or *Model #*,
   *Finish / Color*, *Qty* (when it is not 1) and *Client Notes*; *Room / Area* prints under the item name.
   *Product Link* is generated on every save: it reads “Product Link” and opens whatever is in
   *Product URL*, so edit the URL column (or the app's PRODUCT LINK column) and never this one.
-- **Manufacturers** – brand name → official website. The lookup searches that site first, so
-  keep this list complete (a starter list is included – double-check the domains).
-- **Lists** – dropdown values. The order of **Sections** is the order the headings appear on the schedule.
+- **Manufacturers** – brand name → official website, kept together for reference (a starter
+  list is included – double-check the domains).
+- **Lists** – dropdown values. **Section** is the trade category (Kitchen, Flooring…) and **Location** is where in the home it goes (1st Floor…). The order of the **Locations** column is the order the group headings appear on the schedule.
 
 The example rows are placeholders – replace them with real projects.
 
-## How the URL lookup decides
+## Lookup Status
 
-1. Searches `site:<brand domain> "<model>"`, then a broader query if no manufacturer page can be confirmed.
-2. Checks product-specific data for an exact model/SKU, or a model in the page title/heading accompanied by product markup. Formatting differences are tolerated, but longer model variants and pages listing several structured products are rejected.
-3. Prefers the manufacturer's own page over retailers, and pulls the page's product title and image. Pages without sufficient evidence, including some JavaScript-heavy or blocked sites, need manual lookup. This is candidate discovery, not a guarantee of an exact finish or product match.
-4. Writes a status:
+**Lookup Status** records how far a product link has been checked. You set it yourself; nothing
+in the app changes it behind your back, and editing a row's item name, manufacturer, model or
+finish clears it back to *Not run* because the old link no longer describes the product.
 
 | Status | Meaning |
 |---|---|
-| Found - verify | One confirmed page on the manufacturer's site – quick check, then mark Verified |
-| Multiple matches | Several manufacturer pages matched (often finish variants) – alternatives are in Lookup Notes |
-| Found - retailer | Only a retailer page confirmed it – confirm, or add/fix the brand domain |
-| Not found | Nothing confirmed – Lookup Notes has a ready-made search link |
-| Search error | Provider unavailable, missing credentials, or quota/network issue; fix setup and retry |
-| Verified | Set by you. **Never overwritten** by the script |
+| Not run | No link yet, or the product changed and needs a fresh one |
+| Found - verify | A link is saved but has not been confirmed against the page |
+| Multiple matches | Several candidate pages – note the alternatives in Lookup Notes |
+| Found - retailer | Only a retailer page, not the manufacturer's own |
+| Not found | No product page could be found |
+| Search error | Left over from an earlier automated lookup; treat it as *Not run* |
+| Verified | You opened the page and confirmed manufacturer, model and finish |
 
-Options: `--project UH-101`, `--force` (re-check rows that already have a URL), `--dry-run`.
+Verified links older than six months are flagged **Re-check** in the app.
 
 Product images are review aids for your team and are never printed, so a missing image never
-blocks a deliverable. The product page itself is printed, as a clickable “Product Link” after
-the row description.
+blocks a deliverable. The product page itself is printed, as a clickable “Product Link”.
 
-## The client finish schedule
+## The internal spec sheet
+
+The app's **Import / Export** dialog downloads the selected project's spec sheet. It is a
+landscape page carrying the client details band, the group headings the view is grouped by, and
+one row per line item under the same eight column headers as the screen: ITEM, MANUFACTURER,
+MODEL #, FINISH / COLOR, PRODUCT LINK, QTY, UNIT PRICE and MARKUP %. Pricing is internal, so
+treat the spec sheet as an internal document.
+
+- **Spec sheet · PDF** – `build_lookbook.build_spec`, for reading and printing.
+- **Spec sheet · Word** – `build_word.build_spec`, the same page as editable paragraphs and tables.
+- **Spec sheet · CSV** – the line items for Excel or Sheets, with *Product Link* as a
+  `=HYPERLINK(...)` formula. Price it up, save it as UTF-8 CSV and bring it back in: rows are
+  matched on location, room and item, matches are updated, new lines are added and nothing is
+  removed. A link you type into the spreadsheet imports as *Found - verify*, never as verified.
+
+From the command line, `--spec` writes the same sheet (`build_lookbook.py --spec`,
+`build_word.py --spec`) and `--hide "Qty,Unit Price"` leaves columns out.
+
+## The client finish schedule (command line only)
 
 `python build_lookbook.py --project UH-101` → `output/UH-101_<Name>_<Schedule title>.pdf`
 
-One letter-portrait page per ~20 selections, in the approved layout:
+The client-facing schedule is no longer generated from the app; it remains available as a
+script. One letter-portrait page per ~20 selections, in the approved layout:
 
 - Wordmark, gold `FINISH SCHEDULE` eyebrow and the schedule title over a ruled header.
 - A client / project-lot / address / date band on the first page.
-- Letter-spaced, ruled category headings in the **Lists** sheet order.
+- Letter-spaced, ruled location headings in the **Lists** sheet's Locations order.
 - One row per selection: item code (`EX-01`), item name with its room beneath, and the
   description assembled from the workbook columns, ending in a clickable “Product Link”
-  when the row has a product URL. No product images.
+  when the row has a product URL. No product images and no pricing.
 - **Additional details** rows for project and selection custom fields.
 - The client note and the signature block, then a footer with your contact line and page number.
 
 Options: `--project UH-101` or `--all`; `--verified-only` leaves out unverified rows;
-`--draft` adds the DRAFT mark and a lookup-status column for internal review;
+`--draft` adds the DRAFT mark and a status column for internal review;
 `--title "Interior Selections"` and `--prefix IN` override the schedule title and item codes.
 The script warns you if any included row isn't Verified yet. `build_powerpoint.py` takes the
 same options and writes the editable `.pptx` version of the same page, and `build_word.py`
@@ -206,7 +219,6 @@ alongside the files); to use different brand fonts, drop the `.ttf` files in and
 
 ```
 UH_Homes_Selections_Tracker.xlsx   the workbook
-find_urls.py                       product link lookup
 build_lookbook.py                  finish schedule PDF and spec sheet generators
 build_word.py                      editable Word version, fillable copy and spec sheet
 build_powerpoint.py                editable PowerPoint version

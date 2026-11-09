@@ -38,6 +38,9 @@ create table if not exists uh_history (
 
 create index if not exists uh_history_note_idx on uh_history (note text_pattern_ops);
 
+-- Legacy: held the automatic product-lookup history, which the app no longer has. Kept here
+-- because this migration has already been applied; nothing reads or writes it now, and
+-- `supabase_store.py check` no longer expects it. Safe to drop by hand when convenient.
 create table if not exists uh_lookup_state (
     key        text primary key,
     content    text        not null,

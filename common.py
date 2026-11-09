@@ -54,9 +54,9 @@ class Sheet:
         self.ws.cell(row=row, column=self.cols[header], value=value)
 
 
-# Columns ignored when deciding whether a row is "empty": computed totals and every
-# column AutoLookup fills itself. A row holding only machine output (e.g. an orphan
-# Product URL left behind by a row delete) carries no user data and must not count.
+# Columns ignored when deciding whether a row is "empty": computed totals, generated columns
+# and the product-link metadata. A row holding only that (e.g. an orphan Product URL left
+# behind by a row delete) carries no user data and must not count.
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
                    "Lookup Status", "Include in Lookbook", "Client Status",
                    "Checked On", "Lookup Notes", "Product URL", "Product Link",
@@ -81,3 +81,20 @@ def manufacturer_domains(wb):
 
 def section_order(wb):
     return [clean(r[0].value) for r in wb["Lists"].iter_rows(min_row=2, max_col=1) if clean(r[0].value)]
+
+
+def location_order(wb):
+    """The Locations list on Lists, in order - the schedule's grouping order."""
+    ws = wb["Lists"]
+    column = next((c.column for c in ws[1] if clean(c.value) == "Locations"), None)
+    if column is None:
+        return []
+    return [clean(row[0]) for row in ws.iter_rows(min_row=2, min_col=column, max_col=column, values_only=True)
+            if clean(row[0])]
+
+
+def schedule_sort(rows, wb):
+    """In-place export order: the Locations list order, then entry order within a location."""
+    order = location_order(wb)
+    rows.sort(key=lambda r: (order.index(clean(r.get("Location"))) if clean(r.get("Location")) in order
+                             else len(order), clean(r.get("Location")), r["_row"]))

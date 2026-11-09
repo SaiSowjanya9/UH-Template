@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 
 import app
 import common
-from auto_lookup import AutoLookup
 from workbook_store import WorkbookStore
 
 
@@ -18,7 +17,7 @@ class CustomFieldTests(unittest.TestCase):
         shutil.copy2(common.WORKBOOK, self.path)
         self.store = WorkbookStore(self.path)
         # REQUIRE_LOGIN follows the ambient .env; these tests exercise local mode.
-        self.patches = [patch.object(app, "store", self.store), patch.object(app, "automation", None),
+        self.patches = [patch.object(app, "store", self.store),
                         patch.object(app, "REQUIRE_LOGIN", False)]
         for item in self.patches:
             item.start()
@@ -62,9 +61,8 @@ class CustomFieldTests(unittest.TestCase):
         self.store.save(wb, revision)
         self.assertEqual(self.state()["selections"][0]["custom_fields"], fields)
         self.assertEqual(self.state()["selections"][0]["_row"], row["_row"] + 1)
-        export = self.client.get("/api/workbook")
-        response = self.client.post("/api/workbook/import", data={"file": (io.BytesIO(export.data), "tracker.xlsx"), "revision": self.state()["revision"], "confirm": "replace-with-backup"}, headers=self.headers)
-        self.assertEqual(response.status_code, 200, response.json)
+        _, revision = self.store.snapshot()
+        self.store.import_bytes(self.store.read_bytes(), revision)
         self.assertEqual(self.state()["selections"][0]["custom_fields"], fields)
 
     def test_edit_remove_and_omitted_fields(self):
@@ -90,18 +88,11 @@ class CustomFieldTests(unittest.TestCase):
             self.assertEqual(response.status_code, 400, response.json)
             self.assertEqual(self.path.read_bytes(), before)
 
-    def test_custom_edits_do_not_queue_product_search(self):
-        engine = AutoLookup(self.store, lambda: {"ready": True, "name": "brave", "key_name": "BRAVE_API_KEY"}, search=Mock())
-        engine.observe(self.store.snapshot()[0])
-        with patch.object(app, "automation", engine):
-            response = self.post("/api/selections", {"row": self.state()["selections"][0]["_row"], "values": {}, "custom_fields": [{"name": "Supplier", "value": "New supplier"}]})
-            self.assertEqual(response.status_code, 200, response.json)
-            self.assertFalse(response.json["queued"])
-            engine.tick()
-            engine.search.assert_not_called()
-
-    def test_custom_fields_in_both_presentations_without_cross_project_leak(self):
+    def test_custom_fields_in_generated_documents_without_cross_project_leak(self):
+        import build_lookbook
+        import build_powerpoint
         from pptx import Presentation
+        from workbook_store import detailed_records
         try:
             from pypdf import PdfReader
         except ImportError:
@@ -113,19 +104,21 @@ class CustomFieldTests(unittest.TestCase):
         self.post("/api/projects", {"values": {"Project ID": project["Project ID"]}, "custom_fields": [{"name": "Lot number", "value": "Lot 24"}, {"name": "Long specification", "value": long_value}]})
         self.post("/api/projects", {"values": {"Project ID": other["Project ID"]}, "custom_fields": [{"name": "Private other project", "value": "OTHER-PROJECT-ONLY"}]})
         self.post("/api/selections", {"row": row["_row"], "values": {}, "custom_fields": [{"name": "Supplier", "value": "Approved supplier"}]})
-        pdf = self.post("/api/presentation", {"project": project["Project ID"], "mode": "draft", "format": "pdf"})
-        self.assertEqual(pdf.status_code, 200, pdf.json if pdf.is_json else "")
-        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages)
-        for value in ["Lot number", "Lot 24", "Approved supplier", "END-OF-CUSTOM-VALUE"]:
-            self.assertIn(value, text)
-        self.assertNotIn("OTHER-PROJECT-ONLY", text)
-        pptx = self.post("/api/presentation", {"project": project["Project ID"], "mode": "draft", "format": "pptx"})
-        self.assertEqual(pptx.status_code, 200, pptx.json if pptx.is_json else "")
-        prs = Presentation(io.BytesIO(pptx.data))
-        text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if shape.has_text_frame)
-        for value in ["Lot number", "Lot 24", "Approved supplier", "END-OF-CUSTOM-VALUE"]:
-            self.assertIn(value, text)
-        self.assertNotIn("OTHER-PROJECT-ONLY", text)
+        wb, _ = self.store.snapshot()
+        project_record = next(p for p in detailed_records(wb, "Projects") if p["Project ID"] == project["Project ID"])
+        rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project["Project ID"]]
+        with tempfile.TemporaryDirectory() as folder:
+            pdf = build_lookbook.build(project["Project ID"], project_record, rows, True, Path(folder))
+            pptx = build_powerpoint.build(project["Project ID"], project_record, rows, True, Path(folder))
+            text = "\n".join(page.extract_text() for page in PdfReader(str(pdf)).pages)
+            for value in ["Lot number", "Lot 24", "Approved supplier", "END-OF-CUSTOM-VALUE"]:
+                self.assertIn(value, text)
+            self.assertNotIn("OTHER-PROJECT-ONLY", text)
+            prs = Presentation(str(pptx))
+            text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if shape.has_text_frame)
+            for value in ["Lot number", "Lot 24", "Approved supplier", "END-OF-CUSTOM-VALUE"]:
+                self.assertIn(value, text)
+            self.assertNotIn("OTHER-PROJECT-ONLY", text)
 
     def test_malformed_custom_fields_import_is_rejected(self):
         wb, _ = self.store.snapshot()
@@ -136,8 +129,9 @@ class CustomFieldTests(unittest.TestCase):
         output = io.BytesIO()
         wb.save(output)
         before = self.path.read_bytes()
-        response = self.client.post("/api/workbook/import", data={"file": (io.BytesIO(output.getvalue()), "tracker.xlsx"), "revision": self.state()["revision"], "confirm": "replace-with-backup"}, headers=self.headers)
-        self.assertEqual(response.status_code, 400)
+        _, revision = self.store.snapshot()
+        with self.assertRaises(Exception):
+            self.store.import_bytes(output.getvalue(), revision)
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_formula_like_values_are_literal(self):
