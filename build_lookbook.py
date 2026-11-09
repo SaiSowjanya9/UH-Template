@@ -94,11 +94,11 @@ SPEC_CELL_STYLE = style("spec_cell", 8, 10.5, C["body"])
 SPEC_NOTE_STYLE = style("spec_note", 6.5, 9, C["muted"])
 
 SPEC_TITLE = "Spec Sheet"
-# Internal column dump; Location becomes the heading and the lookbook flag a note under the
-# item. (column, width share, the hideable key that drops it); shares are rescaled to what
-# is shown. build_word.build_spec lays the same registry out in Word.
 # The printed spec sheet mirrors the app's spec-sheet table, column for column, so the
-# download carries exactly the line items and headings on screen.
+# download carries exactly the line items and headings on screen. The grouping field becomes
+# the heading and the lookbook flag a note under the item. (column, width share, the hideable
+# key that drops it); shares are rescaled to what is shown, and build_word.build_spec lays
+# the same registry out in Word.
 SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
                 ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
                 (PRODUCT_LINK, 60, "Product URL"), ("Qty", 30, "Qty"),
