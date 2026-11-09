@@ -57,6 +57,9 @@ class Sheet:
 # Columns ignored when deciding whether a row is "empty": computed totals, generated columns
 # and the product-link metadata. A row holding only that (e.g. an orphan Product URL left
 # behind by a row delete) carries no user data and must not count.
+# The retired lookup columns stay listed on purpose. A workbook written before they were
+# removed can still hold a stray "Not run", and that must not make an empty row look
+# occupied in the window before the next save drops the column.
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
                    "Lookup Status", "Include in Lookbook", "Client Status",
                    "Checked On", "Lookup Notes", "Product URL", "Product Link",

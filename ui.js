@@ -3,9 +3,11 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, editor: null,
-                specGroup: "Location", specCollapsed: new Set(), focusSelector: null,
+                specCollapsed: new Set(), focusSelector: null,
                 specPending: new Map(),
                 specLinkEdit: new Set() };
+// The spec sheet is always grouped by Location; a line item's own Location is set in its editor.
+const SPEC_GROUP = "Location";
 const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -74,11 +76,6 @@ async function action(fn) {
   try { await fn(); } catch (error) { toast(error.message, true); }
 }
 
-function badge(status) {
-  const kind = status === "Verified" ? "verified" : ["Not found", "Search error"].includes(status) ? "failed" : status && status !== "Not run" ? "review" : "";
-  return `<span class="status ${kind}">${esc(status || "Not run")}</span>`;
-}
-
 function thumb(row) {
   if (isUrl(row["Image URL"])) return `<img class="item-thumb" src="${esc(row["Image URL"])}" alt="${esc(row["Item"])}" loading="lazy" referrerpolicy="no-referrer">`;
   return '<span class="item-thumb item-placeholder" aria-hidden="true">◇</span>';
@@ -100,8 +97,6 @@ function render() {
   const data = state.data;
   if (!data) return;
   const project = selectedProject(), rows = projectRows();
-  const verified = rows.filter((r) => r["Lookup Status"] === "Verified").length;
-  const stale = rows.filter((r) => r._stale).length;
   const linked = rows.filter((r) => isUrl(r["Product URL"])).length;
   const bare = state.view === "spec";   // the spec sheet stands on its own
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
@@ -158,7 +153,7 @@ function render() {
   }
   const priced = rows.filter((r) => Number(r["Unit Price"]) > 0);
   const budget = priced.reduce((sum, r) => sum + lineTotal(r), 0);
-  $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, "found or added"], ["Needs review", rows.length - verified, "before presenting"], ["Verified selections", verified, `${rows.length ? Math.round(verified / rows.length * 100) : 0}% complete${stale ? ` · ${stale} stale` : ""}`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
+  $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, `of ${rows.length} with a product page`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
   $("page-title").textContent = names[state.view];
   // the spec sheet is the standard specification, so it is not labelled with one project
   $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
@@ -182,11 +177,11 @@ function render() {
 }
 
 function renderTable() {
-  const query = $("search").value.trim().toLowerCase(), category = $("section-filter").value, location = $("location-filter").value, status = $("status-filter").value;
-  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!location || r.Location === location) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], r.Location, ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)) && (!status || (status === "review" ? r["Lookup Status"] !== "Verified" : status === "missing" ? !isUrl(r["Product URL"]) : r["Lookup Status"] === status)));
+  const query = $("search").value.trim().toLowerCase(), category = $("section-filter").value, location = $("location-filter").value;
+  const rows = projectRows().filter((r) => (!category || r.Section === category) && (!location || r.Location === location) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], r.Location, ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${badge(r["Lookup Status"])}${r._stale ? ' <span class="status review">Re-check</span>' : ""}${r["Client Status"] && r["Client Status"] !== "Proposed" ? ` <small class="muted">Client: ${esc(r["Client Status"])}</small>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${r["Client Status"] ? `<span class="status">${esc(r["Client Status"])}</span>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -210,26 +205,21 @@ const money = (value) => value.toLocaleString(undefined, { minimumFractionDigits
 const lineTotal = (row) => (Number(row["Unit Price"]) || 0) * (Number(row.Qty) || 1) * (1 + (Number(row["Markup %"]) || 0) / 100);
 
 function specGroups(rows) {
-  const key = state.specGroup;
   const groups = new Map();
-  for (const row of rows) groups.set(row[key] || (key === "Section" ? "Other" : "Unassigned"), []);
-  for (const row of rows) groups.get(row[key] || (key === "Section" ? "Other" : "Unassigned")).push(row);
-  const order = key === "Section" ? state.data.sections : key === "Location" ? state.data.locations || [] : null;
-  if (order) {
-    return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
-  }
-  return [...groups];
+  for (const row of rows) groups.set(row[SPEC_GROUP] || "Unassigned", []);
+  for (const row of rows) groups.get(row[SPEC_GROUP] || "Unassigned").push(row);
+  const order = state.data.locations || [];
+  return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
 }
 
 function renderSpec() {
   if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
-  document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
   const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Room / Area"], r.Section, r.Location, r["Client Notes"]].join(" ").toLowerCase().includes(query));
   const groups = specGroups(rows);
   $("spec-summary").textContent = all.length
-    ? `${groups.length} ${{ "Section": "categories", "Location": "locations" }[state.specGroup] || "rooms"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
+    ? `${groups.length} location${groups.length === 1 ? "" : "s"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
     : "";
   $("spec-summary").hidden = state.view !== "spec" || !all.length;
   $("spec-add").disabled = !selectedProject() || state.busy;
@@ -255,7 +245,7 @@ function renderSpec() {
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
       <div class="spec-body"><table class="spec-table"><thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
-      <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button><span class="muted">${items.filter((r) => r["Lookup Status"] === "Verified").length} of ${items.length} verified</span></div>
+      <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button></div>
     </article>`;
   }).join("");
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
@@ -337,9 +327,9 @@ function finishSpecDrop(target, after, card) {
   const targetGroup = card?.dataset.specName;
   if (targetGroup && state.data) {
     const dragged = projectRows().find((r) => r._row === from);
-    const current = dragged?.[state.specGroup] || (state.specGroup === "Section" ? "Other" : "Unassigned");
+    const current = dragged?.[SPEC_GROUP] || "Unassigned";
     if (targetGroup !== current) {
-      updates[from] = { [state.specGroup]: ["Other", "Unassigned"].includes(targetGroup) ? "" : targetGroup };
+      updates[from] = { [SPEC_GROUP]: targetGroup === "Unassigned" ? "" : targetGroup };
     }
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
@@ -513,7 +503,6 @@ function openEditor(kind, record, prefill = {}) {
       : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.";
   } else if (kind === "selection") {
     fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Location", r.Location, { choices: [...new Set(["", ...(state.data.locations || []), r.Location].filter((v) => v != null))] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
-    if (r["Lookup Status"] === "Verified") fields += field("Lookup Status", "Verified", { choices: ["Verified", "Found - verify"] });
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
@@ -526,7 +515,6 @@ function openEditor(kind, record, prefill = {}) {
   $("editor-note").hidden = !note;
   $("editor-delete").hidden = !record;
   if (record) $("editor-delete").textContent = `Delete ${kind}`;
-  $("editor-verify").hidden = !(kind === "selection" && record && isUrl(record["Product URL"]) && record["Lookup Status"] !== "Verified");
   $("editor").showModal();
 }
 
@@ -536,7 +524,7 @@ async function deleteEditorRecord() {
   const label = { selection: `selection “${record.Item}”`, project: `project “${record["Project Name"]}”`, manufacturer: `manufacturer “${record.Manufacturer}”` }[kind];
   const owned = kind === "project" ? state.data.selections.filter((r) => r["Project ID"] === record["Project ID"]).length : 0;
   const extra = owned ? ` Its ${owned} line item${owned === 1 ? "" : "s"} will be deleted too.` : "";
-  if (!confirm(`Delete ${label}? The row is removed from the workbook; a backup is kept.${extra}`)) return;
+  if (!confirm(`Delete ${label}? The row is removed from this project; a backup is kept.${extra}`)) return;
   $("editor-error").hidden = true;
   setBusy(true, "Deleting…");
   try {
@@ -547,7 +535,7 @@ async function deleteEditorRecord() {
     if (kind === "project") state.project = "";
     $("editor").close();
     await refresh();
-    toast("Deleted from the workbook. A backup was preserved.");
+    toast("Deleted. A backup was preserved.");
   } catch (error) {
     $("editor-error").textContent = error.message;
     $("editor-error").hidden = false;
@@ -573,17 +561,6 @@ async function saveEditor(event) {
   } catch (error) {
     $("editor-error").textContent = error.message;
     $("editor-error").hidden = false;
-  } finally { setBusy(false); }
-}
-
-async function verify(row) {
-  const r = projectRows().find((r) => r._row === row);
-  if (!r || !confirm(`Have you opened the product page and confirmed all of these?\n\nManufacturer: ${r.Manufacturer}\nModel: ${r["Model #"]}\nFinish: ${r["Finish / Color"] || "Not specified"}\n\nMark this selection verified?`)) return;
-  setBusy(true, "Saving verification…");
-  try {
-    await api("/api/selections", { row, values: { "Lookup Status": "Verified" }, confirm_verified: true });
-    await refresh();
-    toast("Selection verified.");
   } finally { setBusy(false); }
 }
 
@@ -670,13 +647,12 @@ $("custom-field-rows").addEventListener("click", (event) => {
 specDragEvents();
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
-$("editor-verify").addEventListener("click", () => { const { record } = state.editor || {}; if (record) { $("editor").close(); action(() => verify(record._row)); } });
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("spec-filter").addEventListener("input", renderSpec);
 // The download carries the spec sheet as it is on screen, under the same group headings.
-const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(state.specGroup)}`;
+const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(SPEC_GROUP)}`;
 const FILE_ACTIONS = {
   csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
   "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
@@ -826,7 +802,7 @@ $("sign-out")?.addEventListener("click", () => action(async () => {
 }));
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
 $("next-page").addEventListener("click", () => { state.page++; renderTable(); });
-for (const id of ["search", "section-filter", "location-filter", "status-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
+for (const id of ["search", "section-filter", "location-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
@@ -834,7 +810,6 @@ document.addEventListener("click", (event) => {
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
   if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; $("location-filter").value = ""; render(); }
-  if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
     state.specCollapsed.has(name) ? state.specCollapsed.delete(name) : state.specCollapsed.add(name);
@@ -842,7 +817,7 @@ document.addEventListener("click", (event) => {
   }
   if (button.dataset.specAdd !== undefined) {
     const name = button.dataset.specAdd;   // placeholder group names are not real values
-    const prefill = ["Other", "Unassigned"].includes(name) ? {} : { [state.specGroup]: name };
+    const prefill = name === "Unassigned" ? {} : { [SPEC_GROUP]: name };
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));

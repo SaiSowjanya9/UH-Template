@@ -90,6 +90,6 @@ def apply(wb, project_id, template):
             continue
         put(sheet, take(), {"Project ID": project_id, "Location": location,
                             "Section": infer_category(room, item), "Room / Area": room, "Item": item,
-                            "Lookup Status": "Not run", "Include in Lookbook": "Yes", "Client Status": "Proposed"})
+                            "Include in Lookbook": "Yes", "Client Status": "Proposed"})
         added += 1
     return added, skipped

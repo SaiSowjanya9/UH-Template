@@ -20,10 +20,10 @@ import common
 import spec_template
 import supabase_store
 from workbook_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
-                            PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS, STATUSES,
+                            PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS,
                             ValidationError, WorkbookStore, delete_record, ensure_selection_columns,
                             hyperlink_formula, next_row, parse_hyperlink, put, records,
-                            stale_check, validate_values, detailed_records, set_custom_fields)
+                            validate_values, detailed_records, set_custom_fields)
 
 BASE = common.BASE_DIR
 LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
@@ -214,11 +214,10 @@ def state():
     with store.lock:
         wb, revision = store.snapshot()
         rows = detailed_records(wb, "Selections")
-        rows = [{**row, "_stale": stale_check(row)} for row in rows]
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        locations=common.location_order(wb),
-                       statuses=STATUSES, client_statuses=CLIENT_STATUSES, stale_days=180,
+                       client_statuses=CLIENT_STATUSES,
                        revision=revision,
                        workbook=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
@@ -356,7 +355,7 @@ def reorder_selections():
     return jsonify(ok=True)
 
 
-def merge_selection(old, values, confirm_verified, row=None):
+def merge_selection(old, values, row=None):
     """Merge validated cell values into one selection record; shared by single and batch saves."""
     merged = {k: old.get(k, "") if old else "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}
     merged.update(values)
@@ -368,24 +367,13 @@ def merge_selection(old, values, confirm_verified, row=None):
             merged["Client Status"] = "Changed"
         elif merged["Client Status"] == "Rejected":
             merged["Client Status"] = "Proposed"
+        # The product itself changed, so a link and image found for the old one no longer describe it.
         new_url = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
-        merged.update({k: "" for k in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
+        merged.update({k: "" for k in ["Product URL", "Image URL"]})
         if merged["Product Name"] == old["Product Name"]:
             merged["Product Name"] = ""
         merged["Product URL"] = new_url
-        merged["Lookup Status"] = "Found - verify" if new_url else "Not run"
-    elif old and merged["Product URL"] != old["Product URL"]:
-        merged["Lookup Status"] = "Found - verify" if merged["Product URL"] else "Not run"
-        merged["Checked On"] = ""
-        merged["Lookup Notes"] = "Manually updated link. Review before verifying."
-    elif not old and (merged["Lookup Status"] == "Verified" or merged["Product URL"]):
-        merged["Lookup Status"] = "Found - verify"
-    merged["Lookup Status"] = merged["Lookup Status"] or "Not run"
     merged["Include in Lookbook"] = merged["Include in Lookbook"] or "Yes"
-    if merged["Lookup Status"] == "Verified" and (not old or old["Lookup Status"] != "Verified"):
-        if not confirm_verified:
-            raise ValidationError("Confirm that you checked the manufacturer, model, and finish on the product page.")
-        merged["Checked On"] = dt.date.today().isoformat()
     return merged
 
 
@@ -414,8 +402,7 @@ def save_selection():
                 old = next((r for r in records(wb, "Selections") if r["_row"] == row), None)
                 if not old:
                     raise ConflictError(f"Selection row {row} no longer exists. Refresh the page.")
-                merged = merge_selection(old, validate_values(raw, SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS),
-                                         data.get("confirm_verified"), row)
+                merged = merge_selection(old, validate_values(raw, SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS), row)
                 put(sheet, row, merged)
                 applied.append(row)
             store.save(wb, revision, f"batch edit {len(applied)} selection rows")
@@ -426,7 +413,7 @@ def save_selection():
             if not old:
                 raise ConflictError("This selection no longer exists. Refresh the page.")
         row = old["_row"] if old else next_row(sheet)
-        merged = merge_selection(old, values, data.get("confirm_verified"), row)
+        merged = merge_selection(old, values, row)
         sheet = ensure_selection_columns(wb)
         put(sheet, row, merged)
         from openpyxl.utils import get_column_letter
@@ -626,22 +613,18 @@ def import_spec_csv():
                 merged = {**{k: old.get(k, "") for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values}
                 link = merged["Product URL"] if merged["Product URL"] != old["Product URL"] else ""
                 if any(merged[key] != old[key] for key in IDENTITY_FIELDS):
-                    # the product itself changed, so its old link and verification no longer apply
-                    merged.update({key: "" for key in ["Product URL", "Image URL", "Checked On", "Lookup Notes"]})
-                    merged["Lookup Status"] = "Not run"
+                    # the product itself changed, so its old link and image no longer apply
+                    merged.update({key: "" for key in ["Product URL", "Image URL"]})
                     if merged["Client Status"] in {"Presented", "Approved"}:
                         merged["Client Status"] = "Changed"
                 if link:
-                    # a link typed into the spreadsheet still has to be reviewed before it is trusted
-                    merged.update({"Product URL": link, "Lookup Status": "Found - verify", "Checked On": "",
-                                   "Lookup Notes": "Manually updated link. Review before verifying."})
+                    merged["Product URL"] = link
                 put(sheet, old["_row"], merged)
                 updated += 1
             else:
                 row = next_row(sheet)
                 put(sheet, row, {**{k: "" for k in SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS}, **values,
                                  "Project ID": project_id,
-                                 "Lookup Status": "Found - verify" if values.get("Product URL") else "Not run",
                                  "Include in Lookbook": values.get("Include in Lookbook") or "Yes",
                                  "Client Status": values.get("Client Status") or "Proposed"})
                 added += 1

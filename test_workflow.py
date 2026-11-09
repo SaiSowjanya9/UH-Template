@@ -74,7 +74,7 @@ class AppTests(unittest.TestCase):
         row = sheet.ws.max_row + 1
         for header, value in [("Project ID", project), ("Section", "Specialty Finishes"), ("Item", "Pergola"),
                               ("Manufacturer", "Test Brand"), ("Finish / Color", "Matte Black"),
-                              ("Include in Lookbook", "Yes"), ("Lookup Status", "Not run")]:
+                              ("Include in Lookbook", "Yes")]:
             sheet.set(row, header, value)
         self.store.save(wb, revision)
 
@@ -112,7 +112,6 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         record = next(r for r in self.state()["selections"] if r["Project ID"] == "TEST-1" and r["Item"] == "Faucet")
         self.assertEqual(record["Model #"], "00123")
-        self.assertEqual(record["Lookup Status"], "Not run")
         self.assertEqual(len(list((self.path.parent / "backups").glob("*.xlsx"))), 2)
 
     def test_stale_revision_does_not_overwrite(self):
@@ -127,14 +126,40 @@ class AppTests(unittest.TestCase):
         row = self.state()["selections"][0]
         response = self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/product", "Product Name": "Previous product", "Image URL": "https://example.com/image.jpg"}})
         self.assertEqual(response.status_code, 200, response.json)
-        response = self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
-        self.assertEqual(response.status_code, 200, response.json)
         response = self.post("/api/selections", {"row": row["_row"], "values": {"Model #": "NEW-MODEL"}})
         self.assertEqual(response.status_code, 200, response.json)
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        for key in ["Product URL", "Product Name", "Image URL", "Checked On"]:
+        for key in ["Product URL", "Product Name", "Image URL"]:
             self.assertEqual(current[key], "")
-        self.assertEqual(current["Lookup Status"], "Not run")
+
+    def test_retired_lookup_fields_are_refused(self):
+        """The columns product lookup owned are gone, so a client cannot write them back."""
+        from workbook_store import RETIRED_SELECTION_FIELDS
+        row = self.state()["selections"][0]
+        for field in RETIRED_SELECTION_FIELDS:
+            response = self.post("/api/selections", {"row": row["_row"], "values": {field: "Verified"}})
+            self.assertEqual(response.status_code, 400, field)
+
+    def test_retired_lookup_columns_are_dropped_on_save(self):
+        """A workbook written before product lookup was removed loses those columns, keeping its data."""
+        from workbook_store import RETIRED_PROJECT_FIELDS, RETIRED_SELECTION_FIELDS, records
+        before = self.store.snapshot()[0]
+        self.assertTrue({c.value for c in before["Selections"][1]} & set(RETIRED_SELECTION_FIELDS),
+                        "fixture workbook no longer carries the retired columns")
+        kept = [(r["_row"], r["Item"], r["Client Notes"]) for r in records(before, "Selections")]
+        wb, revision = self.store.snapshot()
+        self.store.save(wb, revision)
+        after, _ = self.store.snapshot()
+        for sheet, retired in (("Selections", RETIRED_SELECTION_FIELDS), ("Projects", RETIRED_PROJECT_FIELDS)):
+            headers = {c.value for c in after[sheet][1]}
+            self.assertFalse(headers & set(retired), sheet)
+        self.assertEqual([(r["_row"], r["Item"], r["Client Notes"]) for r in records(after, "Selections")], kept)
+        self.assertIsNone(after["Lists"]["B1"].value)
+        # The dropdowns that outlived lookup are rebuilt against the shifted columns.
+        sheet = common.Sheet(after["Selections"])
+        for dv in after["Selections"].data_validations.dataValidation:
+            column = {r.min_col for r in dv.sqref.ranges}
+            self.assertTrue(column <= set(sheet.cols.values()), dv.formula1)
 
     def test_product_link_column_mirrors_the_saved_url(self):
         """Excel shows the words 'Product Link', hyperlinked, instead of a raw address."""
@@ -152,11 +177,6 @@ class AppTests(unittest.TestCase):
         self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": ""}})
         self.assertIsNone(link_cell().value)
         self.assertIsNone(link_cell().hyperlink)
-
-    def test_verification_requires_link_and_confirmation(self):
-        row = self.state()["selections"][0]["_row"]
-        self.assertEqual(self.post("/api/selections", {"row": row, "values": {"Lookup Status": "Verified"}}).status_code, 400)
-        self.assertEqual(self.post("/api/selections", {"row": row, "values": {"Lookup Status": "Verified"}, "confirm_verified": True}).status_code, 400)
 
     def test_formula_like_input_is_written_as_literal_text(self):
         row = self.state()["selections"][0]["_row"]
@@ -240,12 +260,14 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(lists), len(LIST_VALIDATIONS))   # one dropdown per column, no duplicates
 
     def test_excel_dropdowns_offer_every_status(self):
-        from workbook_store import CLIENT_STATUSES, STATUSES
+        from workbook_store import CLIENT_STATUSES
         wb, revision = self.store.snapshot()
         wb["Lists"]["B7"] = "Stale value"
         self.store.save(wb, revision)
         lists = self.store.snapshot()[0]["Lists"]
-        self.assertEqual([lists.cell(row, 2).value for row in range(2, 2 + len(STATUSES))], STATUSES)
+        # Column B held the retired Lookup Status list: emptied, never reused, so the
+        # Yes / No, Client Status and Locations ranges still name columns C, D and E.
+        self.assertEqual([lists.cell(row, 2).value for row in range(1, 9)], [None] * 8)
         self.assertEqual([lists.cell(row, 4).value for row in range(2, 2 + len(CLIENT_STATUSES))], CLIENT_STATUSES)
         self.assertEqual(lists.cell(1, 4).value, "Client Status")
 
@@ -261,7 +283,6 @@ class AppTests(unittest.TestCase):
         headers = {c.value: c.column for c in ws[1] if c.value}
         self.assertEqual(ws.cell(row, headers["Total Items"]).value,
                          f'=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))')
-        self.assertEqual(ws.cell(row, headers["Needs Review"]).value, f'=IF(A{row}="","",H{row}-J{row})')
 
     def test_delete_endpoints_and_guards(self):
         row = self.state()["selections"][0]
@@ -295,21 +316,6 @@ class AppTests(unittest.TestCase):
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         self.assertEqual(current["Client Status"], "Changed")
         self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": {"Client Status": "Bogus"}}).status_code, 400)
-
-    def test_stale_verified_links_are_flagged(self):
-        from workbook_store import put
-        row = self.state()["selections"][0]
-        wb, revision = self.store.snapshot()
-        put(common.Sheet(wb["Selections"]), row["_row"],
-            {"Product URL": "https://example.com/p", "Lookup Status": "Verified", "Checked On": "2020-01-01"})
-        self.store.save(wb, revision)
-        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertTrue(current["_stale"])
-        wb, revision = self.store.snapshot()
-        put(common.Sheet(wb["Selections"]), row["_row"], {"Checked On": "2099-01-01"})
-        self.store.save(wb, revision)
-        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertFalse(current["_stale"])
 
     def test_price_schedule_groups_every_selection_and_totals(self):
         from price_schedule import SHEET
@@ -357,8 +363,7 @@ class AppTests(unittest.TestCase):
             self.assertTrue(any(r["Location"] == location and r["Room / Area"] == room and r["Item"] == item for r in rows),
                             f"{location} / {room} / {item} missing")
         seeded = next(r for r in rows if r["Room / Area"] == "Master Bathroom")
-        self.assertEqual((seeded["Lookup Status"], seeded["Include in Lookbook"], seeded["Client Status"]),
-                         ("Not run", "Yes", "Proposed"))
+        self.assertEqual((seeded["Include in Lookbook"], seeded["Client Status"]), ("Yes", "Proposed"))
         # editing the project later must not seed it again
         edit = self.post("/api/projects", {"values": {"Project ID": "TEST-T", "Client Name": "Someone"}})
         self.assertEqual(edit.json["seeded"], 0)
@@ -386,7 +391,6 @@ class AppTests(unittest.TestCase):
         project = self.state()["projects"][0]["Project ID"]
         row = next(r for r in self.state()["selections"] if r["Project ID"] == project)
         self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/p"}})
-        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
         _, lines = self.exported_spec_csv(project)
         target = next(index for index, line in enumerate(lines)
                       if (line["Location"], line["Room / Area"], line["Item"]) == (row["Location"], row["Room / Area"], row["Item"]))
@@ -400,26 +404,24 @@ class AppTests(unittest.TestCase):
         flattened = [dict(line) for line in lines]
         flattened[target]["Product Link"] = "Product Link"
         self.assertEqual(self.send_spec_csv(project, flattened).status_code, 200)
-        self.assertEqual((current()["Product URL"], current()["Lookup Status"]), ("https://example.com/p", "Verified"))
+        self.assertEqual(current()["Product URL"], "https://example.com/p")
 
-        # a link typed into the spreadsheet is imported, but still has to be reviewed
+        # a link typed into the spreadsheet is imported
         typed = [dict(line) for line in lines]
         typed[target]["Product Link"] = "https://example.com/replacement"
         self.assertEqual(self.send_spec_csv(project, typed).status_code, 200)
-        self.assertEqual((current()["Product URL"], current()["Lookup Status"]),
-                         ("https://example.com/replacement", "Found - verify"))
+        self.assertEqual(current()["Product URL"], "https://example.com/replacement")
 
     def test_spec_csv_round_trip_updates_without_losing_data(self):
         project = self.state()["projects"][0]["Project ID"]
         row = next(r for r in self.state()["selections"] if r["Project ID"] == project)
         self.post("/api/selections", {"row": row["_row"], "values": {"Product URL": "https://example.com/p"}})
-        self.post("/api/selections", {"row": row["_row"], "values": {"Lookup Status": "Verified"}, "confirm_verified": True})
 
         export, lines = self.exported_spec_csv(project)
         self.assertIn("attachment", export.headers["Content-Disposition"])
         self.assertEqual(len(lines), len([r for r in self.state()["selections"] if r["Project ID"] == project]))
 
-        # re-importing the untouched export changes nothing and keeps the verified link
+        # re-importing the untouched export changes nothing and keeps the link
         def send(rows):
             return self.send_spec_csv(project, rows)
 
@@ -427,10 +429,9 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual((response.json["added"], response.json["updated"]), (0, len(lines)))
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertEqual(current["Lookup Status"], "Verified")
         self.assertEqual(current["Product URL"], "https://example.com/p")
 
-        # the exported file is sorted by category, so find the verified line by its identity
+        # the exported file is sorted by category, so find the linked line by its identity
         def index_of(record):
             return next(i for i, line in enumerate(lines)
                         if (line["Location"], line["Room / Area"], line["Item"]) == (record["Location"], record["Room / Area"], record["Item"]))
@@ -446,13 +447,13 @@ class AppTests(unittest.TestCase):
         self.assertTrue(any(r["Item"] == "Imported shelving" and r["Qty"] == "2" for r in state["selections"]))
         self.assertEqual(next(r for r in state["selections"] if r["_row"] == row["_row"])["Unit Price"], "99.5")
 
-        # changing the product identity clears its stale link and verification
+        # changing the product identity clears the link that described the old one
         changed = [dict(line) for line in lines]
         changed[target]["Model #"] = "DIFFERENT-MODEL"
         response = send(changed)
         self.assertEqual(response.status_code, 200, response.json)
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
-        self.assertEqual((current["Lookup Status"], current["Product URL"]), ("Not run", ""))
+        self.assertEqual(current["Product URL"], "")
 
         # malformed input is refused outright
         bad = self.client.post("/api/selections/csv", data={
@@ -772,7 +773,7 @@ class ScheduleTests(unittest.TestCase):
         if not template.exists():
             self.skipTest("Reference template PDF is not available.")
         rows = [{**{key: "" for key in SELECTION_FIELDS}, "Section": section, "Location": section,
-                 "Item": item, "Client Notes": note, "Lookup Status": "Verified"} for section, item, note in TEMPLATE_ROWS]
+                 "Item": item, "Client Notes": note} for section, item, note in TEMPLATE_ROWS]
         with tempfile.TemporaryDirectory() as folder:
             pdf = build_lookbook.build("UH-000", {"Project Name": ""}, rows, False, Path(folder),
                                        title="Exterior Selections", prefix="EX")
@@ -781,7 +782,7 @@ class ScheduleTests(unittest.TestCase):
     def rows(self, count=1, **values):
         from workbook_store import SELECTION_FIELDS
         return [{**{key: "" for key in SELECTION_FIELDS}, "Section": "Roofing", "Item": f"Item {index}",
-                 "Lookup Status": "Verified", **values} for index in range(1, count + 1)]
+                 **values} for index in range(1, count + 1)]
 
     def text(self, path):
         from pypdf import PdfReader

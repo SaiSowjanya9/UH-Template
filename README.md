@@ -20,9 +20,9 @@ If another service occupies port 5000, run `.venv\Scripts\python.exe app.py --po
 4. Group the sheet **by location**, **by room** or **by category**, then use **Import / Export** to download the spec sheet as a **PDF**, a **Word** document or a **CSV**. Each one carries the same columns, the same group headings and every line item shown on screen.
 5. Bring a priced-up **CSV** back in from the same dialog: matching line items are updated, new ones are added, and nothing is removed.
 
-Close Excel before saving through the app. Every workbook write creates a backup in `backups/` and checks for conflicting changes. Edits you save directly in Excel appear in the app, and changing a product's item name, manufacturer, model or finish clears that row's old link and verification, because they no longer describe the product.
+Close Excel before saving through the app. Every workbook write creates a backup in `backups/` and checks for conflicting changes. Edits you save directly in Excel appear in the app, and changing a product's item name, manufacturer, model or finish clears that row's old link and image, because they no longer describe the product.
 
-Product links are typed or pasted by you — there is no automated search. **Lookup Status** is your own record of whether a link has been checked: set it to **Verified** once you have opened the page and confirmed the exact manufacturer, model and finish. Verified links older than six months are flagged **Re-check**.
+Product links are typed or pasted by you — there is no automated search and no link-verification status. A row either has a **Product URL** or it does not.
 
 The supplied projects and contact details are examples. Replace the branding/contact placeholders in `lookbook_config.json` and restart the app before preparing client deliverables.
 
@@ -113,11 +113,10 @@ fillable and PowerPoint builders are command-line only — the app itself downlo
 |---|---|---|
 | 1 | Add the project on **Projects**, then its items on **Selections** | — |
 | 2 | Paste each product page address into **Product URL** | — |
-| 3 | Review each link, then set correct rows to **Verified** | — |
-| 4 | Generate the internal spec sheet (PDF, or `build_word.py --spec` for Word) | `python build_lookbook.py --project UH-101 --spec` |
-| 5 | Generate the client finish schedule | `python build_lookbook.py --project UH-101` |
-| 6 | Or the editable Word version | `python build_word.py --project UH-101` |
-| 7 | Or the editable PowerPoint version | `python build_powerpoint.py --project UH-101` |
+| 3 | Generate the internal spec sheet (PDF, or `build_word.py --spec` for Word) | `python build_lookbook.py --project UH-101 --spec` |
+| 4 | Generate the client finish schedule | `python build_lookbook.py --project UH-101` |
+| 5 | Or the editable Word version | `python build_word.py --project UH-101` |
+| 6 | Or the editable PowerPoint version | `python build_powerpoint.py --project UH-101` |
 
 ## Setup (once)
 
@@ -129,7 +128,7 @@ Close the workbook in Excel before running any script that writes to it.
 
 ## The workbook
 
-- **Projects** – one row per project. Total / Links Found / Verified / Needs Review are formulas.
+- **Projects** – one row per project. Total Items is a formula.
   *Cover Image* (optional) = a rendering or photo for the cover (web link or local path).
 - **Selections** – one row per item. Yellow columns are typed; grey columns hold the product-link details.
   *Include in Lookbook = No* hides a row from the schedule without deleting it.
@@ -143,23 +142,11 @@ Close the workbook in Excel before running any script that writes to it.
 
 The example rows are placeholders – replace them with real projects.
 
-## Lookup Status
+## Product links
 
-**Lookup Status** records how far a product link has been checked. You set it yourself; nothing
-in the app changes it behind your back, and editing a row's item name, manufacturer, model or
-finish clears it back to *Not run* because the old link no longer describes the product.
-
-| Status | Meaning |
-|---|---|
-| Not run | No link yet, or the product changed and needs a fresh one |
-| Found - verify | A link is saved but has not been confirmed against the page |
-| Multiple matches | Several candidate pages – note the alternatives in Lookup Notes |
-| Found - retailer | Only a retailer page, not the manufacturer's own |
-| Not found | No product page could be found |
-| Search error | Left over from an earlier automated lookup; treat it as *Not run* |
-| Verified | You opened the page and confirmed manufacturer, model and finish |
-
-Verified links older than six months are flagged **Re-check** in the app.
+A row either carries a **Product URL** or it does not; there is no verification status to keep
+up to date. Editing a row's item name, manufacturer, model or finish clears the link and the
+image, because they described the previous product.
 
 Product images are review aids for your team and are never printed, so a missing image never
 blocks a deliverable. The product page itself is printed, as a clickable “Product Link”.
@@ -177,7 +164,7 @@ treat the spec sheet as an internal document.
 - **Spec sheet · CSV** – the line items for Excel or Sheets, with *Product Link* as a
   `=HYPERLINK(...)` formula. Price it up, save it as UTF-8 CSV and bring it back in: rows are
   matched on location, room and item, matches are updated, new lines are added and nothing is
-  removed. A link you type into the spreadsheet imports as *Found - verify*, never as verified.
+  removed.
 
 From the command line, `--spec` writes the same sheet (`build_lookbook.py --spec`,
 `build_word.py --spec`) and `--hide "Qty,Unit Price"` leaves columns out.
@@ -198,10 +185,9 @@ script. One letter-portrait page per ~20 selections, in the approved layout:
 - **Additional details** rows for project and selection custom fields.
 - The client note and the signature block, then a footer with your contact line and page number.
 
-Options: `--project UH-101` or `--all`; `--verified-only` leaves out unverified rows;
-`--draft` adds the DRAFT mark and a status column for internal review;
+Options: `--project UH-101` or `--all`; `--draft` adds the DRAFT mark for internal review;
 `--title "Interior Selections"` and `--prefix IN` override the schedule title and item codes.
-The script warns you if any included row isn't Verified yet. `build_powerpoint.py` takes the
+`build_powerpoint.py` takes the
 same options and writes the editable `.pptx` version of the same page, and `build_word.py`
 writes the `.docx` version (add `--fillable` for the working copy, `--spec` for the internal
 spec sheet, `--hide "code,Qty"` to leave columns out).

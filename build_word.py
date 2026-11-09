@@ -620,10 +620,9 @@ def read(path_or_stream):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", required=True, help="Project ID, e.g. UH-101")
-    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked, unverified rows allowed)")
+    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--fillable", action="store_true", help="Working copy with content controls")
     parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet")
-    parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
     parser.add_argument("--hide", default="",
@@ -633,7 +632,7 @@ def main():
         hidden = hidden_columns(args.hide)
     except ValueError as error:
         parser.error(str(error))
-    projects, items = load_data(args.verified_only)
+    projects, items = load_data()
     if args.project not in projects or not items.get(args.project):
         parser.error("Project not found or no selections match the export options.")
     project, rows = projects[args.project], items[args.project]
@@ -642,8 +641,6 @@ def main():
     elif args.fillable:
         print(build_fillable(args.project, project, rows, title=args.title, prefix=args.prefix, hidden=hidden))
     else:
-        if not args.draft and any(row["Lookup Status"] != "Verified" for row in rows):
-            parser.error("Review all selections first, or use --draft or --verified-only.")
         print(build(args.project, project, rows, args.draft, title=args.title, prefix=args.prefix,
                     hidden=hidden))
 

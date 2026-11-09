@@ -20,15 +20,18 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from common import Sheet, clean
 
 PROJECT_FIELDS = ["Project ID", "Project Name", "Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"]
-SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color", "Qty", "Product URL", "Product Name", "Image URL", "Lookup Status", "Checked On", "Lookup Notes", "Client Notes", "Include in Lookbook"]
-STATUSES = ["Not run", "Found - verify", "Found - retailer", "Multiple matches", "Not found", "Search error", "Verified"]
+SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color", "Qty", "Product URL", "Product Name", "Image URL", "Client Notes", "Include in Lookbook"]
 IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
 BACKUP_KEEP = 30
-STALE_DAYS = 180
+# Columns the product-lookup feature owned. They are no longer read or written, and
+# drop_retired_columns removes them from any workbook written before the feature went.
+RETIRED_SELECTION_FIELDS = ["Lookup Status", "Checked On", "Lookup Notes"]
+RETIRED_PROJECT_FIELDS = ["Links Found", "Verified", "Needs Review"]
+RETIRED_LIST_COLUMN = "B"       # the Lists column that fed the Lookup Status dropdown
 # Saved copies are named <workbook stem>_<date>_<time>_<microseconds>.xlsx
 BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
-# Client-approval lifecycle: separate from Lookup Status, which only tracks link verification.
+# Client-approval lifecycle: the one status a selection carries.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
 OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location"]
 # Where in the home a selection belongs - the schedule's grouping. Kept out of Section so
@@ -53,12 +56,9 @@ NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,
                   "Markup %": (1_000, "Markup % must be a number between 0 and 1,000.")}
 PRICE_SHEET = "Price Schedule"
 
-# Computed Projects columns (H/I/J/K in the template); backfilled for Excel-added rows.
+# Computed Projects column (H in the template); backfilled for Excel-added rows.
 PROJECT_FORMULAS = {
     "Total Items": '=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))',
-    "Links Found": '=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$I:$I,"?*"))',
-    "Verified": '=IF(A{row}="","",COUNTIFS(Selections!$A:$A,A{row},Selections!$L:$L,"Verified"))',
-    "Needs Review": '=IF(A{row}="","",H{row}-J{row})',
 }
 
 # Selections dropdowns Excel silently drops when it re-saves the workbook.
@@ -66,14 +66,14 @@ LIST_VALIDATIONS = {
     "Project ID": "Projects!$A$2:$A$51",
     "Section": "Lists!$A$2:$A$31",
     "Location": "Lists!$E$2:$E$31",
-    "Lookup Status": "Lists!$B$2:$B$8",
     "Include in Lookbook": "Lists!$C$2:$C$3",
     "Client Status": "Lists!$D$2:$D$6",
 }
 
 # Lists columns the app owns, so the Excel dropdowns always offer every valid value.
-MANAGED_LISTS = {"B": ("Lookup Status", STATUSES), "C": ("Yes / No", ["Yes", "No"]),
-                 "D": ("Client Status", CLIENT_STATUSES)}
+# Column B is deliberately absent: it held the retired Lookup Status list and is cleared,
+# not reused, so the C/D/E ranges the validations name keep pointing at the same columns.
+MANAGED_LISTS = {"C": ("Yes / No", ["Yes", "No"]), "D": ("Client Status", CLIENT_STATUSES)}
 
 
 class ValidationError(ValueError):
@@ -157,8 +157,11 @@ def put(sheet, row, data):
 def records(wb, name):
     # Generated columns are left out: they only restate a value the record already carries,
     # so reading one back would make a workbook saved before they existed look different.
+    # Retired columns are left out for the mirror-image reason: a workbook written before
+    # product lookup was removed must read back exactly like one written after it.
+    hidden = set(GENERATED_SELECTION_FIELDS) | set(RETIRED_SELECTION_FIELDS)
     return [{**{k: v.isoformat() if isinstance(v, (dt.datetime, dt.date)) else clean(v)
-                for k, v in data.items() if k not in GENERATED_SELECTION_FIELDS}, "_row": row}
+                for k, v in data.items() if k not in hidden}, "_row": row}
             for row, data in Sheet(wb[name]).rows()]
 
 
@@ -198,7 +201,7 @@ def read_custom_fields(value, reserved=()):
 
 
 def detailed_records(wb, name):
-    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS + GENERATED_SELECTION_FIELDS
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS + GENERATED_SELECTION_FIELDS + RETIRED_SELECTION_FIELDS
     return [{**row, "custom_fields": read_custom_fields(row.get("Custom Fields"), reserved)} for row in records(wb, name)]
 
 
@@ -217,7 +220,7 @@ def presentation_details(project, rows):
 
 
 def set_custom_fields(wb, name, row, fields):
-    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + GENERATED_SELECTION_FIELDS
+    reserved = PROJECT_FIELDS if name == "Projects" else SELECTION_FIELDS + GENERATED_SELECTION_FIELDS + RETIRED_SELECTION_FIELDS
     fields = validate_custom_fields(fields, reserved)
     sheet = Sheet(wb[name])
     if not fields and "Custom Fields" not in sheet.cols:
@@ -286,12 +289,8 @@ def validate_workbook(wb):
         if row["Project ID"] not in ids:
             raise ValidationError(f"Selections row {row['_row']} references an unknown Project ID.")
         validate_values({key: row[key] for key in SELECTION_FIELDS}, SELECTION_FIELDS)
-        if row["Lookup Status"] and row["Lookup Status"] not in STATUSES:
-            raise ValidationError(f"Unknown lookup status in row {row['_row']}.")
         if clean(row.get("Client Status")) and row["Client Status"] not in CLIENT_STATUSES:
             raise ValidationError(f"Unknown client status in row {row['_row']}.")
-        if row["Lookup Status"] == "Verified" and not http_url(row["Product URL"]):
-            raise ValidationError(f"Verified row {row['_row']} needs a product URL.")
         if row["Include in Lookbook"].lower() not in {"", "yes", "no"}:
             raise ValidationError(f"Include in Lookbook must be Yes or No in row {row['_row']}.")
 
@@ -311,17 +310,34 @@ def workbook_open_elsewhere(path):
         return False
 
 
-def stale_check(row, today=None):
-    """A Verified link stops being trustworthy once the product page may have moved on."""
-    if clean(row.get("Lookup Status")) != "Verified":
-        return False
-    checked = clean(row.get("Checked On"))
-    if not checked:
-        return True
-    try:
-        return (today or dt.date.today()) - dt.date.fromisoformat(checked[:10]) > dt.timedelta(days=STALE_DAYS)
-    except ValueError:
-        return False
+def drop_retired_columns(wb):
+    """Delete the product-lookup columns from a workbook written before the feature went.
+
+    Deleting shifts every column to its right, which openpyxl does not follow through to
+    data validations or hyperlinks, so both are cleared here for the affected sheet:
+    ensure_validations rebuilds the dropdowns from the headers that remain, and
+    ensure_product_links rewrites the one generated link column, both later in the save.
+    Lists column B is emptied rather than deleted, because the other dropdown ranges name
+    columns C, D and E by letter and deleting B would silently slide them one left.
+    """
+    for name, retired in (("Selections", RETIRED_SELECTION_FIELDS), ("Projects", RETIRED_PROJECT_FIELDS)):
+        ws = wb[name]
+        columns = sorted((c.column for c in ws[1] if clean(c.value) in retired), reverse=True)
+        if not columns:
+            continue
+        for column in columns:
+            ws.delete_cols(column)
+        if name == "Selections":
+            ws.data_validations.dataValidation = [dv for dv in ws.data_validations.dataValidation
+                                                  if dv.type != "list"]
+        surviving = {cell.coordinate for row in ws.iter_rows() for cell in row}
+        for ref in [ref for ref in list(getattr(ws, "_hyperlinks", [])) if ref.ref not in surviving]:
+            ws._hyperlinks.remove(ref)
+        ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    lists = wb["Lists"]
+    column = lists[f"{RETIRED_LIST_COLUMN}1"].column
+    for row in range(1, lists.max_row + 1):
+        lists.cell(row, column).value = None
 
 
 def ensure_selection_columns(wb):
@@ -351,9 +367,9 @@ def ensure_selection_columns(wb):
 def ensure_product_links(wb):
     """Rewrite the generated 'Product Link' column from each row's Product URL.
 
-    Product URL stays the column anything writes to - the app, the CSV import, automatic
-    lookup - and this one is only its readable face, so it is rebuilt from scratch on every
-    save and anything typed into it by hand is discarded.
+    Product URL stays the column anything writes to - the app and the CSV import - and this
+    one is only its readable face, so it is rebuilt from scratch on every save and anything
+    typed into it by hand is discarded.
     """
     ws = wb["Selections"]
     sheet = Sheet(ws)
@@ -717,6 +733,7 @@ class WorkbookStore:
             if self.backend.locked_elsewhere():
                 raise PermissionError("The workbook is open in another program.")
             self.backend.backup()
+            drop_retired_columns(wb)
             ensure_selection_columns(wb)
             ensure_locations(wb)
             ensure_product_links(wb)

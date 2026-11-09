@@ -15,16 +15,16 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 from common import WORKBOOK, Sheet, clean
-from workbook_store import (CLIENT_STATUSES, SELECTION_FIELDS, STATUSES, WorkbookStore,
-                            ensure_list_values, ensure_locations, ensure_selection_columns,
-                            ensure_validations)
+from workbook_store import (CLIENT_STATUSES, SELECTION_FIELDS, WorkbookStore,
+                            drop_retired_columns, ensure_list_values, ensure_locations,
+                            ensure_selection_columns, ensure_validations)
 
-# Columns the user fills in by hand versus those the lookup maintains.
+# Columns the user fills in by hand versus those the app maintains.
 ENTRY_COLUMNS = ["Project ID", "Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #",
                  "Finish / Color", "Qty", "Unit Price", "Markup %", "Client Notes",
                  "Include in Lookbook", "Client Status"]
-WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Lookup Notes": 34, "Client Notes": 28,
-                         "Include in Lookbook": 17, "Client Status": 15, "Checked On": 12, "Unit Price": 12,
+WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Client Notes": 28,
+                         "Include in Lookbook": 17, "Client Status": 15, "Unit Price": 12,
                          "Markup %": 11, "Description Override": 40, "Location": 14},
           "Projects": {"Cover Image": 30, "Presentation Date": 18}}
 
@@ -38,9 +38,8 @@ INSTRUCTIONS = [
     ("1. Projects sheet - one row per project, with a unique Project ID such as UH-101.", ""),
     ("2. Selections sheet - one row per product. Fill the entry columns listed below.", ""),
     ("3. Product links - paste each product page address into Product URL.", ""),
-    ("4. Review each link against the real product page, then set Lookup Status to Verified.", ""),
-    ("5. Client Status records the client's decision: Proposed, Presented, Approved, Rejected, Changed.", ""),
-    ("6. Export the finish schedule from the web app, or run "
+    ("4. Client Status records the client's decision: Proposed, Presented, Approved, Rejected, Changed.", ""),
+    ("5. Export the finish schedule from the web app, or run "
      "python build_lookbook.py --project UH-101 (PDF) or build_powerpoint.py (editable deck).", ""),
     ("", ""),
     ("Columns you fill in (Selections)", "heading"),
@@ -71,14 +70,12 @@ INSTRUCTIONS = [
     ("Prices stay internal: they never appear on the client PDF or PowerPoint.", ""),
     ("", ""),
     ("Columns filled in for you", "heading"),
-    ("Product URL, Product Name, Image URL, Lookup Status, Checked On, Lookup Notes are written by the "
-     "product lookup. You may correct any of them by hand.", ""),
-    ("On the Projects sheet, Total Items, Links Found, Verified and Needs Review are formulas.", ""),
+    ("Product Link restates Product URL as a clickable link, and is rebuilt on every save.", ""),
+    ("On the Projects sheet, Total Items is a formula.", ""),
     ("", ""),
     ("Rules worth knowing", "heading"),
     ("- Changing Item, Product Name, Manufacturer, Model # or Finish clears the old link and "
-     "verification, because they no longer describe the same product.", ""),
-    ("- A Verified link older than six months is flagged for re-checking in the web app.", ""),
+     "image, because they no longer describe the same product.", ""),
     ("- Close this workbook in Excel before saving from the web app; the app will not write "
      "to a file Excel has open.", ""),
     ("- Every save keeps a timestamped copy in the backups folder.", ""),
@@ -109,6 +106,8 @@ def main():
     wb, revision = store.snapshot()
     changes = []
 
+    drop_retired_columns(wb)
+    changes.append("Selections/Projects: the retired product-lookup columns are gone")
     sheet = ensure_selection_columns(wb)
     missing = [field for field in SELECTION_FIELDS if field not in sheet.cols]
     if missing:
@@ -116,8 +115,8 @@ def main():
     ensure_list_values(wb)
     ensure_locations(wb)
     ensure_validations(wb)
-    changes.append(f"Lists: Lookup Status offers all {len(STATUSES)} values, Client Status offers {len(CLIENT_STATUSES)}")
-    changes.append("Selections: dropdowns present for Project ID, Section, Location, Lookup Status, Include in Lookbook, Client Status")
+    changes.append(f"Lists: Client Status offers all {len(CLIENT_STATUSES)} values")
+    changes.append("Selections: dropdowns present for Project ID, Section, Location, Include in Lookbook, Client Status")
 
     write_instructions(wb["Instructions"])
     changes.append("Instructions: rewritten to cover the web app, every column, and the current rules")

@@ -266,10 +266,7 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Product URL", exact=True).fill("https://example.com/product")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        # verification moved into the row editor when the review grid was removed
-                        page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
-                        page.locator("#editor-verify").click()
-                        expect(page.locator("#selection-rows")).to_contain_text("Verified")
+                        expect(page.locator("#selection-rows")).to_contain_text("Product Link")
                         # the spec sheet is the deliverable now, downloaded from the files dialog
                         page.locator("#files-button").click()
                         with page.expect_download(timeout=30000) as download_info:
@@ -289,8 +286,8 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Model #", exact=True).fill("NEW-00123")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
+                        # changing the model clears the link that described the old product
                         expect(page.locator("#selection-rows")).to_contain_text("Not linked")
-                        expect(page.locator("#selection-rows")).to_contain_text("Not run")
                         page.locator('[data-project="UH-101"]').click()
                         expect(page.locator("#selection-rows")).not_to_contain_text("Test Kitchen Faucet")
                         page.locator("#search").fill("7594ESRS")

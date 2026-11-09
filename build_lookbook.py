@@ -4,8 +4,7 @@ Build the client finish schedule PDF from the tracker workbook.
 Usage:
     python build_lookbook.py --project UH-101                              # one project
     python build_lookbook.py --all                                         # every project
-    python build_lookbook.py --all --verified-only                         # only rows marked 'Verified'
-    python build_lookbook.py --project UH-101 --draft                      # internal copy (watermark + status)
+    python build_lookbook.py --project UH-101 --draft                      # internal copy (watermarked)
     python build_lookbook.py --project UH-101 --title "Interior Selections" --prefix IN
     python build_lookbook.py --project UH-101 --spec                       # internal priced spec sheet
     python build_lookbook.py --project UH-101 --hide "Manufacturer,Qty"      # leave columns out
@@ -123,7 +122,7 @@ def fmt_date(value):
         return text
 
 
-def load_data(verified_only):
+def load_data():
     wb = open_workbook(data_only=True)
     order = location_order(wb)
     projects = OrderedDict()
@@ -138,11 +137,8 @@ def load_data(verified_only):
             continue
         if not (clean(data.get("Item")) or clean(data.get("Manufacturer"))):
             continue
-        status = clean(data.get("Lookup Status")) or "Not run"
-        if verified_only and status != "Verified":
-            continue
         record = {k: clean(v) for k, v in data.items()}
-        record.update({"Lookup Status": status, "_row": row})
+        record["_row"] = row
         items.setdefault(pid, []).append(record)
 
     def sort_key(record):
@@ -759,8 +755,7 @@ def main():
     group.add_argument("--project", help="Project ID, e.g. UH-101")
     group.add_argument("--all", action="store_true", help="Every project on the Projects sheet")
     parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet, landscape")
-    parser.add_argument("--verified-only", action="store_true", help="Only include rows marked Verified")
-    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked, unverified rows allowed)")
+    parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
     parser.add_argument("--hide", default="",
@@ -771,7 +766,7 @@ def main():
         hidden = hidden_columns(args.hide)
     except ValueError as error:
         parser.error(str(error))
-    projects, items = load_data(args.verified_only)
+    projects, items = load_data()
     if args.spec:
         wb = open_workbook(data_only=True)
         for pid in (list(projects) if args.all else [args.project]):
@@ -791,11 +786,6 @@ def main():
         out = build(pid, projects[pid], rows, args.draft, title=args.title, prefix=args.prefix, hidden=hidden,
                     cover=resolve_cover(projects[pid].get("Cover Image")))
         print(f"+ {pid}: {len(rows)} selections -> {out.relative_to(BASE_DIR)}")
-        pending = [row for row in rows if row["Lookup Status"] != "Verified"]
-        if pending and not args.draft:
-            print(f"  ! {len(pending)} row(s) not marked Verified (sheet rows "
-                  f"{', '.join(str(row['_row']) for row in pending[:12])}{'...' if len(pending) > 12 else ''}). "
-                  "Review before sending, or use --verified-only.")
 
 
 if __name__ == "__main__":
