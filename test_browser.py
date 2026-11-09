@@ -305,6 +305,72 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_other_hands_a_dropdown_over_to_a_typed_value(self):
+        """Section and Location are lists that cannot name every home: choosing "Other" gives
+        way to an empty box, what is typed there is saved on the line item, and a value the
+        list does not hold comes back in that box. An empty box keeps the stored value."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "other.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.get_by_role("button", name="Add selection", exact=False).click()
+                        editor = page.locator("#editor")
+                        section, location = 'input[name="Section"]', 'input[name="Location"]'
+                        editor.locator('input[name="Item"]').fill("Media Rack")
+                        expect(editor.locator(section)).to_be_hidden()
+                        editor.locator('select[name="Section"]').select_option("Other")
+                        expect(editor.locator(section)).to_be_visible()
+                        expect(editor.locator(section)).to_have_value("")
+                        expect(editor.locator('select[name="Section"]')).to_be_hidden()
+                        editor.locator(section).fill("Audio / Visual")
+                        editor.locator('select[name="Location"]').select_option("Other")
+                        editor.locator(location).fill("Media Room")
+                        output = app.BASE / "output"
+                        output.mkdir(exist_ok=True)
+                        page.screenshot(path=str(output / "other-typed-value.png"))
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        page.locator("#search").fill("Media Rack")
+                        expect(page.locator("#selection-rows tr")).to_have_count(1)
+                        expect(page.locator("#selection-rows")).to_contain_text("Audio / Visual")
+                        expect(page.locator("#selection-rows")).to_contain_text("Media Room")
+                        # the typed values come back for editing, not as a dropdown that lost them
+                        page.get_by_role("button", name="Edit Media Rack").click()
+                        expect(editor.locator(section)).to_have_value("Audio / Visual")
+                        expect(editor.locator(location)).to_have_value("Media Room")
+                        editor.locator(section).fill("")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator("#selection-rows")).to_contain_text("Audio / Visual")
+                        # and the list is one click away again
+                        page.get_by_role("button", name="Edit Media Rack").click()
+                        editor.get_by_role("button", name="Choose from the list").first.click()
+                        expect(editor.locator('select[name="Section"]')).to_be_visible()
+                        expect(editor.locator(section)).to_be_hidden()
+                        page.locator("#editor").get_by_role("button", name="Cancel").click()
+                        expect(editor).not_to_be_visible()
+                        # a custom value joins the filters, so the row stays reachable
+                        page.locator("#search").fill("")
+                        page.locator("#section-filter").select_option("Audio / Visual")
+                        expect(page.locator("#selection-rows tr")).to_have_count(1)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

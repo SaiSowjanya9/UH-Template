@@ -473,10 +473,46 @@ function field(name, value = "", options = {}) {
   const readonly = options.readonly ? " readonly" : "";
   const attrs = `name="${esc(name)}"${required}${readonly}`;
   let control;
-  if (options.choices) control = `<select ${attrs}>${options.choices.map((choice) => `<option value="${esc(choice)}" ${choice === value ? "selected" : ""}>${esc(choice)}</option>`).join("")}</select>`;
+  if (options.choices) control = options.custom ? choiceControl(value, options, attrs) : menu(value, options.choices, attrs);
   else if (options.textarea) control = `<textarea ${attrs} aria-label="${esc(name)}" maxlength="4000">${esc(value)}</textarea>`;
   else control = `<input ${attrs} type="${options.type || "text"}" value="${esc(value)}" maxlength="${options.max || 4000}" ${options.type === "number" ? 'min="0" max="1000000" step="any"' : ""}>`;
   return `<label class="field ${options.wide ? "wide" : ""}">${esc(name)}${options.required ? " *" : ""}${control}</label>`;
+}
+
+const menu = (value, choices, attrs, off = false) => `<select ${attrs}${off ? " hidden disabled" : ""}>${choices.map((choice) => `<option value="${esc(choice)}" ${choice === value ? "selected" : ""}>${esc(choice)}</option>`).join("")}</select>`;
+
+// Section and Location come from lists that cannot name every home, so each dropdown ends in
+// "Other". "Other" is not a value in itself - it means "not on this list" - so choosing it hands
+// over an empty box, and what is typed there is saved on the line item. A stored value the list
+// does not hold reopens in that box, ready to edit; the inactive control is disabled so only the
+// one on screen is submitted.
+const OTHER_CHOICE = "Other";
+const CHOICE_LABELS = { list: "Enter another value", custom: "Choose from the list" };
+
+function choiceControl(value, options, attrs) {
+  const choices = options.choices.includes(OTHER_CHOICE) ? options.choices : [...options.choices, OTHER_CHOICE];
+  const typed = value === OTHER_CHOICE ? "" : choices.includes(value) ? null : value;
+  const custom = typed !== null;
+  return `<div class="choice" data-original="${esc(value)}">${menu(custom ? OTHER_CHOICE : value, choices, attrs, custom)}<input ${attrs} type="text" value="${esc(typed ?? "")}" maxlength="${options.max || 200}" placeholder="${esc(options.placeholder || "Type a value")}"${custom ? "" : " hidden disabled"}><button type="button" class="text-button choice-toggle">${CHOICE_LABELS[custom ? "custom" : "list"]}</button></div>`;
+}
+
+function choiceMode(wrapper, custom, blank = false) {
+  const select = wrapper.querySelector("select"), box = wrapper.querySelector("input");
+  select.hidden = select.disabled = custom;
+  box.hidden = box.disabled = !custom;
+  if (blank) box.value = "";
+  wrapper.querySelector(".choice-toggle").textContent = CHOICE_LABELS[custom ? "custom" : "list"];
+  (custom ? box : select).focus();
+}
+
+function editorValues() {
+  const values = Object.fromEntries(new FormData($("editor-form")));
+  // An "Other" box left empty names nothing new, so the record keeps the value it had.
+  for (const wrapper of $("editor-fields").querySelectorAll(".choice")) {
+    const box = wrapper.querySelector("input");
+    if (!box.disabled && !box.value.trim()) values[box.name] = wrapper.dataset.original;
+  }
+  return values;
 }
 
 function addCustomField(field = { name: "", value: "" }, focus = true) {
@@ -502,7 +538,7 @@ function openEditor(kind, record, prefill = {}) {
     note = record ? "Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
       : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.";
   } else if (kind === "selection") {
-    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || "Other", { choices: [...new Set([...state.data.sections, r.Section || "Other"])] }) + field("Location", r.Location, { choices: [...new Set(["", ...(state.data.locations || []), r.Location].filter((v) => v != null))] }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
+    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
@@ -528,7 +564,7 @@ async function deleteEditorRecord() {
   $("editor-error").hidden = true;
   setBusy(true, "Deleting…");
   try {
-    const values = Object.fromEntries(new FormData($("editor-form")));
+    const values = editorValues();
     if (kind === "selection") values["Project ID"] = state.project;
     await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`,
               { values, row: record._row, delete: true, cascade: owned > 0, revision: state.editor.revision });
@@ -546,7 +582,7 @@ async function saveEditor(event) {
   event.preventDefault();
   if (state.busy) return;
   const { kind, record } = state.editor;
-  const values = Object.fromEntries(new FormData($("editor-form")));
+  const values = editorValues();
   if (kind === "selection") values["Project ID"] = state.project;
   const custom = kind === "manufacturer" ? {} : { custom_fields: Array.from($("custom-field-rows").children, (row) => ({ name: row.querySelector(".custom-name").value, value: row.querySelector(".custom-value").value })) };
   setBusy(true, "Saving project details…");
@@ -647,6 +683,15 @@ $("custom-field-rows").addEventListener("click", (event) => {
 specDragEvents();
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
+// Picking "Other" asks for a value the list does not hold, so the dropdown gives way to a box.
+$("editor-fields").addEventListener("change", (event) => {
+  const wrapper = event.target.closest(".choice");
+  if (wrapper && event.target.tagName === "SELECT" && event.target.value === OTHER_CHOICE) choiceMode(wrapper, true, true);
+});
+$("editor-fields").addEventListener("click", (event) => {
+  const toggle = event.target.closest(".choice-toggle");
+  if (toggle) choiceMode(toggle.closest(".choice"), toggle.closest(".choice").querySelector("input").disabled);
+});
 $("new-project").addEventListener("click", () => openEditor("project"));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));

@@ -141,6 +141,9 @@ dialog::backdrop { background:#2e271470; backdrop-filter:blur(3px); }
 .field input,.field select,.field textarea { width:100%; border:1px solid #e3dac0; border-radius:4px; background:#fff; padding:10px 11px; font-size:13px; color:#4a4028; font-weight:400; }
 .field textarea { resize:vertical; min-height:75px; }
 .field input[readonly] { background:#f3eedd; color:#988e72; }
+/* A dropdown whose "Other" entry gives way to a box for a value its list does not hold. */
+.choice { display:flex; flex-direction:column; gap:6px; }
+.choice .choice-toggle { align-self:flex-start; padding:2px 0; font-weight:600; }
 .form-note { font-size:11px; margin:18px 0; }
 .form-error { color:var(--red); background:#fbede6; padding:12px; font-size:13px; border-radius:5px; }
 .dialog-actions { display:flex; justify-content:flex-end; gap:9px; padding-top:19px; border-top:1px solid var(--line); }
