@@ -727,7 +727,11 @@ def spec_cell(row, column, hidden):
 
 
 def spec_table(items, columns, widths, hidden):
-    """A repeated-header table of every priced line item, one row per selection."""
+    """A repeated-header table of every priced line item, one row per selection.
+
+    Hairlines run down the column gaps as well as under the rows: nine narrow columns of
+    short values, many of them empty, read as one drifting line of text without them.
+    """
     data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
         cells = [spec_cell(row, column, hidden) for column, _ in columns]
@@ -744,6 +748,7 @@ def spec_table(items, columns, widths, hidden):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, C["heading_rule"]),
         ("LINEBELOW", (0, 1), (-1, -2), 0.4, C["hairline"]),
+        ("LINEAFTER", (0, 0), (-2, -1), 0.4, C["hairline"]),
     ]))
 
 
