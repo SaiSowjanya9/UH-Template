@@ -1,4 +1,4 @@
-"""Shared helpers: config, workbook access by column name."""
+"""Shared helpers: config, workspace access by column name."""
 import os
 import re
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 BASE_DIR = Path(__file__).resolve().parent
-WORKBOOK = BASE_DIR / "UH_Homes_Selections_Tracker.xlsx"
+WORKSPACE = BASE_DIR / "UH_Homes_Selections_Tracker.xlsx"
 
 
 def load_env(path=BASE_DIR / ".env"):
@@ -21,9 +21,9 @@ def load_env(path=BASE_DIR / ".env"):
 
 
 load_env()
-WORKBOOK = Path(os.getenv("UH_WORKBOOK", str(WORKBOOK)))
-if not WORKBOOK.is_absolute():
-    WORKBOOK = BASE_DIR / WORKBOOK
+WORKSPACE = Path(os.getenv("UH_WORKSPACE", str(WORKSPACE)))
+if not WORKSPACE.is_absolute():
+    WORKSPACE = BASE_DIR / WORKSPACE
 
 
 def clean(v):
@@ -57,7 +57,7 @@ class Sheet:
 # Columns ignored when deciding whether a row is "empty": computed totals, generated columns
 # and the product-link metadata. A row holding only that (e.g. an orphan Product URL left
 # behind by a row delete) carries no user data and must not count.
-# The retired lookup columns stay listed on purpose. A workbook written before they were
+# The retired lookup columns stay listed on purpose. A workspace written before they were
 # removed can still hold a stray "Not run", and that must not make an empty row look
 # occupied in the window before the next save drops the column.
 AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
@@ -66,10 +66,10 @@ AUTO_OR_FORMULA = {"Total Items", "Links Found", "Verified", "Needs Review",
                    "Image URL", "Product Name"}
 
 
-def open_workbook(data_only=False):
-    if not WORKBOOK.exists():
-        raise SystemExit(f"Workbook not found: {WORKBOOK}")
-    return load_workbook(WORKBOOK, data_only=data_only)
+def open_workspace(data_only=False):
+    if not WORKSPACE.exists():
+        raise SystemExit(f"Workspace not found: {WORKSPACE}")
+    return load_workbook(WORKSPACE, data_only=data_only)
 
 
 def manufacturer_domains(wb):

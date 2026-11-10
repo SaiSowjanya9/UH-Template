@@ -4,7 +4,7 @@ Seed a project's line items from spec_template.json.
 The template is a three-level outline - location (floor or zone), room, item - which maps
 onto the Selections columns Location, Room / Area and Item; each item's Section category
 is inferred from the same rules the location migration uses. Applying it adds every missing
-line item in one workbook save and never touches rows that already exist, so it is safe to
+line item in one workspace save and never touches rows that already exist, so it is safe to
 re-run after the template grows or a room is added to a house.
 """
 import json
@@ -12,7 +12,7 @@ import json
 from copy import copy
 
 from common import BASE_DIR, Sheet, clean
-from workbook_store import (MAX_LOCATIONS, ValidationError, ensure_location_list,
+from workspace_store import (MAX_LOCATIONS, ValidationError, ensure_location_list,
                             ensure_selection_columns, infer_category, location_list, put)
 
 TEMPLATE_PATH = BASE_DIR / "spec_template.json"
@@ -73,7 +73,7 @@ def apply(wb, project_id, template):
         while cursor in used:
             cursor += 1
         if cursor > 10001:
-            raise ValidationError("This local workbook supports up to 10,000 rows per sheet.")
+            raise ValidationError("This local workspace supports up to 10,000 rows per sheet.")
         used.add(cursor)
         if cursor > 2:
             for column in sheet.cols.values():

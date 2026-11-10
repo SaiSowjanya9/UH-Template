@@ -1,16 +1,16 @@
 # Render blueprint for the hosted selections workspace.
 #
-# One worker only: the workbook is saved whole, so a second worker would race the first.
+# One worker only: the workspace is saved whole, so a second worker would race the first.
 # Scaling means more threads, never more instances.
 #
-# The workbook lives in Supabase Storage, so no disk is attached. Secrets marked
+# The workspace lives in Supabase Storage, so no disk is attached. Secrets marked
 # sync:false must be set in the Render dashboard, never committed.
 services:
   - type: web
     name: uh-selections
     runtime: python
     # The free plan sleeps after 15 minutes idle and takes ~1 minute to wake. Nothing is lost,
-    # because the workbook lives in Supabase. Change to "starter" to keep it awake.
+    # because the workspace lives in Supabase. Change to "starter" to keep it awake.
     plan: free
     region: oregon           # match your Supabase project's region
     buildCommand: pip install -r requirements.txt

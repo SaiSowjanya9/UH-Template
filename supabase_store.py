@@ -1,4 +1,4 @@
-"""The master workbook kept in Supabase Storage, with its revision held in Postgres.
+"""The master workspace kept in Supabase Storage, with its revision held in Postgres.
 
 Each save uploads a new, immutable object and then advances a single pointer row by
 compare-and-swap, so two app processes can never both win a save. Earlier objects are
@@ -16,7 +16,7 @@ import time
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
-from workbook_store import BACKUP_KEEP, ConflictError, ValidationError, history_entry
+from workspace_store import BACKUP_KEEP, ConflictError, ValidationError, history_entry
 
 TIMEOUT = (5, 30)
 STATE = "uh_workbook_state"
@@ -45,7 +45,7 @@ def settings():
         raise ConfigError("SUPABASE_URL must look like https://<project>.supabase.co.")
     return {"url": url, "key": key,
             "bucket": os.getenv("SUPABASE_BUCKET", "workbooks"),
-            "name": os.getenv("UH_WORKBOOK_NAME", "UH_Homes_Selections_Tracker.xlsx")}
+            "name": os.getenv("UH_WORKSPACE_NAME", "UH_Homes_Selections_Tracker.xlsx")}
 
 
 class Supabase:
@@ -75,7 +75,7 @@ class Supabase:
 
     def download(self, path):
         response = self.session.get(f"{self.url}/storage/v1/object/{self.bucket}/{path}", timeout=TIMEOUT)
-        return self._check(response, "read the stored workbook").content
+        return self._check(response, "read the stored workspace").content
 
     def upload(self, path, raw, content_type=XLSX_MIME):
         response = self.session.post(f"{self.url}/storage/v1/object/{self.bucket}/{path}", data=raw,
@@ -112,7 +112,7 @@ class Supabase:
 
 
 class SupabaseBackend:
-    """Workbook bytes in Storage, authoritative revision in Postgres."""
+    """Workspace bytes in Storage, authoritative revision in Postgres."""
 
     remote = True
 
@@ -135,7 +135,7 @@ class SupabaseBackend:
 
     @property
     def path(self):
-        raise AttributeError("The hosted workbook has no local path. Download it from the app instead.")
+        raise AttributeError("The hosted workspace has no local path. Download it from the app instead.")
 
     def _state(self, fresh=False):
         cached_at, cached = self._pointer
@@ -143,7 +143,7 @@ class SupabaseBackend:
             return cached
         rows = self.api.select(STATE, {"id": "eq.1", "select": "revision,object_path"})
         if not rows:
-            raise ValidationError("No workbook has been uploaded yet. Run 'python supabase_store.py push' once to seed it.")
+            raise ValidationError("No workspace has been uploaded yet. Run 'python supabase_store.py push' once to seed it.")
         self._pointer = (time.monotonic(), rows[0])
         return rows[0]
 
@@ -158,7 +158,7 @@ class SupabaseBackend:
         return self._cache[1], revision
 
     def locked_elsewhere(self):
-        return False        # nothing but this app can hold the hosted workbook open
+        return False        # nothing but this app can hold the hosted workspace open
 
     def backup(self):
         return None         # every save keeps its predecessor, so there is nothing to copy
@@ -221,7 +221,7 @@ class SupabaseBackend:
         return self.api.download(rows[0]["object_path"])
 
     def store_cover(self, name, raw, content_type="image/png"):
-        # Lives beside the versions rather than among them: it is not a restorable workbook.
+        # Lives beside the versions rather than among them: it is not a restorable workspace.
         self.api.upload(f"covers/{name}", raw, content_type)
 
     def read_cover(self, name):
@@ -232,11 +232,11 @@ class SupabaseBackend:
 
 
 def push(source):
-    """Seed the hosted workbook from a local file, replacing whatever revision is current."""
+    """Seed the hosted workspace from a local file, replacing whatever revision is current."""
     from openpyxl import load_workbook
-    from workbook_store import validate_workbook
+    from workspace_store import validate_workspace
     raw = open(source, "rb").read()
-    validate_workbook(load_workbook(io.BytesIO(raw), keep_links=False))
+    validate_workspace(load_workbook(io.BytesIO(raw), keep_links=False))
     backend = SupabaseBackend()
     revision = hashlib.sha256(raw).hexdigest()
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -251,7 +251,7 @@ def push(source):
 
 
 def pull(destination):
-    """Download the hosted workbook, for a local copy or an offline check."""
+    """Download the hosted workspace, for a local copy or an offline check."""
     raw, revision = SupabaseBackend().read()
     with open(destination, "wb") as out:
         out.write(raw)
@@ -272,7 +272,7 @@ def check():
     if not config:
         for key in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY"):
             note(bool((os.getenv(key) or "").strip()), f"{key} is set." if (os.getenv(key) or "").strip()
-                 else f"{key} is empty in .env. Both are needed before the workbook can be hosted.")
+                 else f"{key} is empty in .env. Both are needed before the workspace can be hosted.")
         return results
     note(True, f"Configured for {config['url']} (bucket '{config['bucket']}').")
 
@@ -290,7 +290,7 @@ def check():
         info = api.bucket_info()
         note(not info.get("public", False),
              f"Bucket '{config['bucket']}' exists and is private." if not info.get("public")
-             else f"Bucket '{config['bucket']}' is PUBLIC. Make it private: anyone could download the workbook.")
+             else f"Bucket '{config['bucket']}' is PUBLIC. Make it private: anyone could download the workspace.")
     except Exception:
         note(False, f"Bucket '{config['bucket']}' is missing. Create it in Storage, private, "
                     f"or re-run the migration.")
@@ -298,11 +298,11 @@ def check():
     if tables_ok:
         try:
             raw, revision = SupabaseBackend(config, api=api).read()
-            note(True, f"Workbook seeded: revision {revision[:12]}, {len(raw):,} bytes.")
+            note(True, f"Workspace seeded: revision {revision[:12]}, {len(raw):,} bytes.")
         except ValidationError as error:
             note(False, str(error))
         except Exception:
-            note(False, "The seeded workbook could not be downloaded. Check the bucket contents.")
+            note(False, "The seeded workspace could not be downloaded. Check the bucket contents.")
 
     import auth
     if auth.settings():
@@ -320,9 +320,9 @@ if __name__ == "__main__":
     import argparse
     import common
 
-    parser = argparse.ArgumentParser(description="Move the master workbook between this machine and Supabase.")
+    parser = argparse.ArgumentParser(description="Move the master workspace between this machine and Supabase.")
     parser.add_argument("action", choices=["push", "pull", "check"])
-    parser.add_argument("--file", default=str(common.WORKBOOK))
+    parser.add_argument("--file", default=str(common.WORKSPACE))
     args = parser.parse_args()
     if args.action == "check":
         failures = 0

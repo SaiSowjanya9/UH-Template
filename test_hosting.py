@@ -1,4 +1,4 @@
-"""Hosted deployment: the Supabase-backed workbook, sign-in, and exposure guards.
+"""Hosted deployment: the Supabase-backed workspace, sign-in, and exposure guards.
 
 No network is used. FakeSupabase stands in for Storage and PostgREST, implementing just
 enough of their filter semantics to exercise the compare-and-swap that settles saves.
@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import common
 from openpyxl import load_workbook
-from workbook_store import ConflictError, ValidationError, WorkbookStore, put, records
+from workspace_store import ConflictError, ValidationError, WorkspaceStore, put, records
 
 import auth
 import deploy_render
@@ -37,7 +37,7 @@ class FakeSupabase:
     # --- Storage ---
     def download(self, path):
         if path not in self.objects:
-            raise RuntimeError("Supabase could not read the stored workbook (HTTP 404).")
+            raise RuntimeError("Supabase could not read the stored workspace (HTTP 404).")
         self.downloads += 1
         return self.objects[path]
 
@@ -99,10 +99,10 @@ class FakeSupabase:
         return matched
 
 
-def hosted_backend(workbook):
+def hosted_backend(workspace):
     api = FakeSupabase()
     backend = SupabaseBackend(CONFIG, api=api)
-    raw = Path(workbook).read_bytes()
+    raw = Path(workspace).read_bytes()
     revision = hashlib.sha256(raw).hexdigest()
     path = "versions/seed.xlsx"
     api.upload(path, raw)
@@ -114,8 +114,8 @@ def hosted_backend(workbook):
 
 class SupabaseBackendTests(unittest.TestCase):
     def setUp(self):
-        self.backend, self.api = hosted_backend(common.WORKBOOK)
-        self.store = WorkbookStore(self.backend)
+        self.backend, self.api = hosted_backend(common.WORKSPACE)
+        self.store = WorkspaceStore(self.backend)
 
     def test_reads_the_object_named_by_the_pointer_row(self):
         raw, revision = self.backend.read()
@@ -158,7 +158,7 @@ class SupabaseBackendTests(unittest.TestCase):
 
     def test_a_lost_save_leaves_no_orphan_object_or_copy(self):
         """The loser of a race must leave nothing behind that could later be restored."""
-        other = WorkbookStore(SupabaseBackend(CONFIG, api=self.api))
+        other = WorkspaceStore(SupabaseBackend(CONFIG, api=self.api))
         other.backend._ttl = 3600
         stale, stale_revision = other.snapshot()
 
@@ -230,7 +230,7 @@ class SupabaseBackendTests(unittest.TestCase):
 
     def test_a_stale_cached_pointer_still_cannot_overwrite_another_writer(self):
         """The cache may lag, but the compare-and-swap, not the cache, decides who wins."""
-        other = WorkbookStore(SupabaseBackend(CONFIG, api=self.api))
+        other = WorkspaceStore(SupabaseBackend(CONFIG, api=self.api))
         other.backend._ttl = 3600                       # this process never notices the other's save
         stale, stale_revision = other.snapshot()
 
@@ -243,7 +243,7 @@ class SupabaseBackendTests(unittest.TestCase):
             other.save(stale, stale_revision)
         self.assertEqual(self.api.tables[STATE][0]["revision"], hashlib.sha256(self.backend.read()[0]).hexdigest())
 
-    def test_the_hosted_workbook_is_never_locked_by_excel(self):
+    def test_the_hosted_workspace_is_never_locked_by_excel(self):
         self.assertFalse(self.store.locked_elsewhere())
 
     def test_an_empty_pointer_table_explains_how_to_seed(self):
@@ -252,7 +252,7 @@ class SupabaseBackendTests(unittest.TestCase):
             self.store.snapshot()
         self.assertIn("push", str(caught.exception))
 
-    def test_the_hosted_workbook_has_no_local_path(self):
+    def test_the_hosted_workspace_has_no_local_path(self):
         with self.assertRaises(AttributeError):
             self.store.path
 
@@ -283,7 +283,7 @@ class SettingsTests(unittest.TestCase):
             text = "service-key-for-tests leaked"
 
         with self.assertRaises(RuntimeError) as caught:
-            api._check(Response(), "store the workbook")
+            api._check(Response(), "store the workspace")
         self.assertNotIn(CONFIG["key"], str(caught.exception))
 
 
@@ -398,7 +398,7 @@ class RenderDeployTests(unittest.TestCase):
 
     ENV = {"SUPABASE_URL": "https://p.supabase.co", "SUPABASE_SERVICE_KEY": "service",
            "SUPABASE_ANON_KEY": "anon", "UH_SECRET_KEY": "x" * 64, "RENDER_API_KEY": "rnd_key",
-           "UH_WORKBOOK_NAME": "Tracker.xlsx", "UH_TRUSTED_HOSTS": "", "SUPABASE_BUCKET": ""}
+           "UH_WORKSPACE_NAME": "Tracker.xlsx", "UH_TRUSTED_HOSTS": "", "SUPABASE_BUCKET": ""}
 
     class Session:
         """Records calls and replays canned Render responses."""
@@ -460,7 +460,7 @@ class RenderDeployTests(unittest.TestCase):
         with patch.dict("os.environ", self.ENV):
             deploy_render.deploy(session=session)
         variables = {e["key"]: e["value"] for e in next(c for c in session.calls if c["method"] == "PUT")["json"]}
-        self.assertEqual(variables["UH_WORKBOOK_NAME"], "Tracker.xlsx")
+        self.assertEqual(variables["UH_WORKSPACE_NAME"], "Tracker.xlsx")
         self.assertNotIn("SUPABASE_BUCKET", variables)
 
     def test_an_existing_service_is_reused_rather_than_duplicated(self):
@@ -538,8 +538,8 @@ class HostedAppTests(unittest.TestCase):
         self.module = app
         self.folder = tempfile.TemporaryDirectory()
         self.path = Path(self.folder.name) / "master.xlsx"
-        shutil.copy2(common.WORKBOOK, self.path)
-        self.patches = [patch.object(app, "store", WorkbookStore(self.path)),
+        shutil.copy2(common.WORKSPACE, self.path)
+        self.patches = [patch.object(app, "store", WorkspaceStore(self.path)),
                         patch.object(app, "REQUIRE_LOGIN", True),
                         patch.object(app, "AUTH", SignInTests.CONFIG)]
         for item in self.patches:
@@ -665,7 +665,7 @@ class ExposureTests(unittest.TestCase):
                 app.check_exposure()
         self.assertIn("UH_TRUSTED_HOSTS", str(caught.exception))
 
-    def test_a_public_bind_refuses_to_serve_a_local_workbook_file(self):
+    def test_a_public_bind_refuses_to_serve_a_local_workspace_file(self):
         """A host's filesystem is temporary, so this would silently lose every edit."""
         import app
         local = type("B", (), {"remote": False})()

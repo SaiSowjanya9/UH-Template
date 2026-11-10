@@ -1,10 +1,10 @@
 """
 The 'Price Schedule' sheet: every selection grouped by project and category, priced.
 
-The sheet is a view, rebuilt from the Selections sheet whenever the workbook is saved, so
+The sheet is a view, rebuilt from the Selections sheet whenever the workspace is saved, so
 it is never edited directly. Qty, Unit Price and the line total are live formulas pointing
 at Selections, which means prices typed on Selections (or in the web app) flow straight
-through, together with per-category subtotals, a project total and a workbook grand total.
+through, together with per-category subtotals, a project total and a workspace grand total.
 
 Enter prices in the Unit Price column on Selections. Price = Qty x Unit Price.
 """
@@ -68,7 +68,7 @@ def selection_rows(wb):
 
 def rebuild(wb):
     """Recreate the Price Schedule sheet from the current Selections rows."""
-    from build_lookbook import description   # local import: build_lookbook imports workbook_store
+    from build_lookbook import description   # local import: build_lookbook imports workspace_store
 
     if SHEET in wb.sheetnames:
         wb.remove(wb[SHEET])

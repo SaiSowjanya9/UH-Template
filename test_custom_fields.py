@@ -7,15 +7,15 @@ from unittest.mock import Mock, patch
 
 import app
 import common
-from workbook_store import WorkbookStore
+from workspace_store import WorkspaceStore
 
 
 class CustomFieldTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.path = Path(self.folder.name) / "master.xlsx"
-        shutil.copy2(common.WORKBOOK, self.path)
-        self.store = WorkbookStore(self.path)
+        shutil.copy2(common.WORKSPACE, self.path)
+        self.store = WorkspaceStore(self.path)
         # REQUIRE_LOGIN follows the ambient .env; these tests exercise local mode.
         self.patches = [patch.object(app, "store", self.store),
                         patch.object(app, "REQUIRE_LOGIN", False)]
@@ -46,7 +46,7 @@ class CustomFieldTests(unittest.TestCase):
         data = self.state()
         self.assertEqual(data["projects"][0]["custom_fields"], fields)
         self.assertEqual(data["projects"][1]["custom_fields"], [])
-        with patch.object(app, "store", WorkbookStore(self.path)):
+        with patch.object(app, "store", WorkspaceStore(self.path)):
             self.assertEqual(self.state()["projects"][0]["custom_fields"], fields)
 
     def test_selection_fields_survive_reordering_and_roundtrip(self):
@@ -77,7 +77,7 @@ class CustomFieldTests(unittest.TestCase):
         self.post("/api/selections", {"row": row, "values": {}, "custom_fields": []})
         self.assertEqual(self.state()["selections"][0]["custom_fields"], [])
 
-    def test_invalid_fields_do_not_change_workbook(self):
+    def test_invalid_fields_do_not_change_workspace(self):
         project = self.state()["projects"][0]["Project ID"]
         invalid = [[{"name": "", "value": "x"}], [{"name": "Name", "value": "x"}, {"name": " name ", "value": "y"}],
                    [{"name": "Project ID", "value": "x"}], [{"name": "Long", "value": "x" * 2001}],
@@ -92,7 +92,7 @@ class CustomFieldTests(unittest.TestCase):
         import build_lookbook
         import build_powerpoint
         from pptx import Presentation
-        from workbook_store import detailed_records
+        from workspace_store import detailed_records
         try:
             from pypdf import PdfReader
         except ImportError:

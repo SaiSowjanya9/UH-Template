@@ -1,6 +1,6 @@
--- Hosted storage for the UH Homes selections workbook.
+-- Hosted storage for the UH Homes selections workspace.
 --
--- The workbook itself stays a single .xlsx in Storage. Every save uploads a new immutable
+-- The workspace itself stays a single .xlsx in Storage. Every save uploads a new immutable
 -- object and then advances uh_workbook_state by compare-and-swap, so two app processes can
 -- never both win a save. Earlier objects are the saved copies the app offers to restore.
 
@@ -12,7 +12,7 @@ create table if not exists uh_workbook_state (
 );
 
 comment on table uh_workbook_state is
-    'Single pointer row naming the current workbook revision. Updated only by filtered compare-and-swap.';
+    'Single pointer row naming the current workspace revision. Updated only by filtered compare-and-swap.';
 
 create table if not exists uh_workbook_versions (
     revision    text primary key,
@@ -54,7 +54,7 @@ alter table uh_workbook_versions enable row level security;
 alter table uh_history           enable row level security;
 alter table uh_lookup_state      enable row level security;
 
--- Private bucket for the workbook objects; only the service key can read or write it.
+-- Private bucket for the workspace objects; only the service key can read or write it.
 insert into storage.buckets (id, name, public)
 values ('workbooks', 'workbooks', false)
 on conflict (id) do nothing;

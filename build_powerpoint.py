@@ -12,7 +12,7 @@ Output: output/<ProjectID>_<Project Name>_<Schedule title>.pptx
 Slides are letter portrait and share the PDF's measurements, so one point of the printed
 schedule is one point here and both deliverables group and order rows identically (page
 breaks can differ by a block at the very end). Every value is a plain text box, so the
-schedule can be edited in PowerPoint without rebuilding it from the workbook.
+schedule can be edited in PowerPoint without rebuilding it from the workspace.
 """
 import argparse
 import datetime as dt
@@ -285,7 +285,7 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate the editable UH Homes finish schedule from the master workbook.")
+    parser = argparse.ArgumentParser(description="Generate the editable UH Homes finish schedule from the master workspace.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")

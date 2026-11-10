@@ -6,7 +6,7 @@ headings, coded rows, note and sign-off - but the client details and each line's
 description are real PDF form fields, and every line carries a small remove box.
 
 It is a working document: fill it in any PDF reader, then import it back to update the
-workbook. Field names carry the workbook row, so a filled form maps back exactly even
+workspace. Field names carry the workspace row, so a filled form maps back exactly even
 after rows move. The client-facing PDF produced by build_lookbook.py is unchanged.
 """
 import re

@@ -19,7 +19,7 @@ tab leaders rather than drawn lines for the same reason. Page breaks may therefo
 from the PDF.
 
 The fillable copy holds the client details, each line's description and a remove tick in
-content controls tagged with the workbook row, so a marked-up document imports back through
+content controls tagged with the workspace row, so a marked-up document imports back through
 the same route as the fillable PDF. The spec sheet is the internal landscape column dump and
 is the only Word document here that carries pricing.
 """
@@ -406,7 +406,7 @@ def band(document, values, content_w, controls=False):
         line = shape(cell.add_paragraph(), size=9, leading=13, before=7)
         rule(line, "bottom", 0.5, COLORS["field_rule"])
         tag = field.lower().replace(" / ", "_").replace(" ", "_")
-        # project_lot prints two workbook columns at once, so it is shown but never editable
+        # project_lot prints two workspace columns at once, so it is shown but never editable
         if controls and tag != "project_lot":
             control(line, tag, value, alias=field.title(), size=9, color=COLORS["text"])
         else:

@@ -9,7 +9,7 @@ import sys
 
 import requests
 
-from workbook_store import infer_category
+from workspace_store import infer_category
 
 BASE = "https://uh-selections.onrender.com"
 EMAIL = "saisowjanya218@gmail.com"

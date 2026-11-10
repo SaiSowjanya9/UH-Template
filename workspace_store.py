@@ -24,11 +24,11 @@ SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacture
 IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
 BACKUP_KEEP = 30
 # Columns the product-lookup feature owned. They are no longer read or written, and
-# drop_retired_columns removes them from any workbook written before the feature went.
+# drop_retired_columns removes them from any workspace written before the feature went.
 RETIRED_SELECTION_FIELDS = ["Lookup Status", "Checked On", "Lookup Notes"]
 RETIRED_PROJECT_FIELDS = ["Links Found", "Verified", "Needs Review"]
 RETIRED_LIST_COLUMN = "B"       # the Lists column that fed the Lookup Status dropdown
-# Saved copies are named <workbook stem>_<date>_<time>_<microseconds>.xlsx
+# Saved copies are named <workspace stem>_<date>_<time>_<microseconds>.xlsx
 BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: the one status a selection carries.
@@ -46,7 +46,7 @@ PRODUCT_LINK = "Product Link"
 GENERATED_SELECTION_FIELDS = [PRODUCT_LINK]
 
 # A Cover Image cell holding "cover:<name>" points at a file the app stored: ./covers beside the
-# local workbook, objects under covers/ in the hosted bucket. Plain URLs and file paths still work.
+# local workspace, objects under covers/ in the hosted bucket. Plain URLs and file paths still work.
 COVER_PREFIX = "cover:"
 COVER_NAME = re.compile(r"^cover-[A-Za-z0-9_-]{1,50}\.(png|jpg)$")
 LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
@@ -61,7 +61,7 @@ PROJECT_FORMULAS = {
     "Total Items": '=IF(A{row}="","",COUNTIF(Selections!$A:$A,A{row}))',
 }
 
-# Selections dropdowns Excel silently drops when it re-saves the workbook.
+# Selections dropdowns Excel silently drops when it re-saves the workspace.
 LIST_VALIDATIONS = {
     "Project ID": "Projects!$A$2:$A$51",
     "Section": "Lists!$A$2:$A$31",
@@ -156,8 +156,8 @@ def put(sheet, row, data):
 
 def records(wb, name):
     # Generated columns are left out: they only restate a value the record already carries,
-    # so reading one back would make a workbook saved before they existed look different.
-    # Retired columns are left out for the mirror-image reason: a workbook written before
+    # so reading one back would make a workspace saved before they existed look different.
+    # Retired columns are left out for the mirror-image reason: a workspace written before
     # product lookup was removed must read back exactly like one written after it.
     hidden = set(GENERATED_SELECTION_FIELDS) | set(RETIRED_SELECTION_FIELDS)
     return [{**{k: v.isoformat() if isinstance(v, (dt.datetime, dt.date)) else clean(v)
@@ -186,7 +186,7 @@ def validate_custom_fields(fields, reserved=()):
         names.add(name.casefold())
         result.append({"name": name, "value": value})
     if len(json.dumps(result, ensure_ascii=False).encode("utf-16-le")) // 2 > 30000:
-        raise ValidationError("The combined custom fields are too long for one workbook record.")
+        raise ValidationError("The combined custom fields are too long for one workspace record.")
     return result
 
 
@@ -246,14 +246,14 @@ def next_row(sheet):
     while row in used:
         row += 1
     if row > 10001:
-        raise ValidationError("This local workbook supports up to 10,000 rows per sheet.")
+        raise ValidationError("This local workspace supports up to 10,000 rows per sheet.")
     if row > 2:
         for col in sheet.cols.values():
             sheet.ws.cell(row, col)._style = copy(sheet.ws.cell(2, col)._style)
     return row
 
 
-def validate_workbook(wb):
+def validate_workspace(wb):
     required = {"Projects": PROJECT_FIELDS, "Selections": SELECTION_FIELDS,
                 "Manufacturers": ["Manufacturer", "Official Domain"], "Lists": ["Sections (lookbook order)"]}
     for name, fields in required.items():
@@ -295,7 +295,7 @@ def validate_workbook(wb):
             raise ValidationError(f"Include in Lookbook must be Yes or No in row {row['_row']}.")
 
 
-def workbook_open_elsewhere(path):
+def workspace_open_elsewhere(path):
     """True when another process (e.g. Excel) holds the file open for writing.
 
     Probing the file itself is more reliable than looking for a '~$' lock file,
@@ -311,7 +311,7 @@ def workbook_open_elsewhere(path):
 
 
 def drop_retired_columns(wb):
-    """Delete the product-lookup columns from a workbook written before the feature went.
+    """Delete the product-lookup columns from a workspace written before the feature went.
 
     Deleting shifts every column to its right, which openpyxl does not follow through to
     data validations or hyperlinks, so both are cleared here for the affected sheet:
@@ -341,7 +341,7 @@ def drop_retired_columns(wb):
 
 
 def ensure_selection_columns(wb):
-    """Add the optional Selections columns when the workbook predates them. Returns a fresh Sheet."""
+    """Add the optional Selections columns when the workspace predates them. Returns a fresh Sheet."""
     ws = wb["Selections"]
     sheet = Sheet(ws)
     added = False
@@ -479,7 +479,7 @@ def ensure_locations(wb):
     A Section that names a Locations entry is a location, not a trade category: the row's
     Location takes the value (unless it already has one) and its Section is re-inferred from
     the room and item. Location names are also stripped from the sections list so the
-    Section dropdown stops offering them. Runs on every save, so workbooks edited directly
+    Section dropdown stops offering them. Runs on every save, so workspaces edited directly
     in Excel migrate the same way.
     """
     ensure_location_list(wb)
@@ -534,7 +534,7 @@ def ensure_list_values(wb):
 def ensure_validations(wb):
     """Re-add the Selections dropdowns Excel silently drops when it re-saves.
 
-    Validations on the managed columns are replaced rather than appended, so a workbook
+    Validations on the managed columns are replaced rather than appended, so a workspace
     saved by an older version cannot end up with two conflicting lists on one column.
     """
     ws = wb["Selections"]
@@ -579,7 +579,7 @@ def history_entry(note):
 
 
 class LocalBackend:
-    """The master workbook as a file beside the app: Excel can open it, backups sit in ./backups.
+    """The master workspace as a file beside the app: Excel can open it, backups sit in ./backups.
 
     This is the single-user arrangement the tracker was built for. Concurrency rests on the
     revision hash alone, so only one process may write at a time.
@@ -606,7 +606,7 @@ class LocalBackend:
         return hashlib.sha256(self.path.read_bytes()).hexdigest()
 
     def locked_elsewhere(self):
-        return workbook_open_elsewhere(self.path)
+        return workspace_open_elsewhere(self.path)
 
     def backup(self):
         self.backup_dir.mkdir(exist_ok=True)
@@ -689,8 +689,8 @@ class LocalBackend:
         return path.read_bytes()
 
 
-class WorkbookStore:
-    """Validation, repair and compare-and-swap around whichever backend holds the workbook."""
+class WorkspaceStore:
+    """Validation, repair and compare-and-swap around whichever backend holds the workspace."""
 
     def __init__(self, backend):
         self.backend = LocalBackend(backend) if isinstance(backend, (str, os.PathLike)) else backend
@@ -698,7 +698,7 @@ class WorkbookStore:
 
     @property
     def path(self):
-        """The workbook file, for the local backend only (Excel integration, tests)."""
+        """The workspace file, for the local backend only (Excel integration, tests)."""
         return self.backend.path
 
     @property
@@ -720,18 +720,18 @@ class WorkbookStore:
         with self.lock:
             raw, revision = self.backend.read()
             wb = load_workbook(io.BytesIO(raw), keep_links=False)
-            validate_workbook(wb)
+            validate_workspace(wb)
             # Views and exports see location data even before the next save migrates the file.
             ensure_locations(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
         with self.lock:
-            validate_workbook(wb)
+            validate_workspace(wb)
             if self.backend.revision() != revision:
                 raise ConflictError("The workspace changed since this copy was read. Refresh and retry.")
             if self.backend.locked_elsewhere():
-                raise PermissionError("The workbook is open in another program.")
+                raise PermissionError("The workspace is open in another program.")
             self.backend.backup()
             drop_retired_columns(wb)
             ensure_selection_columns(wb)
@@ -746,7 +746,7 @@ class WorkbookStore:
             self.backend.log(note)
 
     def log(self, note):
-        """Append a history entry without touching the workbook (e.g. an export with no row changes)."""
+        """Append a history entry without touching the workspace (e.g. an export with no row changes)."""
         with self.lock:
             self.backend.log(note)
 
@@ -764,7 +764,7 @@ class WorkbookStore:
         return self.backend.read_backup(name)
 
     def store_cover(self, name, raw, content_type="image/png"):
-        """A cover image lives outside the workbook, so it survives unchanged across saves."""
+        """A cover image lives outside the workspace, so it survives unchanged across saves."""
         if not COVER_NAME.match(name):
             raise ValidationError("Invalid cover image name.")
         self.backend.store_cover(name, raw, content_type)
@@ -778,12 +778,12 @@ class WorkbookStore:
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 if sum(info.file_size for info in archive.infolist()) > 50_000_000:
-                    raise ValidationError("The uncompressed workbook exceeds 50 MB.")
+                    raise ValidationError("The uncompressed workspace exceeds 50 MB.")
                 if any(info.filename.lower().endswith("vbaproject.bin") for info in archive.infolist()):
                     raise ValidationError("Macro-enabled workbooks are not supported.")
             wb = load_workbook(io.BytesIO(raw), keep_links=False)
         except ValidationError:
             raise
         except Exception:
-            raise ValidationError("This file could not be read as an Excel .xlsx workbook.") from None
-        self.save(wb, revision, "workbook import")
+            raise ValidationError("This file could not be read as an Excel .xlsx file.") from None
+        self.save(wb, revision, "workspace import")

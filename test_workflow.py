@@ -26,12 +26,12 @@ def docx_text(raw):
 class AppTests(unittest.TestCase):
     def setUp(self):
         import app
-        from workbook_store import WorkbookStore
+        from workspace_store import WorkspaceStore
         self.module = app
         self.folder = tempfile.TemporaryDirectory()
         self.path = Path(self.folder.name) / "master.xlsx"
-        shutil.copy2(common.WORKBOOK, self.path)
-        self.store = WorkbookStore(self.path)
+        shutil.copy2(common.WORKSPACE, self.path)
+        self.store = WorkspaceStore(self.path)
         self.patcher = patch.object(app, "store", self.store)
         self.patcher.start()
         # These tests exercise the local-mode contract (the per-start TOKEN);
@@ -63,7 +63,7 @@ class AppTests(unittest.TestCase):
 
     def test_excel_edits_flow_into_the_interface_and_the_schedule(self):
         """Excel stays the source of truth: sheet edits appear in state and on the deliverable."""
-        from workbook_store import ensure_location_list, location_list
+        from workspace_store import ensure_location_list, location_list
         wb, revision = self.store.snapshot()
         column = ensure_location_list(wb)
         lists = wb["Lists"]
@@ -85,7 +85,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(record["Location"], "Specialty Finishes")
         self.assertEqual(record["Section"], "Other")
         import build_lookbook
-        from workbook_store import detailed_records
+        from workspace_store import detailed_records
         wb, _ = self.store.snapshot()
         rows = [r for r in detailed_records(wb, "Selections") if r["Project ID"] == project]
         common.schedule_sort(rows, wb)
@@ -134,18 +134,18 @@ class AppTests(unittest.TestCase):
 
     def test_retired_lookup_fields_are_refused(self):
         """The columns product lookup owned are gone, so a client cannot write them back."""
-        from workbook_store import RETIRED_SELECTION_FIELDS
+        from workspace_store import RETIRED_SELECTION_FIELDS
         row = self.state()["selections"][0]
         for field in RETIRED_SELECTION_FIELDS:
             response = self.post("/api/selections", {"row": row["_row"], "values": {field: "Verified"}})
             self.assertEqual(response.status_code, 400, field)
 
     def test_retired_lookup_columns_are_dropped_on_save(self):
-        """A workbook written before product lookup was removed loses those columns, keeping its data."""
-        from workbook_store import RETIRED_PROJECT_FIELDS, RETIRED_SELECTION_FIELDS, records
+        """A workspace written before product lookup was removed loses those columns, keeping its data."""
+        from workspace_store import RETIRED_PROJECT_FIELDS, RETIRED_SELECTION_FIELDS, records
         before = self.store.snapshot()[0]
         self.assertTrue({c.value for c in before["Selections"][1]} & set(RETIRED_SELECTION_FIELDS),
-                        "fixture workbook no longer carries the retired columns")
+                        "fixture workspace no longer carries the retired columns")
         kept = [(r["_row"], r["Item"], r["Client Notes"]) for r in records(before, "Selections")]
         wb, revision = self.store.snapshot()
         self.store.save(wb, revision)
@@ -233,24 +233,24 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.post("/api/selections", {"values": {"Project ID": "UNKNOWN", "Item": "Item"}}).status_code, 400)
         self.assertEqual(self.post("/api/selections", {"values": {"Project ID": "UH-101", "Item": "Item", "Qty": "nan"}}).status_code, 400)
 
-    def test_locked_workbook_keeps_original(self):
+    def test_locked_workspace_keeps_original(self):
         before = self.path.read_bytes()
-        with patch("workbook_store.os.replace", side_effect=PermissionError()):
+        with patch("workspace_store.os.replace", side_effect=PermissionError()):
             response = self.post("/api/projects", {"values": {"Project ID": "TEST-1", "Project Name": "Test House"}})
         self.assertEqual(response.status_code, 409)
         self.assertIn("Close", response.json["error"])
         self.assertEqual(self.path.read_bytes(), before)
 
-    def test_save_refused_while_excel_holds_the_workbook(self):
+    def test_save_refused_while_excel_holds_the_workspace(self):
         before = self.path.read_bytes()
-        with patch("workbook_store.workbook_open_elsewhere", return_value=True):
+        with patch("workspace_store.workspace_open_elsewhere", return_value=True):
             response = self.post("/api/projects", {"values": {"Project ID": "TEST-1", "Project Name": "Test House"}})
         self.assertEqual(response.status_code, 409)
         self.assertIn("Close", response.json["error"])
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_save_restores_dropdowns_excel_dropped(self):
-        from workbook_store import LIST_VALIDATIONS
+        from workspace_store import LIST_VALIDATIONS
         wb, revision = self.store.snapshot()
         wb["Selections"].data_validations.dataValidation = []
         self.store.save(wb, revision)
@@ -260,7 +260,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(lists), len(LIST_VALIDATIONS))   # one dropdown per column, no duplicates
 
     def test_excel_dropdowns_offer_every_status(self):
-        from workbook_store import CLIENT_STATUSES
+        from workspace_store import CLIENT_STATUSES
         wb, revision = self.store.snapshot()
         wb["Lists"]["B7"] = "Stale value"
         self.store.save(wb, revision)
@@ -566,7 +566,7 @@ class AppTests(unittest.TestCase):
         self.assertNotEqual(original, "The mistake")
 
     def test_backups_are_pruned_and_logged(self):
-        with patch("workbook_store.BACKUP_KEEP", 2):
+        with patch("workspace_store.BACKUP_KEEP", 2):
             for index in range(4):
                 response = self.post("/api/projects", {"create": True, "values": {"Project ID": f"TEST-{index}", "Project Name": "T"}})
                 self.assertEqual(response.status_code, 200, response.json)
@@ -628,7 +628,7 @@ class AppTests(unittest.TestCase):
 
     def test_batch_save_applies_every_row_in_one_revision(self):
         """Manual-save mode flushes many edited rows at once; one stale revision would
-        reject the rest, so the whole batch must share a single workbook save."""
+        reject the rest, so the whole batch must share a single workspace save."""
         state = self.state()
         rows = [r for r in state["selections"] if r["Project ID"] == state["projects"][0]["Project ID"]][:3]
         batch = {str(r["_row"]): {"Item": f"Batched {i}", "Client Notes": f"note {i}"}
@@ -706,7 +706,7 @@ class BrandingTests(unittest.TestCase):
         from PIL import Image
         from pptx import Presentation
         from branding import load_logo
-        from workbook_store import SELECTION_FIELDS
+        from workspace_store import SELECTION_FIELDS
         project = {"Project ID": "BRAND", "Project Name": "Branding preview"}
         row = {**{key: "" for key in SELECTION_FIELDS}, "Section": "Kitchen", "Item": "Test fixture"}
         wordmark = load_logo(build_lookbook.CFG["logo_print_path"])
@@ -771,7 +771,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_layout_matches_the_approved_template(self):
         import build_lookbook
-        from workbook_store import SELECTION_FIELDS
+        from workspace_store import SELECTION_FIELDS
         template = Path("brand_assets/finish_schedule_template.pdf")
         if not template.exists():
             self.skipTest("Reference template PDF is not available.")
@@ -783,7 +783,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(page_geometry(pdf), page_geometry(template))
 
     def rows(self, count=1, **values):
-        from workbook_store import SELECTION_FIELDS
+        from workspace_store import SELECTION_FIELDS
         return [{**{key: "" for key in SELECTION_FIELDS}, "Section": "Roofing", "Item": f"Item {index}",
                  **values} for index in range(1, count + 1)]
 
@@ -818,7 +818,7 @@ class ScheduleTests(unittest.TestCase):
                                (build_powerpoint.DESC, 10)]:
                 self.assertEqual(spec[0], size)
 
-    def test_descriptions_are_assembled_from_workbook_columns(self):
+    def test_descriptions_are_assembled_from_workspace_columns(self):
         from build_lookbook import description
         cases = [
             ({"Manufacturer": "Sherwin-Williams", "Finish / Color": "White Duck (SW 7010)", "Client Notes": "warm white"},

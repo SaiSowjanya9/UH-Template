@@ -1,5 +1,5 @@
 """
-Build the client finish schedule PDF from the tracker workbook.
+Build the client finish schedule PDF from the tracker workspace.
 
 Usage:
     python build_lookbook.py --project UH-101                              # one project
@@ -41,8 +41,8 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
                                 PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
-from common import BASE_DIR, WORKBOOK, Sheet, clean, open_workbook, location_order, schedule_sort
-from workbook_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
+from common import BASE_DIR, WORKSPACE, Sheet, clean, open_workspace, location_order, schedule_sort
+from workspace_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
 M = 46.8                         # side margins
@@ -123,7 +123,7 @@ def fmt_date(value):
 
 
 def load_data():
-    wb = open_workbook(data_only=True)
+    wb = open_workspace(data_only=True)
     order = location_order(wb)
     projects = OrderedDict()
     for _, data in Sheet(wb["Projects"]).rows():
@@ -153,7 +153,7 @@ def load_data():
 # --------------------------------------------------------------------------
 # Hidden columns
 # --------------------------------------------------------------------------
-# What an export may leave out, chosen per download. Keys are the workbook columns, except
+# What an export may leave out, chosen per download. Keys are the workspace columns, except
 # 'code' and 'details', which name generated blocks rather than a column. 'schedule' covers
 # the PDF, the PowerPoint twin and the fillable copy; 'sheet' is the spec sheet CSV.
 HIDEABLE_COLUMNS = [
@@ -239,7 +239,7 @@ def numbered(rows, prefix):
 
 
 def description(row, include_quantity=True, hidden=()):
-    """One plain-English line per selection, assembled from the workbook columns.
+    """One plain-English line per selection, assembled from the workspace columns.
 
     A Description Override, typed on the fillable schedule, replaces the assembled text and is
     printed as typed: it is literal text, not columns, so hiding a column cannot edit it.
@@ -317,7 +317,7 @@ def public_url(value):
 def resolve_cover(value):
     """Cover Image cell -> image bytes: an app upload (cover:name), a web address, or a file path.
 
-    Uploads land in ./covers beside the workbook; the hosted app resolves the same reference
+    Uploads land in ./covers beside the workspace; the hosted app resolves the same reference
     through its storage backend and passes the bytes in. A source that cannot be read simply
     produces no cover rather than failing the schedule.
     """
@@ -325,7 +325,7 @@ def resolve_cover(value):
     if not value:
         return None
     if value.startswith(COVER_PREFIX):
-        folder = WORKBOOK.parent / "covers"
+        folder = WORKSPACE.parent / "covers"
         path = folder / value[len(COVER_PREFIX):]
         if path.parent.resolve() != folder.resolve() or not path.is_file():
             return None
@@ -341,7 +341,7 @@ def resolve_cover(value):
         except requests.RequestException:
             return None
     path = Path(value)
-    path = path if path.is_absolute() else WORKBOOK.parent / path
+    path = path if path.is_absolute() else WORKSPACE.parent / path
     try:
         return path.read_bytes()
     except OSError:
@@ -788,7 +788,7 @@ def main():
         parser.error(str(error))
     projects, items = load_data()
     if args.spec:
-        wb = open_workbook(data_only=True)
+        wb = open_workspace(data_only=True)
         for pid in (list(projects) if args.all else [args.project]):
             if pid not in projects or not spec_rows(wb, pid):
                 print(f"- {pid}: no line items to export, skipped")

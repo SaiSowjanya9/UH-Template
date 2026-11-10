@@ -1,4 +1,4 @@
-"""Creates the UH Homes Selections Tracker workbook (run once)."""
+"""Creates the UH Homes Selections Tracker workspace (run once)."""
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -24,7 +24,7 @@ ins.title = "Instructions"
 lines = [
     ("UH Homes - Selections Tracker", True, 16),
     ("", False, 10),
-    ("How this workbook works", True, 12),
+    ("How this workspace works", True, 12),
     ("1. Add each project once on the Projects sheet (one row per project, unique Project ID).", False, 10),
     ("2. Add every selection on the Selections sheet. Yellow columns are yours to fill; grey columns hold the product-link details.", False, 10),
     ("3. Paste each product page address into Product URL, with Product Name and Image URL as needed.", False, 10),

@@ -3,7 +3,7 @@
 Reads the settings already in .env and copies the hosted ones to Render, so there is no
 second place to keep them in step. Run it again after changing .env to push the new values.
 
-The service is deliberately a single instance: a save rewrites the whole workbook, so a
+The service is deliberately a single instance: a save rewrites the whole workspace, so a
 second instance would race the first.
 
 `UH_TRUSTED_HOSTS` can only be known once Render has assigned a hostname, so the service is
@@ -27,7 +27,7 @@ START = "waitress-serve --listen=0.0.0.0:$PORT --threads=8 wsgi:application"
 
 # Copied from .env when present. Anything empty is skipped rather than sent blank.
 COPIED = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY", "SUPABASE_BUCKET",
-          "UH_WORKBOOK_NAME", "UH_SECRET_KEY"]
+          "UH_WORKSPACE_NAME", "UH_SECRET_KEY"]
 # Without these the app would either refuse to start or have nothing to serve.
 REQUIRED = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY", "UH_SECRET_KEY"]
 

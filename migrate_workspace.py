@@ -1,12 +1,12 @@
 """
-Bring the master workbook up to date for direct data entry in Excel.
+Bring the master workspace up to date for direct data entry in Excel.
 
 Usage:
-    python migrate_workbook.py            # update the workbook named in .env / the default
-    python migrate_workbook.py --dry-run  # report what would change
+    python migrate_workspace.py            # update the workspace named in .env / the default
+    python migrate_workspace.py --dry-run  # report what would change
 
 Safe to re-run: it only fixes presentation and guidance. Row data is never rewritten.
-Saving goes through WorkbookStore, so the workbook is validated and backed up first, and
+Saving goes through WorkspaceStore, so the workspace is validated and backed up first, and
 the save is refused while Excel holds the file open.
 """
 import argparse
@@ -14,8 +14,8 @@ import argparse
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from common import WORKBOOK, Sheet, clean
-from workbook_store import (CLIENT_STATUSES, SELECTION_FIELDS, WorkbookStore,
+from common import WORKSPACE, Sheet, clean
+from workspace_store import (CLIENT_STATUSES, SELECTION_FIELDS, WorkspaceStore,
                             drop_retired_columns, ensure_list_values, ensure_locations,
                             ensure_selection_columns, ensure_validations)
 
@@ -31,7 +31,7 @@ WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Client Notes": 28
 INSTRUCTIONS = [
     ("UH Homes - Selections Tracker", "title"),
     ("", ""),
-    ("This workbook is the source of truth. You can type directly into it, or use the web app "
+    ("This workspace is the source of truth. You can type directly into it, or use the web app "
      "(python app.py, then open the address it prints). Both read and write these same sheets.", ""),
     ("", ""),
     ("How the workflow runs", "heading"),
@@ -65,7 +65,7 @@ INSTRUCTIONS = [
     ("Every selection grouped by project and category with S.No, Code, Description, Qty, Unit Price, "
      "Markup % and Price, plus a subtotal per category, a total per project and a grand total.", ""),
     ("Price = Qty x Unit Price x (1 + Markup %).", ""),
-    ("It is rebuilt automatically each time the workbook is saved, so do not type into it. "
+    ("It is rebuilt automatically each time the workspace is saved, so do not type into it. "
      "Enter costs in the Unit Price column on Selections and they flow through.", ""),
     ("Prices stay internal: they never appear on the client PDF or PowerPoint.", ""),
     ("", ""),
@@ -76,7 +76,7 @@ INSTRUCTIONS = [
     ("Rules worth knowing", "heading"),
     ("- Changing Item, Product Name, Manufacturer, Model # or Finish clears the old link and "
      "image, because they no longer describe the same product.", ""),
-    ("- Close this workbook in Excel before saving from the web app; the app will not write "
+    ("- Close this workspace in Excel before saving from the web app; the app will not write "
      "to a file Excel has open.", ""),
     ("- Every save keeps a timestamped copy in the backups folder.", ""),
     ("- Product URLs and images are internal review aids and never appear on client documents.", ""),
@@ -102,7 +102,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Report the changes without saving")
     args = parser.parse_args()
 
-    store = WorkbookStore(WORKBOOK)
+    store = WorkspaceStore(WORKSPACE)
     wb, revision = store.snapshot()
     changes = []
 
@@ -146,7 +146,7 @@ def main():
     if args.dry_run:
         print(f"Dry run - {len(changes)} change(s), nothing saved.")
         return
-    store.save(wb, revision, "workbook entry migration")
+    store.save(wb, revision, "workspace entry migration")
     print(f"Saved. {len(changes)} change(s) applied; a backup was kept.")
 
 

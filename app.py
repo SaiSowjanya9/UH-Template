@@ -19,9 +19,9 @@ import build_lookbook
 import common
 import spec_template
 import supabase_store
-from workbook_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
+from workspace_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENTITY_FIELDS, OPTIONAL_SELECTION_FIELDS,
                             PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS,
-                            ValidationError, WorkbookStore, delete_record, ensure_selection_columns,
+                            ValidationError, WorkspaceStore, delete_record, ensure_selection_columns,
                             hyperlink_formula, next_row, parse_hyperlink, put, records,
                             validate_values, detailed_records, set_custom_fields)
 
@@ -35,11 +35,11 @@ REQUIRE_LOGIN = bool(AUTH) and os.getenv("UH_REQUIRE_LOGIN", "1") != "0"
 
 
 def open_store():
-    """The workbook in Supabase Storage when configured, otherwise the local file."""
+    """The workspace in Supabase Storage when configured, otherwise the local file."""
     config = supabase_store.settings()
     if config:
-        return WorkbookStore(supabase_store.SupabaseBackend(config))
-    return WorkbookStore(common.WORKBOOK)
+        return WorkspaceStore(supabase_store.SupabaseBackend(config))
+    return WorkspaceStore(common.WORKSPACE)
 
 
 def trusted_hosts():
@@ -121,7 +121,7 @@ def error_response(error):
     if isinstance(error, ValidationError):
         return jsonify(error=str(error)), 400
     if isinstance(error, PermissionError):
-        return jsonify(error="Close the master workbook in Excel, then retry. Your existing workbook has not been replaced."), 409
+        return jsonify(error="Close the master workspace in Excel, then retry. Your existing workspace has not been replaced."), 409
     if isinstance(error, FileNotFoundError):
         return jsonify(error="A required file is missing. Check the workspace and template configuration."), 404
     app.logger.error("Request failed: %s", type(error).__name__)
@@ -219,7 +219,7 @@ def state():
                        locations=common.location_order(wb),
                        client_statuses=CLIENT_STATUSES,
                        revision=revision,
-                       workbook=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
+                       workspace=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
 
 def payload():
@@ -283,7 +283,7 @@ COVER_PIXEL_LIMIT = 2400
 
 @app.post("/api/projects/<pid>/cover")
 def upload_cover(pid):
-    """Store a cover image outside the workbook and point the project's Cover Image at it."""
+    """Store a cover image outside the workspace and point the project's Cover Image at it."""
     upload = request.files.get("file")
     if not upload:
         raise ValidationError("Choose a PNG or JPEG image.")
@@ -315,7 +315,7 @@ def upload_cover(pid):
 @app.get("/api/covers/<name>")
 def project_cover(name):
     """A stored cover image, for the thumbnail beside the Cover Image field. The name comes
-    from a cover: cell value, so no workbook read is needed to serve it."""
+    from a cover: cell value, so no workspace read is needed to serve it."""
     return send_file(io.BytesIO(store.read_cover(name)),
                      mimetype=COVER_MIME.get(Path(name).suffix, "image/png"))
 
@@ -505,7 +505,7 @@ def export_spec_csv():
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
     writer.writeheader()
-    # Product Link is generated from the URL, never copied from the workbook's own link column.
+    # Product Link is generated from the URL, never copied from the workspace's own link column.
     writer.writerows({**{field: row.get(field, "") for field in fields},
                       PRODUCT_LINK: hyperlink_formula(row.get("Product URL"))} for row in rows)
     name = re.sub(r"[^A-Za-z0-9_-]", "_", project_id)[:50]
@@ -649,7 +649,7 @@ def check_exposure():
                          "for example uh-selections.onrender.com.")
     if not store.remote:
         # A hosted filesystem is temporary, so edits would vanish on the next deploy.
-        raise SystemExit("Refusing to start: UH_HOST is not local but the workbook is a local file, "
+        raise SystemExit("Refusing to start: UH_HOST is not local but the workspace is a local file, "
                          "which a redeploy would discard. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.")
 
 
@@ -664,7 +664,7 @@ if __name__ == "__main__":
         parser.error("Port must be between 1 and 65535.")
     print(f"UH Homes Selections: http://{HOST}:{args.port}")
     if store.remote:
-        print("Workbook stored in Supabase. Sign-in required." if REQUIRE_LOGIN else "Workbook stored in Supabase.")
+        print("Workspace stored in Supabase. Sign-in required." if REQUIRE_LOGIN else "Workspace stored in Supabase.")
     else:
-        print("Local access only. Close the master workbook in Excel before saving changes.")
+        print("Local access only. Close the master workspace in Excel before saving changes.")
     app.run(host=HOST, port=args.port, debug=False)

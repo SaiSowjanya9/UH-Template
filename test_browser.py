@@ -8,7 +8,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
-from workbook_store import WorkbookStore
+from workspace_store import WorkspaceStore
 
 try:
     from playwright.sync_api import sync_playwright, expect
@@ -32,9 +32,9 @@ class BrowserTests(unittest.TestCase):
 
     def test_custom_project_and_selection_fields(self):
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "custom.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "custom.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -103,9 +103,9 @@ class BrowserTests(unittest.TestCase):
         """Every committed cell saves itself and confirms with a toast. The Save button
         stays as a manual fallback: a save the network drops is held for it to retry."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "spec.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "spec.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -170,9 +170,9 @@ class BrowserTests(unittest.TestCase):
         by category. Grouping by location was removed by request, and the chosen heading is
         what the downloads print under."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "groups.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "groups.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -216,9 +216,9 @@ class BrowserTests(unittest.TestCase):
         """A pasted address renders as a "Product Link" anchor; the pencil button
         reopens the input so the stored URL can be viewed or changed."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "link.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "link.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -263,9 +263,9 @@ class BrowserTests(unittest.TestCase):
 
     def test_project_selection_review_and_download_flow(self):
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "test.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "test.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -357,9 +357,9 @@ class BrowserTests(unittest.TestCase):
         person did not cause that race, so the save takes the new revision and goes again
         instead of reporting a conflict."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "conflict.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "conflict.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -403,9 +403,9 @@ class BrowserTests(unittest.TestCase):
         """A workspace must not stay empty because one request landed on a bad moment: the
         first /api/state fails here, and the poll two and a half seconds later fills it in."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "recover.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "recover.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -442,9 +442,9 @@ class BrowserTests(unittest.TestCase):
         way to an empty box, what is typed there is saved on the line item, and a value the
         list does not hold comes back in that box. An empty box keeps the stored value."""
         with tempfile.TemporaryDirectory() as folder:
-            workbook = Path(folder) / "other.xlsx"
-            shutil.copy2(app.common.WORKBOOK, workbook)
-            with patch.object(app, "store", WorkbookStore(workbook)):
+            workspace = Path(folder) / "other.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
                 server = make_server("127.0.0.1", 0, app.app, threaded=True)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
