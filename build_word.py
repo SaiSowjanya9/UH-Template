@@ -548,7 +548,7 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
     return out
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Location"):
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area"):
     """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
     document = new_document(SPEC_TITLE, landscape=True)
     width = content_width(document)

@@ -207,11 +207,12 @@ def group_sections(rows, hidden=()):
     return groups
 
 
-# The spec sheet's group-by chips, as the app offers them.
-SPEC_GROUPS = ("Location", "Room / Area", "Section")
+# The spec sheet's group-by chips, as the app offers them: by room, as the view opens, or by
+# category. Grouping by Location was removed from the view, so an export cannot ask for it either.
+SPEC_GROUPS = ("Room / Area", "Section")
 
 
-def spec_groups(rows, group="Location", hidden=()):
+def spec_groups(rows, group="Room / Area", hidden=()):
     """Rows under the heading the spec sheet is grouped by on screen."""
     if group not in SPEC_GROUPS:
         raise ValueError(f"Group the spec sheet by one of: {', '.join(SPEC_GROUPS)}.")
@@ -726,7 +727,7 @@ def spec_table(items, columns, widths, hidden):
     ]))
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Location"):
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area"):
     """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
     columns = [(column, share) for column, share, key in SPEC_COLUMNS if key not in hidden]
     if not columns:

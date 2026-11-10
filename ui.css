@@ -206,6 +206,9 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 @media(max-width:480px) { .spec-client-fields { grid-template-columns:1fr; } .spec-client-head { flex-direction:column; gap:2px; } }
 .spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
 .spec-toolbar .search-field { flex:1; min-width:220px; }
+.chip-group { display:inline-flex; background:var(--cream); border:1px solid var(--gold-line); border-radius:999px; padding:3px; }
+.chip { border:0; background:none; border-radius:999px; padding:7px 15px; font-size:11px; font-weight:600; color:var(--gold-ink); }
+.chip.active { background:var(--gold); color:#fff; }
 .spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
 #spec-view .spec-toolbar .heading-actions { gap:4px; }
 .spec-toolbar .toolbar-divider { width:1px; height:20px; background:var(--gold-line); margin:0 6px; flex:none; }

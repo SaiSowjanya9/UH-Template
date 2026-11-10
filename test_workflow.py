@@ -515,7 +515,7 @@ class AppTests(unittest.TestCase):
 
     def test_spec_exports_group_the_way_the_view_does(self):
         from pypdf import PdfReader
-        row = next(r for r in self.state()["selections"] if r["Section"] and r["Location"])
+        row = next(r for r in self.state()["selections"] if r["Section"] and r["Room / Area"])
         pid = row["Project ID"]
 
         def headings(group):
@@ -527,9 +527,12 @@ class AppTests(unittest.TestCase):
         # the heading is letter-spaced on the page, exactly as the schedule's are
         spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
         self.assertIn(spaced(row["Section"]), headings("Section"))
-        self.assertIn(spaced(row["Location"]), headings("Location"))
-        self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&group=Nonsense").status_code, 400)
-        self.assertEqual(self.client.get(f"/api/selections/docx?project={pid}&group=Nonsense").status_code, 400)
+        self.assertIn(spaced(row["Room / Area"]), headings("Room / Area"))
+        self.assertIn(spaced(row["Room / Area"]), headings(""))   # the chip the view opens on
+        # the view offers by room and by category only, so Location is as unknown as any other name
+        for group in ("Location", "Nonsense"):
+            self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&group={group}").status_code, 400)
+            self.assertEqual(self.client.get(f"/api/selections/docx?project={pid}&group={group}").status_code, 400)
 
     def test_spec_exports_show_pricing(self):
         """The spec sheet is the internal document, so its downloads carry prices."""

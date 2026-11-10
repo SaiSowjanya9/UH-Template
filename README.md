@@ -17,7 +17,7 @@ If another service occupies port 5000, run `.venv\Scripts\python.exe app.py --po
 1. Add a project, then add its selections (manufacturer, model, finish, room, and quantity).
 2. Open **Spec sheet** to fill in the line items: brand, model, finish, the product link, quantity, unit price and markup. Paste each product page address into the **PRODUCT LINK** column; the cell then shows the words "Product Link" and the pencil reopens the address. Edits save themselves, and **Save** retries anything a dropped connection held back.
 3. Enter the client details at the top of the Spec sheet — client, plan / lot, address and date. They are saved to the project and print in the band at the top of every download.
-4. Group the sheet **by location**, **by room** or **by category**, then use **Import / Export** to download the spec sheet as a **PDF**, a **Word** document or a **CSV**. Each one carries the same columns, the same group headings and every line item shown on screen.
+4. Group the sheet **by room** (as it opens) or **by category**, then use **Import / Export** to download the spec sheet as a **PDF**, a **Word** document or a **CSV**. Each one carries the same columns, the same group headings and every line item shown on screen.
 5. Bring a priced-up **CSV** back in from the same dialog: matching line items are updated, new ones are added, and nothing is removed.
 
 Close Excel before saving through the app. Every workbook write creates a backup in `backups/` and checks for conflicting changes. Edits you save directly in Excel appear in the app, and changing a product's item name, manufacturer, model or finish clears that row's old link and image, because they no longer describe the product.

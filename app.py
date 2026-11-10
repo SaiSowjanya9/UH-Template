@@ -515,7 +515,7 @@ def export_spec_csv():
 
 def group_option(value):
     """The heading the spec sheet is grouped by, as chosen by the view's group-by chips."""
-    group = common.clean(value) or "Location"
+    group = common.clean(value) or "Room / Area"
     if group not in build_lookbook.SPEC_GROUPS:
         raise ValidationError(f"Group the spec sheet by one of: {', '.join(build_lookbook.SPEC_GROUPS)}.")
     return group

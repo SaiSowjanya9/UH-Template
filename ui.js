@@ -3,11 +3,12 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, editor: null,
-                specCollapsed: new Set(), focusSelector: null,
+                specGroup: "Room / Area", specCollapsed: new Set(), focusSelector: null,
                 specPending: new Map(),
                 specLinkEdit: new Set() };
-// The spec sheet is always grouped by Location; a line item's own Location is set in its editor.
-const SPEC_GROUP = "Location";
+// The spec sheet's group-by chips: by room, as it opens, or by category. A line item with nothing
+// in that column sits under a placeholder heading, which is a label rather than a stored value.
+const specPlaceholder = () => (state.specGroup === "Section" ? "Other" : "Unassigned");
 const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -205,21 +206,28 @@ const money = (value) => value.toLocaleString(undefined, { minimumFractionDigits
 const lineTotal = (row) => (Number(row["Unit Price"]) || 0) * (Number(row.Qty) || 1) * (1 + (Number(row["Markup %"]) || 0) / 100);
 
 function specGroups(rows) {
+  const key = state.specGroup, placeholder = specPlaceholder();
   const groups = new Map();
-  for (const row of rows) groups.set(row[SPEC_GROUP] || "Unassigned", []);
-  for (const row of rows) groups.get(row[SPEC_GROUP] || "Unassigned").push(row);
-  const order = state.data.locations || [];
+  for (const row of rows) groups.set(row[key] || placeholder, []);
+  for (const row of rows) groups.get(row[key] || placeholder).push(row);
+  // Categories print in the order the Lists sheet names them; rooms keep the order of the line items.
+  if (key !== "Section") return [...groups];
+  const order = state.data.sections || [];
   return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
 }
 
 function renderSpec() {
   if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
+  document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
   const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Room / Area"], r.Section, r.Location, r["Client Notes"]].join(" ").toLowerCase().includes(query));
   const groups = specGroups(rows);
+  const heading = state.specGroup === "Section"
+    ? (groups.length === 1 ? "category" : "categories")
+    : `room${groups.length === 1 ? "" : "s"}`;
   $("spec-summary").textContent = all.length
-    ? `${groups.length} location${groups.length === 1 ? "" : "s"} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
+    ? `${groups.length} ${heading} · ${rows.length} line item${rows.length === 1 ? "" : "s"}${rows.length !== all.length ? ` of ${all.length}` : ""}`
     : "";
   $("spec-summary").hidden = state.view !== "spec" || !all.length;
   $("spec-add").disabled = !selectedProject() || state.busy;
@@ -327,9 +335,9 @@ function finishSpecDrop(target, after, card) {
   const targetGroup = card?.dataset.specName;
   if (targetGroup && state.data) {
     const dragged = projectRows().find((r) => r._row === from);
-    const current = dragged?.[SPEC_GROUP] || "Unassigned";
+    const current = dragged?.[state.specGroup] || specPlaceholder();
     if (targetGroup !== current) {
-      updates[from] = { [SPEC_GROUP]: targetGroup === "Unassigned" ? "" : targetGroup };
+      updates[from] = { [state.specGroup]: targetGroup === specPlaceholder() ? "" : targetGroup };
     }
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
@@ -697,7 +705,7 @@ $("edit-project").addEventListener("click", () => openEditor("project", selected
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("spec-filter").addEventListener("input", renderSpec);
 // The download carries the spec sheet as it is on screen, under the same group headings.
-const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(SPEC_GROUP)}`;
+const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(state.specGroup)}`;
 const FILE_ACTIONS = {
   csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
   "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
@@ -855,6 +863,7 @@ document.addEventListener("click", (event) => {
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
   if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; $("location-filter").value = ""; render(); }
+  if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
     state.specCollapsed.has(name) ? state.specCollapsed.delete(name) : state.specCollapsed.add(name);
@@ -862,7 +871,7 @@ document.addEventListener("click", (event) => {
   }
   if (button.dataset.specAdd !== undefined) {
     const name = button.dataset.specAdd;   // placeholder group names are not real values
-    const prefill = name === "Unassigned" ? {} : { [SPEC_GROUP]: name };
+    const prefill = name === specPlaceholder() ? {} : { [state.specGroup]: name };
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));

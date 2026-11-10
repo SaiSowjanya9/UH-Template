@@ -165,6 +165,53 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_spec_sheet_groups_by_room_or_category(self):
+        """The toolbar offers the two groupings the view has: by room, which it opens on, and
+        by category. Grouping by location was removed by request, and the chosen heading is
+        what the downloads print under."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "groups.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        chips = page.locator("#spec-view .chip")
+                        expect(chips).to_have_text(["By room", "By category"])
+                        headings = page.locator(".spec-card-head h3")
+
+                        expect(chips.nth(0)).to_have_class("chip active")
+                        rooms = list(dict.fromkeys(page.evaluate("projectRows().map((r) => r['Room / Area'] || 'Unassigned')")))
+                        expect(headings).to_have_text(rooms)   # rooms keep the order of the line items
+                        expect(page.locator("#spec-summary")).to_contain_text(f"{len(rooms)} room")
+                        self.assertIn("group=Room%20%2F%20Area", page.evaluate("specQuery()"))
+
+                        page.get_by_role("button", name="By category").click()
+                        expect(chips.nth(1)).to_have_class("chip active")
+                        expect(chips.nth(0)).to_have_class("chip")
+                        order = page.evaluate("state.data.sections")
+                        sections = list(dict.fromkeys(page.evaluate("projectRows().map((r) => r.Section || 'Other')")))
+                        # categories print in the order the Lists sheet names them
+                        expect(headings).to_have_text(sorted(sections, key=lambda s: order.index(s) + 1 if s in order else 99))
+                        expect(page.locator("#spec-summary")).to_contain_text(f"{len(sections)} categor")
+                        self.assertIn("group=Section", page.evaluate("specQuery()"))
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_spec_product_link_shows_link_text(self):
         """A pasted address renders as a "Product Link" anchor; the pencil button
         reopens the input so the stored URL can be viewed or changed."""
