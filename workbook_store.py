@@ -633,7 +633,7 @@ class LocalBackend:
         try:
             wb.save(temp)
             if self.revision() != revision:
-                raise ConflictError("The workbook changed during the save. Refresh and retry.")
+                raise ConflictError("The workspace changed during the save. Refresh and retry.")
             os.replace(temp, self.path)
         finally:
             Path(temp).unlink(missing_ok=True)
@@ -729,7 +729,7 @@ class WorkbookStore:
         with self.lock:
             validate_workbook(wb)
             if self.backend.revision() != revision:
-                raise ConflictError("The workbook changed. Refresh the page before saving again.")
+                raise ConflictError("The workspace changed since this copy was read. Refresh and retry.")
             if self.backend.locked_elsewhere():
                 raise PermissionError("The workbook is open in another program.")
             self.backend.backup()

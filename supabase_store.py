@@ -14,6 +14,7 @@ import re
 import time
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 from workbook_store import BACKUP_KEEP, ConflictError, ValidationError, history_entry
 
@@ -54,6 +55,13 @@ class Supabase:
         import auth     # local import keeps the dependency one-way
         self.url, self.bucket = config["url"], config["bucket"]
         self.session = requests.Session()
+        # A pooled connection Supabase has already closed fails the next request on it, which
+        # turned one dropped keep-alive into a 500 on page load. Reads are repeated because
+        # they are idempotent; a write is only repeated when the connection never carried it,
+        # so the pointer's compare-and-swap is still decided by exactly one PATCH.
+        self.session.mount(f"{self.url}/", HTTPAdapter(max_retries=Retry(
+            total=3, connect=2, read=2, status=0, other=0, redirect=0,
+            allowed_methods=frozenset({"GET"}), backoff_factor=0.25, raise_on_status=False)))
         # Keep this User-Agent non-browser-like: secret keys are rejected with 401 when the
         # request looks like it came from a browser.
         self.session.headers.update({**auth.key_headers(config["key"]),

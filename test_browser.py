@@ -352,6 +352,91 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_save_that_lands_second_retries_rather_than_blaming_the_user(self):
+        """Two quick edits make the second carry the revision the first just replaced. The
+        person did not cause that race, so the save takes the new revision and goes again
+        instead of reporting a conflict."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "conflict.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors, refused = [], []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+
+                        def conflict_once(route):
+                            if route.request.method == "POST" and not refused:
+                                refused.append(route.request.url)
+                                route.fulfill(status=409, content_type="application/json",
+                                              body='{"error": "This page is out of date."}')
+                            else:
+                                route.continue_()
+
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        page.route("**/api/selections", conflict_once)
+                        cell = page.locator("#spec-groups input.cell").first
+                        cell.fill("Retried finish")
+                        cell.blur()
+                        expect(page.locator("#toast")).to_have_text("Saved.", timeout=20000)
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_count(0)
+                        self.assertEqual(len(refused), 1, "the first save should have been refused once")
+                        page.unroute("**/api/selections")
+                        page.reload()
+                        expect(page.locator("#spec-groups input.cell").first).to_have_value("Retried finish")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_a_failed_first_load_recovers_on_the_next_poll(self):
+        """A workspace must not stay empty because one request landed on a bad moment: the
+        first /api/state fails here, and the poll two and a half seconds later fills it in."""
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "recover.xlsx"
+            shutil.copy2(app.common.WORKBOOK, workbook)
+            with patch.object(app, "store", WorkbookStore(workbook)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                        errors, calls = [], []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+
+                        def fail_once(route):
+                            calls.append(route.request.url)
+                            if len(calls) == 1:
+                                route.fulfill(status=500, content_type="application/json",
+                                              body='{"error": "The operation could not be completed."}')
+                            else:
+                                route.continue_()
+
+                        page.route("**/api/state", fail_once)
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#load-error")).to_be_visible()
+                        expect(page.locator(".project-choice").first).to_be_visible(timeout=20000)
+                        expect(page.locator("#load-error")).not_to_be_visible()
+                        expect(page.locator("#project-name")).not_to_be_empty()
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_other_hands_a_dropdown_over_to_a_typed_value(self):
         """Section and Location are lists that cannot name every home: choosing "Other" gives
         way to an empty box, what is typed there is saved on the line item, and a value the

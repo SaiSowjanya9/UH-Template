@@ -123,9 +123,9 @@ def error_response(error):
     if isinstance(error, PermissionError):
         return jsonify(error="Close the master workbook in Excel, then retry. Your existing workbook has not been replaced."), 409
     if isinstance(error, FileNotFoundError):
-        return jsonify(error="A required file is missing. Check the workbook and template configuration."), 404
+        return jsonify(error="A required file is missing. Check the workspace and template configuration."), 404
     app.logger.error("Request failed: %s", type(error).__name__)
-    return jsonify(error="The operation could not be completed. Your source workbook is preserved; check the terminal and retry."), 500
+    return jsonify(error="The operation could not be completed. Nothing was changed; check the terminal and retry."), 500
 
 
 @app.get("/")
@@ -225,14 +225,14 @@ def state():
 def payload():
     data = request.get_json()
     if not isinstance(data, dict) or not isinstance(data.get("revision"), str):
-        raise ValidationError("A workbook revision is required. Refresh this page.")
+        raise ValidationError("This request is missing its page revision. Refresh this page.")
     return data
 
 
 def current(data):
     wb, revision = store.snapshot()
     if data["revision"] != revision:
-        raise ConflictError("The workbook changed. Refresh before saving your changes.")
+        raise ConflictError("This page is out of date \u2014 refresh it, then make the change again.")
     return wb, revision
 
 

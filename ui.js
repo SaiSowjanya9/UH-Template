@@ -63,6 +63,22 @@ async function refresh() {
   render();
 }
 
+// Every write carries the revision the page last saw, so the save that landed a moment ago -
+// usually the previous cell or field this person edited - makes the next one conflict. That
+// edit is still exactly what they asked for, so take the current revision and send it once
+// more rather than showing them a race they did not cause. The check runs after the refresh:
+// an edit whose row has since gone must not be reapplied blind.
+async function persist(path, body, stillThere) {
+  try {
+    return await api(path, body);
+  } catch (error) {
+    if (error.status !== 409) throw error;
+    await refresh();
+    if (stillThere && !stillThere()) throw error;
+    return await api(path, body);
+  }
+}
+
 function setBusy(value, message = "") {
   state.busy = value;
   $("busy-banner").hidden = !value;
@@ -356,13 +372,11 @@ function finishSpecDrop(target, after, card) {
   action(async () => {
     const payload = { project: state.project, order, updates };
     try {
-      await api("/api/selections/order", payload);
+      // The same swap stays valid against a newer revision, so persist retries it for us.
+      await persist("/api/selections/order", payload);
     } catch (error) {
-      if (error.status !== 409) { await refresh().catch(() => {}); throw error; }
-      // Someone (or an Excel save) may have landed between the last poll and this drop; the
-      // same swap is still valid against the new revision, so refresh and retry once.
-      await refresh();
-      await api("/api/selections/order", payload);
+      await refresh().catch(() => {});
+      throw error;
     }
     remapPendingSpec(order, all);
     await refresh();
@@ -406,7 +420,8 @@ async function saveProjectField(input) {
   if (before === value) return;
   state.focusSelector = `[data-project-field="${CSS.escape(field)}"]`;
   // the Project ID travels with every edit so the server updates this row instead of adding one
-  await api("/api/projects", { values: { "Project ID": project["Project ID"], [field]: value } });
+  await persist("/api/projects", { values: { "Project ID": project["Project ID"], [field]: value } },
+                () => !!selectedProject());
   await refresh();
   toast("Saved.");
 }
@@ -419,7 +434,8 @@ async function saveProjectCustom(input) {
   if (!fields[index] || fields[index][key] === input.value.trim()) return;
   fields[index][key] = input.value.trim();
   state.focusSelector = `[data-custom-index="${index}"][data-custom-key="${key}"]`;
-  await api("/api/projects", { values: { "Project ID": project["Project ID"] }, custom_fields: fields });
+  await persist("/api/projects", { values: { "Project ID": project["Project ID"] }, custom_fields: fields },
+                () => !!selectedProject());
   await refresh();
   toast("Saved.");
 }
@@ -442,7 +458,8 @@ async function saveCell(input) {
   input.classList.add("dirty");
   state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
   try {
-    await api("/api/selections", { row, values: { [field]: value } });
+    await persist("/api/selections", { row, values: { [field]: value } },
+                 () => projectRows().some((r) => r._row === row));
     dropHeldSpecEdit(row, field);
     await refresh();
     toast("Saved.");
@@ -633,7 +650,9 @@ setInterval(async () => {
   polling = true;
   try {
     const data = await api("/api/state");
-    if (!state.busy && !$("editor").open && data.revision !== state.data.revision) {
+    // state.data is null when the very first load failed, so this poll is also the recovery:
+    // a workspace must not stay empty because one request happened to land on a bad moment.
+    if (!state.busy && !$("editor").open && data.revision !== state.data?.revision) {
       state.data = data;
       if (!selectedProject()) state.project = data.projects[0]?.["Project ID"] || "";
       $("load-error").hidden = true;
@@ -759,8 +778,9 @@ async function specSaveAll() {
   const batch = Object.fromEntries(state.specPending);
   setBusy(true, "Saving changes…");
   try {
-    await api("/api/selections", { batch });
-    state.specPending.clear();   // only once the workbook has them
+    await persist("/api/selections", { batch },
+                 () => Object.keys(batch).every((row) => projectRows().some((r) => r._row === Number(row))));
+    state.specPending.clear();   // only once the save has them
     await refresh();
     toast(`Saved ${count} change${count === 1 ? "" : "s"}.`);
   } finally { setBusy(false); }
@@ -889,5 +909,5 @@ document.addEventListener("click", (event) => {
 refresh().catch((error) => {
   $("load-error").textContent = error.message;
   $("load-error").hidden = false;
-  $("project-list").textContent = "Workbook unavailable";
+  $("project-list").textContent = "Workspace unavailable";
 });
