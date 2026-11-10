@@ -426,6 +426,8 @@ class RenderDeployTests(unittest.TestCase):
                     if url.endswith("/services") and method == "POST":
                         return {"service": {"id": "srv-9", "name": "uh-selections", "slug": "uh-selections",
                                             "serviceDetails": {"url": "https://uh-selections-ab12.onrender.com"}}}
+                    if url.endswith("/deploys"):
+                        return {"id": "dep-1", "status": "build_in_progress", "commit": {"id": "c0ffee1234"}}
                     return {}
             return Response()
 
@@ -469,7 +471,24 @@ class RenderDeployTests(unittest.TestCase):
             result = deploy_render.deploy(session=session)
         self.assertFalse(result["created"])
         self.assertEqual(result["service_id"], "srv-old")
-        self.assertFalse([c for c in session.calls if c["method"] == "POST"])
+        self.assertFalse([c for c in session.calls if c["method"] == "POST" and c["url"].endswith("/services")])
+
+    def test_the_current_commit_is_deployed_rather_than_hoped_for(self):
+        """Render redeploys on an environment change only when a value changed, and on a push
+        only while its GitHub connection is live. The host ran three commits behind for a day
+        on that assumption, so the deploy is now asked for outright."""
+        existing = [{"service": {"id": "srv-old", "name": "uh-selections", "slug": "uh-selections",
+                                 "serviceDetails": {"url": "https://uh-selections.onrender.com"}}}]
+        session = self.Session(existing=existing)
+        with patch.dict("os.environ", self.ENV):
+            result = deploy_render.deploy(session=session)
+        started = [c for c in session.calls if c["url"].endswith("/services/srv-old/deploys")]
+        self.assertEqual([c["method"] for c in started], ["POST"])
+        self.assertEqual(result["deploy_id"], "dep-1")
+        self.assertEqual(result["commit"], "c0ffee12")
+        # the settings have to be in place before the build that will run with them
+        self.assertLess(session.calls.index(next(c for c in session.calls if c["method"] == "PUT")),
+                        session.calls.index(started[0]))
 
     def test_missing_supabase_settings_stop_the_deploy_before_it_configures_anything(self):
         session = self.Session()

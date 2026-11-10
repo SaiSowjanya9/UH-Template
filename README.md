@@ -70,9 +70,10 @@ the app itself needs a host such as Render (`render.yaml` is included).
    to `.env`, which creates the service, copies the hosted settings across and sets
    `UH_TRUSTED_HOSTS` to the hostname Render assigns; or use `render.yaml` from the dashboard
    (**New → Blueprint**) and set that hostname and the `sync: false` secrets by hand.
-   `deploy_render.py` is safe to re-run: it reuses an existing service and just pushes the
-   current `.env` values. Use `--plan starter` to avoid the free plan's sleeping, and
-   `--region` to match your Supabase project.
+   `deploy_render.py` is safe to re-run: it reuses an existing service, pushes the current
+   `.env` values and then deploys whatever is at the top of `main`, so re-running it after a
+   `git push` is how the host is brought up to date. Use `--plan starter` to avoid the free
+   plan's sleeping, and `--region` to match your Supabase project.
 
 **It must run as exactly one process.** The workbook is saved whole, so a second worker would
 race the first's saves. `wsgi.py` is the entry point and `waitress-serve --threads=8` is the

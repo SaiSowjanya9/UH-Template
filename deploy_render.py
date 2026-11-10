@@ -3,12 +3,14 @@
 Reads the settings already in .env and copies the hosted ones to Render, so there is no
 second place to keep them in step. Run it again after changing .env to push the new values.
 
-The service is deliberately a single instance: automatic lookup is a background thread and
-saves rewrite the whole workbook, so a second instance would race the first.
+The service is deliberately a single instance: a save rewrites the whole workbook, so a
+second instance would race the first.
 
 `UH_TRUSTED_HOSTS` can only be known once Render has assigned a hostname, so the service is
-created first and the variables are written afterwards, which also triggers the real deploy.
-No secret value is ever printed; only the names of the variables that were sent.
+created first and the variables are written afterwards. A deploy is then asked for by name,
+because nothing else can be relied on to ship a commit: Render only redeploys on an
+environment change when a value actually changed, and only on a push while its GitHub
+connection is live. No secret value is ever printed; only the names of the variables sent.
 """
 import os
 import re
@@ -92,6 +94,16 @@ class Render:
         body = [{"key": key, "value": value} for key, value in variables.items()]
         self._call("PUT", f"/services/{service_id}/env-vars", "set the environment variables", json=body)
 
+    def deploy_branch_head(self, service_id):
+        """Build and release whatever is at the top of BRANCH now.
+
+        Asking outright is the only dependable way to ship a commit. Render supersedes a
+        build already running, so the extra request costs nothing when something else did
+        start one.
+        """
+        return self._call("POST", f"/services/{service_id}/deploys", "start a deploy",
+                          json={"clearCache": "do_not_clear"})
+
 
 def hostname_of(service):
     url = ((service.get("serviceDetails") or {}).get("url") or "").strip()
@@ -126,8 +138,10 @@ def deploy(token=None, owner_email=None, region="oregon", plan="free", session=N
     hostname = hostname_of(service)
     variables = hosted_variables(hostname)
     api.set_env_vars(service["id"], variables)
+    started = api.deploy_branch_head(service["id"])
     return {"workspace": workspace["name"], "service_id": service["id"], "created": created,
-            "hostname": hostname, "url": f"https://{hostname}", "variables": sorted(variables)}
+            "hostname": hostname, "url": f"https://{hostname}", "variables": sorted(variables),
+            "deploy_id": started.get("id", ""), "commit": (started.get("commit") or {}).get("id", "")[:8]}
 
 
 if __name__ == "__main__":
@@ -151,5 +165,6 @@ if __name__ == "__main__":
     print(f"Service:    {result['service_id']} ({'created' if result['created'] else 'already existed'})")
     print(f"URL:        {result['url']}")
     print(f"Variables:  {', '.join(result['variables'])}")
+    print(f"Deploy:     {result['deploy_id']} building {BRANCH} {result['commit']}".rstrip())
     print("\nRender is building now; the first deploy takes a few minutes.")
     print(f"When it is live, open {result['url']} and sign in.")
