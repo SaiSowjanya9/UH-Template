@@ -72,6 +72,12 @@ OUT = BASE_DIR / "output"
 # --------------------------------------------------------------------------
 CFG = json.loads((BASE_DIR / "lookbook_config.json").read_text(encoding="utf-8"))
 C = {key: HexColor(value) for key, value in CFG["colors"].items()}
+# The spec sheet is the internal working copy, so by request it prints on plain white and is
+# ruled in black at the same weights, while the client finish schedule keeps the studio's
+# cream paper and gold rules. The client details band is deliberately left out of it: cream
+# fill and gold field underlines as before. No text, link or logo colour changes either.
+SHEET_COLORS = {"paper": "#FFFFFF", "rule": "#000000", **CFG.get("sheet_colors", {})}
+SHEET = {key: HexColor(value) for key, value in SHEET_COLORS.items()}
 SCHEDULE = CFG.get("schedule", {})
 FONT_H, FONT_B, FONT_BB = "Helvetica", "Helvetica", "Helvetica-Bold"
 for key, attr, name in [("heading", "FONT_H", "BrandHeading"), ("body", "FONT_B", "BrandBody"),
@@ -485,19 +491,20 @@ def mark_bottom(width=MARK_W):
     return FOOT_BASE + (cap - height) / 2
 
 
-def paper(canvas, page_w, page_h):
+def paper(canvas, page_w, page_h, color=None):
     """The studio's cream sheet, laid under everything else; reportlab leaves paper white."""
-    canvas.setFillColor(C["paper"])
+    canvas.setFillColor(color or C["paper"])
     canvas.rect(0, 0, page_w, page_h, stroke=0, fill=1)
 
 
-def furniture(canvas, doc, title, draft, landscape=False):
+def furniture(canvas, doc, title, draft, landscape=False, sheet=False):
     """Header and footer, repeated on every page. Positions hang off the page edges so the
-    same furniture fits the landscape spec sheet."""
+    same furniture fits the landscape spec sheet, and `sheet` prints it on the spec sheet's
+    white page with black rules."""
     page_w, page_h = (LAND_W, LAND_H) if landscape else (PAGE_W, PAGE_H)
     content_w = page_w - 2 * M
     canvas.saveState()
-    paper(canvas, page_w, page_h)
+    paper(canvas, page_w, page_h, SHEET["paper"] if sheet else None)
     logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M,
                              page_h - 57.6, height=LOGO_H)
     if not logo_width:
@@ -507,10 +514,10 @@ def furniture(canvas, doc, title, draft, landscape=False):
     place(canvas, page_w - M, page_h - 39.6, eyebrow, FONT_BB, 7, C["accent"], "right")
     size, shown = fit(title, FONT_H, 15, content_w - logo_width - 12, minimum=9)   # keep clear of the wordmark
     place(canvas, page_w - M, page_h - 55.44, shown, FONT_H, size, C["dark"], "right")
-    canvas.setStrokeColor(C["dark"])
+    canvas.setStrokeColor(SHEET["rule"] if sheet else C["dark"])
     canvas.setLineWidth(0.8)
     canvas.line(M, page_h - 72, page_w - M, page_h - 72)
-    canvas.setStrokeColor(C["hairline"])
+    canvas.setStrokeColor(SHEET["rule"] if sheet else C["hairline"])
     canvas.setLineWidth(0.5)
     canvas.line(M, FOOT_RULE_Y, page_w - M, FOOT_RULE_Y)
     has_mark = brand_image(canvas, CFG.get("logo_mark_path"), M, mark_bottom(), width=MARK_W)
@@ -630,10 +637,11 @@ class Band(Flowable):
 class Heading(Flowable):
     """Letter-spaced section heading with a rule running past the right margin."""
 
-    def __init__(self, text, width=CONTENT_W, keep=True):
+    def __init__(self, text, width=CONTENT_W, keep=True, rule=None):
         super().__init__()
         self.text, self.width = spaced_caps(text), width
         self.keepWithNext = 1 if keep else 0
+        self.rule = rule or C["heading_rule"]
 
     def wrap(self, *_):
         return self.width, HEADING_H
@@ -641,13 +649,13 @@ class Heading(Flowable):
     def draw(self):
         canvas = self.canv
         place(canvas, PAD_X, 5, self.text, FONT_BB, 10, C["dark"])
-        canvas.setStrokeColor(C["heading_rule"])
+        canvas.setStrokeColor(self.rule)
         canvas.setLineWidth(0.5)
         canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 10) + HEADING_GAP, 8,
                     self.width + HEADING_OVERHANG, 8)
 
 
-def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM):
+def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM, rule=None):
     """A section heading with its rows: the rows may split across pages, but the heading is
     never left stranded at the foot of one.
 
@@ -656,7 +664,7 @@ def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM):
     maxHeight of the frame tells KeepTogether to split the rows in place instead, and only
     break the page when the heading itself no longer fits.
     """
-    return KeepTogether([Heading(text, width, keep=False), table], maxHeight=frame_h)
+    return KeepTogether([Heading(text, width, keep=False, rule=rule), table], maxHeight=frame_h)
 
 
 class SignOff(Flowable):
@@ -787,7 +795,8 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     """A repeated-header table of every priced line item, one row per selection.
 
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
-    short values, many of them empty, read as one drifting line of text without them.
+    short values, many of them empty, read as one drifting line of text without them. They
+    are black at the studio weights, because this sheet prints on white.
     """
     data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
@@ -803,9 +812,9 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
         ("RIGHTPADDING", (0, 0), (-1, -1), pad_x),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.5, C["heading_rule"]),
-        ("LINEBELOW", (0, 1), (-1, -2), 0.4, C["hairline"]),
-        ("LINEAFTER", (0, 0), (-2, -1), 0.4, C["hairline"]),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, SHEET["rule"]),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.4, SHEET["rule"]),
+        ("LINEAFTER", (0, 0), (-2, -1), 0.4, SHEET["rule"]),
     ]))
 
 
@@ -821,8 +830,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         if index:
             story.append(Spacer(0, SECTION_GAP))
         table = spec_table(items, columns, widths, hidden, page.pad_x)
-        story.append(section_block(section, table, page.content_w, page.body_top - BODY_BOTTOM)
-                     if section else table)
+        story.append(section_block(section, table, page.content_w, page.body_top - BODY_BOTTOM,
+                                   rule=SHEET["rule"]) if section else table)
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)
@@ -840,7 +849,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     doc.addPageTemplates([PageTemplate("spec", [frame],
                                        onPage=lambda canvas, document: furniture(canvas, document,
                                                                                  SPEC_TITLE, False,
-                                                                                 landscape=page.landscape))])
+                                                                                 landscape=page.landscape,
+                                                                                 sheet=True))])
     doc.build(story)
     return out
 

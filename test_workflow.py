@@ -1030,6 +1030,40 @@ def page_geometry(path):
     return sorted(marks)
 
 
+def pdf_ink(path):
+    """What the first page is painted in: the fill colours used, and every rule by colour.
+
+    reportlab writes colours as their own operators ('1 1 1 rg' to fill, '... RG' to stroke)
+    and each rule as one line op, so a count per stroke colour says which rules are drawn
+    in what - the page, the client band and the rules can be told apart.
+    """
+    from pypdf import PdfReader
+    stream = PdfReader(str(path)).pages[0].get_contents().get_data().decode("latin-1")
+    fills, rules, stroke = set(), {}, None
+    for line in stream.splitlines():
+        if match := re.fullmatch(r"([\d.]+) ([\d.]+) ([\d.]+) (rg|RG)", line):
+            color = tuple(round(float(match[index]), 3) for index in (1, 2, 3))
+            if match[4] == "rg":
+                fills.add(color)
+            else:
+                stroke = color
+        elif line.endswith(" S"):
+            rules[stroke] = rules.get(stroke, 0) + 1
+    return fills, rules
+
+
+def rgb(value):
+    """'#AA8960' as the fractions a PDF operator carries."""
+    return tuple(round(int(value.lstrip("#")[index:index + 2], 16) / 255, 3) for index in (0, 2, 4))
+
+
+def cell_borders(document):
+    """Every colour the table cell rules in a Word document are drawn in."""
+    from docx.oxml.ns import qn
+    return {edge.get(qn("w:color")) for table in document.tables for row in table.rows
+            for cell in row.cells for borders in cell._tc.iter(qn("w:tcBorders")) for edge in borders}
+
+
 class ScheduleTests(unittest.TestCase):
     """The client deliverable follows the approved finish schedule template."""
 
@@ -1081,6 +1115,43 @@ class ScheduleTests(unittest.TestCase):
             for spec, size in [(build_powerpoint.CODE, 9), (build_powerpoint.ITEM, 10),
                                (build_powerpoint.DESC, 10)]:
                 self.assertEqual(spec[0], size)
+
+    def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
+        """The internal sheet is the one document on plain paper: a white page ruled in black
+        at the studio weights, with the client details box left exactly as it was - cream,
+        with its four gold field underlines. The client finish schedule keeps the cream sheet
+        and its gold rules, so the two are told apart at a glance.
+        """
+        import build_lookbook
+        import build_word
+        from docx import Document
+        from docx.oxml.ns import qn
+        colors = build_lookbook.CFG["colors"]
+        band, gold, cream = (rgb(colors[key]) for key in ("band", "field_rule", "hairline"))
+        project = {"Project Name": "T", "Client Name": "C"}
+        rows = self.rows(3, **{"Room / Area": "Whole House"})
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            fills, rules = pdf_ink(build_lookbook.build_spec("UH-1", project, rows, folder))
+            self.assertIn(rgb("#FFFFFF"), fills)        # the page under everything
+            self.assertIn(band, fills)                  # the client details box, untouched
+            self.assertEqual(rules.get(gold), 4)        # and only its own four underlines
+            self.assertEqual(set(rules) - {gold}, {rgb("#000000")})
+
+            # the client schedule is left on cream paper with its gold and hairline rules
+            fills, rules = pdf_ink(build_lookbook.build("UH-1", project, rows, False, folder))
+            self.assertIn(rgb(colors["paper"]), fills)
+            self.assertNotIn(rgb("#FFFFFF"), fills)
+            self.assertIn(cream, rules)
+
+            # the Word copies of each say the same thing
+            sheet = Document(str(build_word.build_spec("UH-1", project, rows, folder)))
+            self.assertEqual(sheet.element.find(qn("w:background")).get(qn("w:color")), "FFFFFF")
+            self.assertEqual(cell_borders(sheet), {"000000"})
+            schedule = Document(str(build_word.build("UH-1", project, rows, False, folder)))
+            self.assertEqual(schedule.element.find(qn("w:background")).get(qn("w:color")),
+                             colors["paper"].lstrip("#").upper())
+            self.assertEqual(cell_borders(schedule), {colors["hairline"].lstrip("#").upper()})
 
     def test_descriptions_are_assembled_from_workspace_columns(self):
         from build_lookbook import description

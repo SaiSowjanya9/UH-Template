@@ -166,7 +166,9 @@ The app's **Import / Export** dialog downloads the selected project's spec sheet
 landscape page carrying the client details band, the group headings the view is grouped by, and
 one row per line item under the same eight column headers as the screen: ITEM, MANUFACTURER,
 MODEL #, FINISH / COLOR, PRODUCT LINK, QTY / UNIT, UNIT PRICE and MARKUP %. Pricing is internal,
-so treat the spec sheet as an internal document.
+so treat the spec sheet as an internal document — and it looks like one: the PDF and Word
+copies print on plain white and are ruled in black, with only the client details box keeping
+the studio's cream and gold.
 
 - **Spec sheet · PDF** – `build_lookbook.build_spec`, for reading and printing.
 - **Spec sheet · Word** – `build_word.build_spec`, the same page as editable paragraphs and tables.
@@ -217,7 +219,10 @@ spec sheet, `--hide "code,Qty"` to leave columns out).
 ### Branding – `lookbook_config.json`
 
 Company name, the `tagline` used as the eyebrow, contact line, logos, colors, fonts, and the
-`schedule` defaults (`title`, `code_prefix`, `note`, `signatures`). `logo_path` is the
+`schedule` defaults (`title`, `code_prefix`, `note`, `signatures`). `colors` is the studio
+palette the client schedule is set in; `sheet_colors` is the spec sheet's own paper and rule
+colour, white and black, because it is the internal working copy – its client details box
+keeps the cream and gold regardless. `logo_path` is the
 white/gold wordmark for dark backgrounds (app sidebar); `logo_print_path` is the dark wordmark
 used on the printed schedule. Lato is included under `brand_assets/fonts/` (SIL OFL, license
 alongside the files); to use different brand fonts, drop the `.ttf` files in and set

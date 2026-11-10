@@ -49,7 +49,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             HEADING_OVERHANG, HIDEABLE, ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W,
                             NOTE_STYLE, OUT, PAD_X, PAD_Y,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
+                            SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
                             band_values, clean, code_prefix, description, fit, group_sections,
                             hidden_columns, load_data, mark_bottom, numbered, presentation_details,
                             product_link, row_widths, schedule_title, spaced_caps, spec_columns,
@@ -57,6 +57,8 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
+# The spec sheet's own paper and rules: white and black, as in the PDF twin.
+SHEET = {key: value.lstrip("#").upper() for key, value in SHEET_COLORS.items()}
 FONTS = CFG.get("fonts", {})
 FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
 # (font size, leading) taken from the PDF's styles so one change moves both deliverables.
@@ -308,8 +310,9 @@ def plain(paragraph):
     return paragraph
 
 
-def furniture(section, title, draft, content_w):
-    """Header and footer, which Word then repeats on every page."""
+def furniture(section, title, draft, content_w, sheet=False):
+    """Header and footer, which Word then repeats on every page; `sheet` rules them in black
+    for the spec sheet's white page."""
     head = section.header
     head.is_linked_to_previous = False
     eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
@@ -317,7 +320,7 @@ def furniture(section, title, draft, content_w):
           COLORS["accent"], bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT, leading=9)
     banner = shape(plain(head.add_paragraph()), leading=LOGO_H + 2)
     banner.paragraph_format.tab_stops.add_tab_stop(Pt(content_w), WD_TAB_ALIGNMENT.RIGHT)
-    rule(banner, "bottom", 0.8, COLORS["dark"])
+    rule(banner, "bottom", 0.8, SHEET["rule"] if sheet else COLORS["dark"])
     drawn = picture(banner, CFG.get("logo_print_path") or CFG.get("logo_path"), height=LOGO_H)
     if not drawn:
         run_text(banner, CFG["company_name"], 13, COLORS["dark"], bold=True)
@@ -335,7 +338,7 @@ def furniture(section, title, draft, content_w):
     # the symbol hangs below the words, so the line is a floor Word may grow rather than a cage
     line.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
     line.paragraph_format.tab_stops.add_tab_stop(Pt(content_w), WD_TAB_ALIGNMENT.RIGHT)
-    rule(line, "top", 0.5, COLORS["hairline"])
+    rule(line, "top", 0.5, SHEET["rule"] if sheet else COLORS["hairline"])
     if picture(line, CFG.get("logo_mark_path"), width=MARK_W, shift=mark_bottom() - FOOT_BASE):
         run_text(line, "   ", FOOT_SIZE, COLORS["muted"])
     run_text(line, f"{clean(CFG.get('contact_line', ''))}\tPage ", FOOT_SIZE, COLORS["muted"])
@@ -343,21 +346,21 @@ def furniture(section, title, draft, content_w):
                                                half=round(FOOT_SIZE * 2), color=COLORS["muted"])))
 
 
-def paper(document):
+def paper(document, color=None):
     """The cream sheet, as Word expresses it: a document background it has to be told to show.
 
     Word still treats a page colour as a screen setting, so a printed copy needs 'Print
     background colors and images'; the band, rules and type carry the theme regardless.
     """
     background = OxmlElement("w:background")
-    background.set(qn("w:color"), COLORS["paper"])
+    background.set(qn("w:color"), color or COLORS["paper"])
     document.element.insert(0, background)          # w:background precedes w:body
     property_element(document.settings.element, "w:displayBackgroundShape", SETTINGS_ORDER)
 
 
-def new_document(title, draft=False, landscape=False):
+def new_document(title, draft=False, landscape=False, sheet=False):
     document = Document()
-    paper(document)
+    paper(document, SHEET["paper"] if sheet else None)
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = FAMILY, Pt(DESC[0])
     normal.font.color.rgb = RGBColor.from_string(COLORS["body"])
@@ -370,7 +373,7 @@ def new_document(title, draft=False, landscape=False):
     section.left_margin = section.right_margin = Pt(M)
     section.top_margin, section.bottom_margin = Pt(PAGE_H - BODY_TOP), Pt(BODY_BOTTOM)
     section.header_distance, section.footer_distance = Pt(HEADER_TOP), Pt(FOOTER_BOTTOM)
-    furniture(section, title, draft, content_width(document))
+    furniture(section, title, draft, content_width(document), sheet)
     for paragraph in list(document.paragraphs):       # the template's empty first line
         paragraph._p.getparent().remove(paragraph._p)
     return document
@@ -568,7 +571,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     """The internal spec sheet: the app's line items and columns, under the same headings,
     on the page orientation the download asked for."""
     page = spec_page(orientation)
-    document = new_document(SPEC_TITLE, landscape=page.landscape)
+    document = new_document(SPEC_TITLE, landscape=page.landscape, sheet=True)
     width = content_width(document)
     band(document, band_values(project), width)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
@@ -582,7 +585,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         keep_whole(table.rows[0], header=True)
         for cell, (column, _) in zip(titles, columns):
             write(cell.paragraphs[0], column.upper(), 6.5, COLORS["muted"], bold=True, leading=9)
-            cell_rule(cell, "bottom", 0.5, COLORS["heading_rule"])
+            cell_rule(cell, "bottom", 0.5, SHEET["rule"])
         for position, row in enumerate(items):
             cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
             keep_whole(table.rows[position + 1])
@@ -594,7 +597,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                 elif column != PRODUCT_LINK:
                     write(cell.paragraphs[0], spec_value(row, column), 8, COLORS["body"], leading=10.5)
                 if position < len(items) - 1:
-                    cell_rule(cell, "bottom", 0.4, COLORS["hairline"])
+                    cell_rule(cell, "bottom", 0.4, SHEET["rule"])
             if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
                 write(cells[0].add_paragraph(), "Not in lookbook", 6.5, COLORS["muted"], leading=9)
     destination = finish(document, pid, project, SPEC_TITLE, output_dir,

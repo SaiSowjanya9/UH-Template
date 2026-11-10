@@ -17,6 +17,10 @@
     "field_rule": "#AA8960",
     "paper": "#FAF8F1"
   },
+  "sheet_colors": {
+    "paper": "#FFFFFF",
+    "rule": "#000000"
+  },
   "fonts": {
     "family": "Arial",
     "heading": "brand_assets/fonts/LiberationSans-Regular.ttf",
