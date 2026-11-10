@@ -41,7 +41,7 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
                                 PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
-from common import BASE_DIR, WORKSPACE, Sheet, clean, open_workspace, location_order, schedule_sort
+from common import BASE_DIR, WORKSPACE, Sheet, clean, open_workspace, location_order
 from workspace_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
@@ -778,12 +778,14 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
 
 
 def spec_rows(wb, pid):
-    """Every line item of a project in spec-sheet order; the lookbook flag is a note, not a filter."""
-    rows = [{**{k: clean(v) for k, v in data.items()}, "_row": row}
+    """Every line item of a project in workspace order, which is the order the view shows.
+
+    The lookbook flag is a note, not a filter, and the rows are deliberately left unsorted:
+    `schedule_sort` is the finish schedule's Location order and would reshuffle the sheet.
+    """
+    return [{**{k: clean(v) for k, v in data.items()}, "_row": row}
             for row, data in Sheet(wb["Selections"]).rows()
             if clean(data.get("Project ID")) == pid]
-    schedule_sort(rows, wb)
-    return rows
 
 
 def main():

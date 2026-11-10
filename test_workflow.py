@@ -431,7 +431,7 @@ class AppTests(unittest.TestCase):
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         self.assertEqual(current["Product URL"], "https://example.com/p")
 
-        # the exported file is sorted by category, so find the linked line by its identity
+        # rows are matched on identity rather than position, so find the linked line by its own
         def index_of(record):
             return next(i for i, line in enumerate(lines)
                         if (line["Location"], line["Room / Area"], line["Item"]) == (record["Location"], record["Room / Area"], record["Item"]))
@@ -533,6 +533,37 @@ class AppTests(unittest.TestCase):
         for group in ("Location", "Nonsense"):
             self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&group={group}").status_code, 400)
             self.assertEqual(self.client.get(f"/api/selections/docx?project={pid}&group={group}").status_code, 400)
+
+    def test_spec_exports_keep_the_order_the_view_shows(self):
+        """A download must read top to bottom like the screen, which is workspace order.
+
+        Sorting the rows by Location instead moved every heading: a row dragged into place on
+        the spec sheet landed somewhere else in its own PDF.
+        """
+        from pypdf import PdfReader
+        pid = self.state()["projects"][0]["Project ID"]
+        mine = lambda: [r for r in self.state()["selections"] if r["Project ID"] == pid]
+        first, last = mine()[0], mine()[-1]
+        # Locations the list puts last and first, so a location-ordered export would swap these
+        # two rows end for end; distinctive room names make their headings unmistakable.
+        self.post("/api/selections", {"row": first["_row"],
+                                      "values": {"Room / Area": "Zulu Suite", "Location": "Bulk Items"}})
+        self.post("/api/selections", {"row": last["_row"],
+                                      "values": {"Room / Area": "Alpha Nook", "Location": "1st Floor"}})
+        rows = mine()
+        self.assertEqual([rows[0]["_row"], rows[-1]["_row"]], [first["_row"], last["_row"]])
+
+        _, lines = self.exported_spec_csv(pid)
+        self.assertEqual([line["Item"] for line in lines], [r["Item"] for r in rows])
+
+        pdf = self.client.get(f"/api/selections/pdf?project={pid}")
+        self.assertEqual(pdf.status_code, 200)
+        text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
+        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        self.assertLess(text.index(spaced("Zulu Suite")), text.index(spaced("Alpha Nook")))
+
+        word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())
+        self.assertLess(word.index(spaced("Zulu Suite")), word.index(spaced("Alpha Nook")))
 
     def test_spec_exports_show_pricing(self):
         """The spec sheet is the internal document, so its downloads carry prices."""

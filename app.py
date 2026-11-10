@@ -500,7 +500,7 @@ def export_spec_csv():
         if not project:
             raise ValidationError("Choose a valid project.")
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
-    common.schedule_sort(rows, wb)
+    # Workspace order, so the file reads like the view; the import matches on spec_key, not position.
     fields = csv_fields(hidden)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
@@ -522,7 +522,12 @@ def group_option(value):
 
 
 def spec_export_rows():
-    """The requested project's line items in spec-sheet order for a document export."""
+    """The requested project's line items in spec-sheet order for a document export.
+
+    Workspace order, which is the order the view shows and the order dragging a row
+    writes back. Never `schedule_sort`: that is the finish schedule's Location order,
+    and applying it here reshuffles a download away from the screen it came from.
+    """
     project_id = common.clean(request.args.get("project"))
     with store.lock:
         wb, _ = store.snapshot()
@@ -532,7 +537,6 @@ def spec_export_rows():
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
     if not rows:
         raise ValidationError("This project has no line items to export.")
-    common.schedule_sort(rows, wb)
     return project_id, project, rows
 
 

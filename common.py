@@ -97,7 +97,12 @@ def location_order(wb):
 
 
 def schedule_sort(rows, wb):
-    """In-place export order: the Locations list order, then entry order within a location."""
+    """In-place finish-schedule order: the Locations list order, then entry order within a location.
+
+    This belongs to the finish schedule alone, because that document prints Location headings.
+    The spec sheet has none and is shown in workspace order, so sorting its rows here only
+    reshuffles a download away from the screen it was exported from.
+    """
     order = location_order(wb)
     rows.sort(key=lambda r: (order.index(clean(r.get("Location"))) if clean(r.get("Location")) in order
                              else len(order), clean(r.get("Location")), r["_row"]))
