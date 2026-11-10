@@ -237,8 +237,16 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-card-head .group-total { margin-left:auto; font-size:13px; font-weight:600; color:#43381f; }
 .spec-card.collapsed .spec-body { display:none; }
 .spec-body { overflow-x:auto; }
-.spec-table { width:100%; border-collapse:collapse; min-width:860px; }
-.spec-table th { text-align:left; font-size:11px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
+/* Fixed layout, with each column's width set on its <col>: a width somebody chose is the width
+   they get, instead of the browser re-dividing the row every time a cell's text changes. The
+   table's own min-width is written inline, from the sum of those columns. */
+.spec-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+.spec-table th { position:relative; text-align:left; font-size:11px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
+.spec-table th .th-label { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.col-grip { position:absolute; top:0; right:-4px; z-index:1; width:9px; height:100%; padding:0; border:0; background:none; cursor:col-resize; touch-action:none; }
+.col-grip::after { content:""; position:absolute; top:5px; bottom:5px; left:4px; width:1px; background:var(--gold-line); }
+.col-grip:hover::after,.col-grip:focus-visible::after,.col-grip.resizing::after { left:3px; width:3px; background:var(--gold); }
+body.resizing-column { cursor:col-resize; user-select:none; }
 .spec-table td { padding:4px 6px; border-bottom:1px solid #f4f1e8; vertical-align:middle; }
 .spec-table tr:last-child td { border-bottom:0; }
 .spec-table tr:hover td { background:#fdfcf8; }
@@ -251,7 +259,7 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .cell.dirty { border-color:var(--gold); }
 .link-cell { display:flex; align-items:center; gap:4px; padding:3px 5px 3px 9px; border:1px solid transparent; border-radius:4px; }
 .link-cell.dirty { border-color:var(--gold); }
-.link-cell .product-link { font-size:13px; padding:5px 1px; overflow:hidden; text-overflow:ellipsis; }
+.link-cell .product-link { font-size:13px; padding:5px 1px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .link-cell.dirty .product-link { color:var(--red); }
 .link-edit { flex:none; font-size:13px; line-height:1; padding:5px 6px; color:#b7a87f; }
 .link-edit:hover { background:#f0ead8; color:var(--gold-ink); }

@@ -165,6 +165,73 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_column_width_set_from_its_header_is_kept(self):
+        """Long brand, model and finish names are what the sheet is for, so every header
+        carries a grip that sets its column's width. A width set once holds: the same in
+        every group card, through a re-render, and after a reload."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "widths.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+
+                        def open_sheet():
+                            page.locator('[data-view="spec"]').click()
+                            expect(page.locator("#spec-view")).to_be_visible()
+                            expect(page.locator(".spec-table tr[data-row]").first).to_be_attached()
+
+                        def model_width():
+                            return page.locator('.spec-table th:has(.col-grip[data-grip="Model #"])').first.bounding_box()["width"]
+
+                        open_sheet()
+                        grip = page.locator('.spec-table .col-grip[data-grip="Model #"]').first
+                        opened = model_width()
+                        box = grip.bounding_box()
+                        middle = box["y"] + box["height"] / 2
+                        page.mouse.move(box["x"] + box["width"] / 2, middle)
+                        page.mouse.down()
+                        page.mouse.move(box["x"] + box["width"] / 2 + 90, middle, steps=8)
+                        page.mouse.up()
+                        widened = model_width()
+                        self.assertAlmostEqual(widened, opened + 90, delta=3)
+                        # one grid, not one per card: every group card reads the same width
+                        widths = page.evaluate("""[...document.querySelectorAll('.spec-table col[data-col="Model #"]')].map((c) => c.style.width)""")
+                        self.assertGreater(len(widths), 0)
+                        self.assertEqual(set(widths), {f"{round(widened)}px"})
+
+                        # a re-render must not put the column back where it started
+                        page.locator("#spec-filter").fill("a")
+                        page.locator("#spec-filter").fill("")
+                        expect(page.locator(".spec-table tr[data-row]").first).to_be_attached()
+                        self.assertAlmostEqual(model_width(), widened, delta=1)
+
+                        page.reload()
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        open_sheet()
+                        self.assertAlmostEqual(model_width(), widened, delta=1)
+                        self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('uh-spec-widths'))['Model #']"),
+                                         round(widened))
+
+                        # the grip's own double-click is the only way back to the opening width
+                        page.locator('.spec-table .col-grip[data-grip="Model #"]').first.dblclick()
+                        self.assertAlmostEqual(model_width(), opened, delta=1)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_spec_sheet_groups_by_room_or_category(self):
         """The toolbar offers the two groupings the view has: by room, which it opens on, and
         by category. Grouping by location was removed by request, and the chosen heading is

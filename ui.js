@@ -133,7 +133,7 @@ function selectionDetails(row) {
 }
 
 function render() {
-  if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
+  if (specDrag || specResize) { specRenderPending = true; return; }   // never tear down rows mid-drag
   const data = state.data;
   if (!data) return;
   const project = selectedProject(), rows = projectRows();
@@ -230,16 +230,57 @@ function renderTable() {
 }
 
 const SPEC_COLUMNS = [
-  { field: "Item", label: "ITEM", placeholder: "Name the selection" },
-  { field: "Manufacturer", label: "BRAND", placeholder: "Brand" },
-  { field: "Model #", label: "MODEL", placeholder: "Model / SKU" },
-  { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish" },
+  { field: "Item", label: "ITEM", placeholder: "Name the selection", width: 200 },
+  { field: "Manufacturer", label: "BRAND", placeholder: "Brand", width: 125 },
+  { field: "Model #", label: "MODEL", placeholder: "Model / SKU", width: 115 },
+  { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish", width: 140 },
   // the product URL is stored as it always was; this column is where it is pasted and read
-  { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true },
-  { field: "Qty", label: "QTY", placeholder: "1", number: true },
-  { field: "Unit Price", label: "UNIT PRICE", placeholder: "—", number: true },
-  { field: "Markup %", label: "MARKUP %", placeholder: "0", number: true },
+  { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true, width: 120 },
+  { field: "Qty", label: "QTY", placeholder: "1", number: true, width: 64 },
+  { field: "Unit Price", label: "UNIT PRICE", placeholder: "—", number: true, width: 100 },
+  { field: "Markup %", label: "MARKUP %", placeholder: "0", number: true, width: 100 },
 ];
+
+// A brand, model or finish is often longer than the column it lands in, so every header carries
+// a grip that sets that column's width: dragged once and then kept, the same in every group card,
+// through every re-render and after a reload. The width is how one person reads the sheet rather
+// than anything about the home, so it is remembered in the browser - like the sidebar - and never
+// written to the workspace. The table is laid out fixed, so a width that has been set is the
+// width that is used; whatever is left over past the last column goes to the actions cell.
+const SPEC_WIDTH_KEY = "uh-spec-widths";
+const SPEC_WIDTH_MIN = 56, SPEC_WIDTH_MAX = 680, SPEC_WIDTH_STEP = 12;
+const SPEC_DRAG_W = 26, SPEC_ACTIONS_W = 104;   // the reorder handle and the actions are not resizable
+const specClamp = (value) => Math.min(SPEC_WIDTH_MAX, Math.max(SPEC_WIDTH_MIN, Math.round(value)));
+const specDefault = (field) => SPEC_COLUMNS.find((c) => c.field === field)?.width || SPEC_WIDTH_MIN;
+
+function loadSpecWidths() {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(SPEC_WIDTH_KEY)) || {}; } catch {}
+  return new Map(SPEC_COLUMNS.map((c) => [c.field, Number(stored[c.field]) ? specClamp(stored[c.field]) : c.width]));
+}
+
+const specWidths = loadSpecWidths();
+const specWidth = (field) => specWidths.get(field) || specDefault(field);
+const specTableWidth = () => SPEC_DRAG_W + SPEC_ACTIONS_W + SPEC_COLUMNS.reduce((sum, c) => sum + specWidth(c.field), 0);
+// The columns are declared bare and sized afterwards: the app serves no inline styles (its
+// Content-Security-Policy allows none), and the CSSOM is also what a drag needs - it writes the
+// new width onto the tables already on screen rather than tearing down the rows being sized.
+const specColgroup = () => `<colgroup><col class="drag-col">${SPEC_COLUMNS.map((c) =>
+  `<col data-col="${esc(c.field)}">`).join("")}<col></colgroup>`;
+
+function applySpecWidths() {
+  const total = `${specTableWidth()}px`;
+  document.querySelectorAll(".spec-table").forEach((table) => {
+    table.style.minWidth = total;
+    table.querySelectorAll("col[data-col]").forEach((col) => { col.style.width = `${specWidth(col.dataset.col)}px`; });
+  });
+}
+
+function setSpecWidth(field, width) {
+  specWidths.set(field, specClamp(width));
+  applySpecWidths();
+  try { localStorage.setItem(SPEC_WIDTH_KEY, JSON.stringify(Object.fromEntries(specWidths))); } catch {}
+}
 
 const money = (value) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const lineTotal = (row) => (Number(row["Unit Price"]) || 0) * (Number(row.Qty) || 1) * (1 + (Number(row["Markup %"]) || 0) / 100);
@@ -256,7 +297,7 @@ function specGroups(rows) {
 }
 
 function renderSpec() {
-  if (specDrag) { specRenderPending = true; return; }   // never tear down rows mid-drag
+  if (specDrag || specResize) { specRenderPending = true; return; }   // never tear down rows mid-drag
   document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
@@ -291,16 +332,55 @@ function renderSpec() {
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
       <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
-      <div class="spec-body"><table class="spec-table"><thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}>${c.label}</th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
+      <div class="spec-body"><table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button></div>
     </article>`;
   }).join("");
+  applySpecWidths();
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
   specSaveUI();
 }
 
-let specDrag = null, specPress = null, specRenderPending = false;
+let specDrag = null, specPress = null, specRenderPending = false, specResize = null;
+
+function specResizeEvents() {
+  const zone = $("spec-groups");
+  zone.addEventListener("pointerdown", (event) => {
+    const grip = event.target.closest(".col-grip");
+    if (!grip || event.button) return;
+    event.preventDefault();   // no text selection, and no row drag starting underneath the grip
+    grip.focus({ preventScroll: true });   // so the arrow keys can finish what the pointer started
+    const field = grip.dataset.grip, fromX = event.clientX, fromW = specWidth(field);
+    specResize = field;
+    grip.setPointerCapture(event.pointerId);
+    grip.classList.add("resizing");
+    document.body.classList.add("resizing-column");
+    const drag = (moved) => setSpecWidth(field, fromW + moved.clientX - fromX);
+    const release = () => {
+      grip.removeEventListener("pointermove", drag);
+      grip.classList.remove("resizing");
+      document.body.classList.remove("resizing-column");
+      specResize = null;
+      if (specRenderPending) { specRenderPending = false; render(); }
+    };
+    grip.addEventListener("pointermove", drag);
+    grip.addEventListener("pointerup", release, { once: true });
+    grip.addEventListener("pointercancel", release, { once: true });
+  });
+  // The grip's own double-click is the only way back to the width the column opened with.
+  zone.addEventListener("dblclick", (event) => {
+    const grip = event.target.closest(".col-grip");
+    if (grip) setSpecWidth(grip.dataset.grip, specDefault(grip.dataset.grip));
+  });
+  zone.addEventListener("keydown", (event) => {
+    const grip = event.target.closest?.(".col-grip");
+    if (!grip || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const step = SPEC_WIDTH_STEP * (event.key === "ArrowRight" ? 1 : -1);
+    setSpecWidth(grip.dataset.grip, specWidth(grip.dataset.grip) + step);
+  });
+}
 
 function clearDropMarks() {
   document.querySelectorAll(".drop-before,.drop-after,.drop-end,.dragging").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-end", "dragging"));
@@ -734,6 +814,7 @@ $("custom-field-rows").addEventListener("click", (event) => {
   row.remove();
 });
 specDragEvents();
+specResizeEvents();
 $("editor-form").addEventListener("submit", saveEditor);
 $("editor-delete").addEventListener("click", deleteEditorRecord);
 // Picking "Other" asks for a value the list does not hold, so the dropdown gives way to a box.
