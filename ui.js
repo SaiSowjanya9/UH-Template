@@ -28,14 +28,27 @@ function toast(message, error = false) {
   toastTimer = setTimeout(() => { $("toast").hidden = true; }, error ? 11000 : 5000);
 }
 
+// A request that never answers - a sleeping hosted instance, a dropped connection - used to
+// leave the save counter above zero, so the toolbar read "Saving…" for ever while the edit sat
+// in hand. Every request now has a deadline, which is generous enough for a cold start on the
+// free hosting plan and still guarantees the promise settles.
+const REQUEST_DEADLINE = 90000;
+
 async function api(path, body, binary = false) {
   const options = body === undefined ? {} : { method: "POST", headers: { "X-UH-Token": token }, body };
   if (body !== undefined && !(body instanceof FormData)) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify({ revision: state.data?.revision, ...body });
   }
+  options.signal = AbortSignal.timeout(REQUEST_DEADLINE);
   let response;
-  try { response = await fetch(path, options); } catch { throw new Error("Cannot reach the app. Make sure it is running, then retry."); }
+  try {
+    response = await fetch(path, options);
+  } catch (error) {
+    throw new Error(error?.name === "TimeoutError"
+      ? "The workspace did not answer in time. Your change is still here \u2014 press Save to send it again."
+      : "Cannot reach the app. Make sure it is running, then retry.");
+  }
   if (response.status === 401) {
     // The session ended on the hosted workspace, so collect a new one rather than losing the edit.
     window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
@@ -357,7 +370,7 @@ function finishSpecDrop(target, after, card) {
     }
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
-  // Land the row now: the server round-trip on a hosted workbook takes a moment,
+  // Land the row now: the server round-trip on a hosted workspace takes a moment,
   // and nobody wants to watch the row hang while it saves.
   const byRow = new Map(projectRows().map((r) => [r._row, r]));
   const positions = all.slice().sort((a, b) => a - b);
