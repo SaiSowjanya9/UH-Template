@@ -241,11 +241,16 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
    they get, instead of the browser re-dividing the row every time a cell's text changes. The
    table's own min-width is written inline, from the sum of those columns. */
 .spec-table { width:100%; border-collapse:collapse; table-layout:fixed; }
-.spec-table th { position:relative; text-align:left; font-size:11px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
+.spec-table th { position:relative; user-select:none; text-align:left; font-size:11px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
 .spec-table th .th-label { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-.col-grip { position:absolute; top:0; right:-4px; z-index:1; width:9px; height:100%; padding:0; border:0; background:none; cursor:col-resize; touch-action:none; }
-.col-grip::after { content:""; position:absolute; top:5px; bottom:5px; left:4px; width:1px; background:var(--gold-line); }
-.col-grip:hover::after,.col-grip:focus-visible::after,.col-grip.resizing::after { left:3px; width:3px; background:var(--gold); }
+/* Every header ends in a divider that is also its resize handle. It has to look grabbable
+   before anyone thinks to try: a ruled edge at rest, the whole set darkening the moment the
+   pointer enters the header row, and the one under the pointer a gold bar. */
+.col-grip { position:absolute; top:0; right:-7px; z-index:1; width:14px; height:100%; padding:0; border:0; background:none; cursor:col-resize; touch-action:none; }
+.col-grip::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; border-radius:2px; background:var(--gold-line); }
+.spec-table thead:hover .col-grip::after { background:#cdbb92; }
+.col-grip:hover::after,.col-grip:focus-visible::after,.col-grip.resizing::after { left:5px; width:4px; background:var(--gold); }
+.col-grip.resizing::after { box-shadow:0 0 0 1px #fdfbf680; }
 body.resizing-column { cursor:col-resize; user-select:none; }
 .spec-table td { padding:4px 6px; border-bottom:1px solid #f4f1e8; vertical-align:middle; }
 .spec-table tr:last-child td { border-bottom:0; }
