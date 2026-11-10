@@ -622,6 +622,74 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_restarting_host_is_waited_out_rather_than_reported(self):
+        """The hosted workspace is one process, so a deploy leaves a few seconds where the
+        router answers 502 and nothing is behind the address. A read is asked again, so the
+        poll and every refresh ride it out. A write is not retried - a delete names a row by
+        number - so it says what happened and the edit stays held for Save."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "gateway.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        cell = page.locator(".spec-table tr[data-row] input.cell").first
+                        expect(cell).to_be_attached()
+                        cell.click()   # the poll leaves a cell being edited alone, so reads are ours
+
+                        reads = []
+
+                        def restarting(route):
+                            reads.append(route.request.url)
+                            if len(reads) <= 2:   # the gap while the new instance comes up
+                                route.fulfill(status=502, content_type="text/html",
+                                              body="<html><body>Bad Gateway</body></html>")
+                            else:
+                                route.continue_()
+
+                        page.route("**/api/state", restarting)
+                        page.evaluate("refresh()")        # resolves only because it is retried
+                        self.assertGreaterEqual(len(reads), 3)
+                        expect(page.locator("#load-error")).to_be_hidden()
+                        expect(page.locator("#toast")).to_be_hidden()
+                        page.unroute("**/api/state")
+
+                        # a write is not sent twice; it explains itself and stays in hand
+                        writes = []
+
+                        def refuse(route):
+                            writes.append(route.request.url)
+                            route.fulfill(status=502, content_type="text/html",
+                                          body="<html><body>Bad Gateway</body></html>")
+
+                        page.route("**/api/selections", refuse)
+                        row = page.locator(".spec-table tr[data-row]").first.get_attribute("data-row")
+                        target = page.locator(f'tr[data-row="{row}"] input.cell').nth(1)
+                        target.fill("Mid deploy")
+                        target.blur()
+                        expect(page.locator("#toast")).to_contain_text("restarting", timeout=15000)
+                        self.assertEqual(len(writes), 1, "a write must not be retried by itself")
+                        expect(page.locator("#spec-save")).to_have_text("Save changes (1)")
+                        expect(page.locator("#spec-groups .cell.dirty")).to_have_value("Mid deploy")
+                        page.unroute("**/api/selections")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_clicking_away_from_a_dialog_closes_it(self):
         """Clicking outside a modal dismisses it, the way Escape does, for every dialog the
         app opens. A click on the dialog's own padding is not "outside", and neither is a

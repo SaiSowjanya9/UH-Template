@@ -37,6 +37,15 @@ const REQUEST_DEADLINE = 90000;
 // rendering it puts the old value back on screen - a cell someone cleared filling itself in
 // again. Every write counts, and a read that straddled one is discarded instead of drawn.
 let writes = 0, writing = 0;
+// 502/503/504 are the host's router answering, not the app: the hosted workspace is deliberately
+// one process, so a deploy or a restart leaves a few seconds with nothing behind the address.
+// A read can simply be asked again - it changes nothing - and that covers the 2.5s poll and
+// every refresh, which are what a restart usually interrupts. A write is deliberately not
+// retried: a delete names a row by its number and the editor creates rows, so a second attempt
+// could remove the wrong line item or add a duplicate. Instead it says what happened, and the
+// edit stays in hand for the Save button to send again.
+const GATEWAY = [502, 503, 504];
+const GATEWAY_WAITS = [700, 2000, 4500];
 
 async function api(path, body, binary = false) {
   const write = body !== undefined;
@@ -45,17 +54,23 @@ async function api(path, body, binary = false) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify({ revision: state.data?.revision, ...body });
   }
-  options.signal = AbortSignal.timeout(REQUEST_DEADLINE);
   // Counted as it starts: a read already in flight cannot describe what this write is about to
   // do, and a write that times out may still have reached the workspace.
   if (write) { writing++; writes++; }
   let response;
   try {
-    response = await fetch(path, options);
-  } catch (error) {
-    throw new Error(error?.name === "TimeoutError"
-      ? "The workspace did not answer in time. Your change is still here \u2014 press Save to send it again."
-      : "Cannot reach the app. Make sure it is running, then retry.");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // A fresh deadline per attempt: an AbortSignal that has fired stays fired.
+        response = await fetch(path, { ...options, signal: AbortSignal.timeout(REQUEST_DEADLINE) });
+      } catch (error) {
+        throw new Error(error?.name === "TimeoutError"
+          ? "The workspace did not answer in time. Your change is still here \u2014 press Save to send it again."
+          : "Cannot reach the app. Make sure it is running, then retry.");
+      }
+      if (write || attempt >= GATEWAY_WAITS.length || !GATEWAY.includes(response.status)) break;
+      await new Promise((done) => setTimeout(done, GATEWAY_WAITS[attempt]));
+    }
   } finally {
     if (write) writing--;
   }
@@ -66,7 +81,9 @@ async function api(path, body, binary = false) {
   }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
-    const error = new Error(detail.error || `Request failed (${response.status}).`);
+    const error = new Error(detail.error || (GATEWAY.includes(response.status)
+      ? "The app is restarting, so that did not reach the workspace. Your change is still here \u2014 press Save to send it again."
+      : `Request failed (${response.status}).`));
     error.status = response.status;
     throw error;
   }
