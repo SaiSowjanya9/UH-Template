@@ -33,12 +33,18 @@ BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: the one status a selection carries.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location", "Unit"]
 # Where in the home a selection belongs - the schedule's grouping. Kept out of Section so
 # Section stays a pure trade category; the seeded list lives on Lists under "Locations".
 LOCATIONS = ["1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
 LOCATIONS_HEADER = "Locations"
 MAX_LOCATIONS = 30          # the Location dropdown covers Lists!E2:E31
+# What a Qty counts: each, square feet, roofing squares, linear feet, gallons, a lot price.
+# Free text per row, because the unit follows the trade and no list can name them all; the
+# seeded list on Lists under "Units" only fills the dropdown, and is the user's afterwards.
+UNITS = ["EA", "sq ft", "SQ", "LF", "gal", "lot"]
+UNITS_HEADER = "Units"
+MAX_UNITS = 30              # the Unit dropdown covers 30 rows of whichever column holds the list
 # Generated Selections column: the clickable face of Product URL, rebuilt on every save.
 # The header and the words inside the cell are deliberately the same, so a reader
 # clicks "Product Link" under "Product Link" instead of reading a raw address.
@@ -440,37 +446,64 @@ def infer_category(room, item):
     return "Other"
 
 
-def location_list(ws):
-    """The Lists column headed 'Locations', as (column, names in order)."""
-    column = next((cell.column for cell in ws[1] if clean(cell.value) == LOCATIONS_HEADER), None)
+def named_list(ws, header):
+    """A Lists column found by its header, as (column, the names in it in order)."""
+    column = next((cell.column for cell in ws[1] if clean(cell.value) == header), None)
     if column is None:
         return None, []
     names = [clean(row[0]) for row in ws.iter_rows(min_row=2, min_col=column, max_col=column, values_only=True)]
     return column, [name for name in names if name]
 
 
-def ensure_location_list(wb):
-    """Seed the 'Locations' column on Lists so the Location dropdown has values.
+def ensure_named_list(wb, header, values):
+    """Seed a user-owned list column on Lists, appending the column when one is missing.
 
-    Like the sections column, the list belongs to the user afterwards: existing entries are
-    never rewritten or removed here.
+    Seeding happens once. Like the sections column, the list belongs to the user afterwards:
+    nothing here rewrites or removes an entry once the column holds anything at all. The
+    column is appended rather than placed, so the ranges the other validations name by
+    letter keep pointing at the same columns.
     """
     ws = wb["Lists"]
-    column, names = location_list(ws)
+    column, names = named_list(ws, header)
     if column is not None and names:
         return column
     if column is None:
         column = ws.max_column + 1
         if column > 50:
-            raise ValidationError("The Lists sheet has no space for the Locations column.")
-        cell = ws.cell(1, column, LOCATIONS_HEADER)
+            raise ValidationError(f"The Lists sheet has no space for the {header} column.")
+        cell = ws.cell(1, column, header)
         cell._style = copy(ws.cell(1, 1)._style)
         ws.column_dimensions[get_column_letter(column)].width = max(
             ws.column_dimensions[get_column_letter(column)].width or 0, 20)
-    for index, name in enumerate(LOCATIONS, start=2):
+    for index, name in enumerate(values, start=2):
         if clean(ws.cell(index, column).value) != name:
             ws.cell(index, column, name)
     return column
+
+
+def location_list(ws):
+    """The Lists column headed 'Locations', as (column, names in order)."""
+    return named_list(ws, LOCATIONS_HEADER)
+
+
+def ensure_location_list(wb):
+    """Seed the 'Locations' column on Lists so the Location dropdown has values."""
+    return ensure_named_list(wb, LOCATIONS_HEADER, LOCATIONS)
+
+
+def unit_list(ws):
+    """The Lists column headed 'Units', as (column, names in order)."""
+    return named_list(ws, UNITS_HEADER)
+
+
+def ensure_unit_list(wb):
+    """Seed the 'Units' column on Lists so the Unit dropdown has values."""
+    return ensure_named_list(wb, UNITS_HEADER, UNITS)
+
+
+def unit_order(wb):
+    """The Units list on Lists, in order - what the editor's Unit dropdown offers."""
+    return unit_list(wb["Lists"])[1]
 
 
 def ensure_locations(wb):
@@ -539,7 +572,14 @@ def ensure_validations(wb):
     """
     ws = wb["Selections"]
     sheet = Sheet(ws)
-    managed = {sheet.cols[header] for header in LIST_VALIDATIONS if header in sheet.cols}
+    validations = dict(LIST_VALIDATIONS)
+    # Units was appended to Lists rather than given a letter, so its range is read off the
+    # column the list actually sits in instead of being named here.
+    unit_column, _ = unit_list(wb["Lists"])
+    if unit_column is not None:
+        letter = get_column_letter(unit_column)
+        validations["Unit"] = f"Lists!${letter}$2:${letter}${MAX_UNITS + 1}"
+    managed = {sheet.cols[header] for header in validations if header in sheet.cols}
 
     def owns(dv):
         ranges = list(dv.sqref.ranges) if dv.sqref else []
@@ -548,7 +588,7 @@ def ensure_validations(wb):
     for dv in [dv for dv in ws.data_validations.dataValidation if dv.type == "list" and owns(dv)]:
         ws.data_validations.dataValidation.remove(dv)
     last = max(501, ws.max_row)
-    for header, formula in LIST_VALIDATIONS.items():
+    for header, formula in validations.items():
         column = sheet.cols.get(header)
         if column is None:
             continue
@@ -721,8 +761,10 @@ class WorkspaceStore:
             raw, revision = self.backend.read()
             wb = load_workbook(io.BytesIO(raw), keep_links=False)
             validate_workspace(wb)
-            # Views and exports see location data even before the next save migrates the file.
+            # Views and exports see location data, and the Unit dropdown its values, even
+            # before the next save migrates the file on disk.
             ensure_locations(wb)
+            ensure_unit_list(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -736,6 +778,7 @@ class WorkspaceStore:
             drop_retired_columns(wb)
             ensure_selection_columns(wb)
             ensure_locations(wb)
+            ensure_unit_list(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)

@@ -23,7 +23,7 @@ from workspace_store import (CLIENT_STATUSES, COVER_PREFIX, ConflictError, IDENT
                             PRODUCT_LINK, PROJECT_FIELDS, PROJECT_FORMULAS, SELECTION_FIELDS,
                             ValidationError, WorkspaceStore, delete_record, ensure_selection_columns,
                             hyperlink_formula, next_row, parse_hyperlink, put, records,
-                            validate_values, detailed_records, set_custom_fields)
+                            validate_values, detailed_records, set_custom_fields, unit_order)
 
 BASE = common.BASE_DIR
 LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
@@ -217,6 +217,7 @@ def state():
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        locations=common.location_order(wb),
+                       units=unit_order(wb),
                        client_statuses=CLIENT_STATUSES,
                        revision=revision,
                        workspace=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
@@ -452,7 +453,7 @@ PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 SPEC_CSV_FIELDS = ["Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
-                   "Qty", "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
+                   "Qty", "Unit", "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
                    "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
 # The spec sheet shows the product URL as a Product Link column, hidden under the column's own name.

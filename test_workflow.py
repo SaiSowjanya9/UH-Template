@@ -250,14 +250,19 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_save_restores_dropdowns_excel_dropped(self):
-        from workspace_store import LIST_VALIDATIONS
+        from openpyxl.utils import get_column_letter
+        from workspace_store import LIST_VALIDATIONS, MAX_UNITS, unit_list
         wb, revision = self.store.snapshot()
         wb["Selections"].data_validations.dataValidation = []
         self.store.save(wb, revision)
         restored, _ = self.store.snapshot()
         lists = [dv for dv in restored["Selections"].data_validations.dataValidation if dv.type == "list"]
-        self.assertEqual({dv.formula1 for dv in lists}, set(LIST_VALIDATIONS.values()))
-        self.assertEqual(len(lists), len(LIST_VALIDATIONS))   # one dropdown per column, no duplicates
+        # Units was appended to Lists instead of being given a letter, so its range follows
+        # the column the list landed in rather than being named in LIST_VALIDATIONS.
+        letter = get_column_letter(unit_list(restored["Lists"])[0])
+        expected = set(LIST_VALIDATIONS.values()) | {f"Lists!${letter}$2:${letter}${MAX_UNITS + 1}"}
+        self.assertEqual({dv.formula1 for dv in lists}, expected)
+        self.assertEqual(len(lists), len(expected))   # one dropdown per column, no duplicates
 
     def test_excel_dropdowns_offer_every_status(self):
         from workspace_store import CLIENT_STATUSES
@@ -564,6 +569,73 @@ class AppTests(unittest.TestCase):
 
         word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())
         self.assertLess(word.index(spaced("Zulu Suite")), word.index(spaced("Alpha Nook")))
+
+    def test_unit_is_a_selections_column_the_spec_sheet_carries(self):
+        """Qty is a bare number without it: 7571 means nothing until it says sq ft."""
+        import csv as csvlib
+        from pypdf import PdfReader
+        from workspace_store import UNITS, unit_list
+        row = self.state()["selections"][0]
+        pid = row["Project ID"]
+        saved = self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "7571", "Unit": "sq ft"}})
+        self.assertEqual(saved.status_code, 200, saved.json)
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual((current["Qty"], current["Unit"]), ("7571", "sq ft"))
+
+        # the seeded list fills the editor's dropdown, and Excel's own
+        self.assertEqual(self.state()["units"], UNITS)
+        wb, _ = self.store.snapshot()
+        column, names = unit_list(wb["Lists"])
+        self.assertEqual(names, UNITS)
+        letter = __import__("openpyxl").utils.get_column_letter(column)
+        sheet = common.Sheet(wb["Selections"])
+        unit_letter = __import__("openpyxl").utils.get_column_letter(sheet.cols["Unit"])
+        lists = [dv for dv in wb["Selections"].data_validations.dataValidation
+                 if dv.type == "list" and f"Lists!${letter}$2" in (dv.formula1 or "")]
+        self.assertEqual(len(lists), 1, "the Unit column needs exactly one dropdown")
+        self.assertIn(f"{unit_letter}2", str(lists[0].sqref))
+
+        for name, text in (("PDF", " ".join(" ".join(p.extract_text() for p in PdfReader(
+                                io.BytesIO(self.client.get(f"/api/selections/pdf?project={pid}").data)).pages).split())),
+                           ("Word", " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split()))):
+            self.assertIn("UNIT", text, name)
+            self.assertIn("sq ft", text, name)
+
+        # the CSV carries it beside Qty and brings it back unchanged
+        export, lines = self.exported_spec_csv(pid)
+        self.assertEqual(list(lines[0])[list(lines[0]).index("Qty") + 1], "Unit")
+        mine = next(l for l in lines if l["Qty"] == "7571")
+        self.assertEqual(mine["Unit"], "sq ft")
+        again = self.send_spec_csv(pid, [{**l, "Unit": "SQ"} if l is mine else l for l in lines])
+        self.assertEqual(again.status_code, 200, again.json)
+        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Unit"], "SQ")
+
+        # and it can be left out of a download like any other spec-sheet column
+        hidden = self.client.get(f"/api/selections/csv?project={pid}&hide=Unit")
+        self.assertEqual(hidden.status_code, 200)
+        self.assertNotIn("Unit", list(csvlib.DictReader(io.StringIO(hidden.data.decode("utf-8-sig"))))[0])
+
+    def test_unit_column_is_added_to_a_workspace_that_predates_it(self):
+        """A workspace saved before the column existed gains it, and its list, on the next save."""
+        from workspace_store import UNITS, UNITS_HEADER, named_list
+        wb, revision = self.store.snapshot()
+        sheet = common.Sheet(wb["Selections"])
+        wb["Selections"].delete_cols(sheet.cols["Unit"])
+        lists = wb["Lists"]
+        unit_column, _ = named_list(lists, UNITS_HEADER)
+        lists.delete_cols(unit_column)
+        # The save that writes the stripped workspace repairs it on the way through.
+        self.store.save(wb, revision, "drop the Unit column")
+
+        wb, _ = self.store.snapshot()
+        self.assertIn("Unit", common.Sheet(wb["Selections"]).cols)
+        self.assertEqual(named_list(wb["Lists"], UNITS_HEADER)[1], UNITS)
+        state = self.state()
+        self.assertTrue(all(r["Unit"] == "" for r in state["selections"]))
+        row = state["selections"][0]
+        self.assertEqual(self.post("/api/selections",
+                                   {"row": row["_row"], "values": {"Unit": "LF"}}).status_code, 200)
+        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Unit"], "LF")
 
     def test_spec_exports_show_pricing(self):
         """The spec sheet is the internal document, so its downloads carry prices."""

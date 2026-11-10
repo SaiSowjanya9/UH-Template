@@ -103,7 +103,7 @@ SPEC_TITLE = "Spec Sheet"
 # the same registry out in Word.
 SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
                 ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
-                (PRODUCT_LINK, 60, "Product URL"), ("Qty", 30, "Qty"),
+                (PRODUCT_LINK, 60, "Product URL"), ("Qty", 30, "Qty"), ("Unit", 34, "Unit"),
                 ("Unit Price", 50, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
@@ -173,6 +173,9 @@ HIDEABLE_COLUMNS = [
     ("Client Notes", "Client notes", ("schedule", "sheet")),
     ("Product URL", "Product link", ("schedule", "sheet")),
     ("details", "Additional details", ("schedule",)),
+    # Unit sits beside Qty on the spec sheet only: the client documents describe a quantity
+    # in words through `description`, which the fillable copies compare against on import.
+    ("Unit", "Unit", ("sheet",)),
     ("Unit Price", "Unit price", ("sheet",)),
     ("Markup %", "Markup %", ("sheet",)),
     ("Client Status", "Client status", ("sheet",)),
