@@ -237,6 +237,38 @@ def current(data):
     return wb, revision
 
 
+def rename_project(wb, project, new_id):
+    """Move a project and every line item that names it onto a new Project ID.
+
+    The ID is the only thing tying a selection to its project, so this has to happen inside one
+    save: a workspace where the project has been renumbered and its line items have not is a
+    project with nothing in it. Returns how many line items moved.
+
+    The cover image is stored under a file named after the old ID. The cell would go on
+    resolving to it, but the next upload would write the new name and leave the sheet pointing
+    at the old one, so the file is copied across now; a cover that cannot be read is not worth
+    failing a rename for.
+    """
+    old_id = project["Project ID"]
+    projects, selections = common.Sheet(wb["Projects"]), common.Sheet(wb["Selections"])
+    owned = [r["_row"] for r in records(wb, "Selections") if r["Project ID"] == old_id]
+    put(projects, project["_row"], {"Project ID": new_id})
+    for row in owned:
+        put(selections, row, {"Project ID": new_id})
+    cover = common.clean(project.get("Cover Image"))
+    if cover.startswith(COVER_PREFIX):
+        name = cover[len(COVER_PREFIX):]
+        suffix = Path(name).suffix.lower()
+        renamed = f"cover-{re.sub(r'[^A-Za-z0-9_-]', '_', new_id)[:40]}{suffix}"
+        if renamed != name:
+            try:
+                store.store_cover(renamed, store.read_cover(name), COVER_MIME.get(suffix, "image/png"))
+                put(projects, project["_row"], {"Cover Image": f"{COVER_PREFIX}{renamed}"})
+            except Exception:
+                pass
+    return len(owned)
+
+
 @app.post("/api/projects")
 def save_project():
     data = payload()
@@ -258,6 +290,20 @@ def save_project():
             return jsonify(ok=True, deleted=True, removed=len(owned))
         if data.get("create") and existing:
             raise ValidationError("That Project ID already exists. Choose a unique ID.")
+        old_id, moved = values.get("Project ID"), 0
+        if data.get("rename") is not None:
+            if not existing:
+                raise ConflictError("This project no longer exists. Refresh the page.")
+            new_id = validate_values({"Project ID": data["rename"]}, PROJECT_FIELDS)["Project ID"]
+            if not new_id:
+                raise ValidationError("Enter the new Project ID.")
+            if len(new_id) > 50:
+                raise ValidationError("A Project ID can be up to 50 characters.")
+            if new_id != old_id:
+                if any(p["Project ID"] == new_id for p in records(wb, "Projects")):
+                    raise ValidationError("That Project ID already exists. Choose a unique ID.")
+                moved = rename_project(wb, existing, new_id)
+                values["Project ID"] = new_id   # the rest of this save writes against the new ID
         row = existing["_row"] if existing else next_row(sheet)
         put(sheet, row, values)
         for field, formula in PROJECT_FORMULAS.items():
@@ -274,8 +320,10 @@ def save_project():
             from openpyxl.utils import get_column_letter
             selections = wb["Selections"]
             selections.auto_filter.ref = f"A1:{get_column_letter(selections.max_column)}{selections.max_row}"
-        store.save(wb, revision, f"project {values.get('Project ID')}" + (f" (+{seeded} line items)" if seeded else ""))
-    return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded)
+        detail = (f" (renamed from {old_id}, {moved} line items moved)" if moved
+                  else f" (+{seeded} line items)" if seeded else "")
+        store.save(wb, revision, f"project {values.get('Project ID')}{detail}")
+    return jsonify(ok=True, project_id=values.get("Project ID"), seeded=seeded, moved=moved)
 
 
 COVER_MIME = {".png": "image/png", ".jpg": "image/jpeg"}

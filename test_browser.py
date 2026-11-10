@@ -1,3 +1,4 @@
+import re
 import shutil
 import tempfile
 import threading
@@ -615,6 +616,66 @@ class BrowserTests(unittest.TestCase):
                         page.locator("#search").fill("")
                         page.locator("#section-filter").select_option("Audio / Visual")
                         expect(page.locator("#selection-rows tr")).to_have_count(1)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_a_project_is_renumbered_from_its_editor_and_the_next_one_follows(self):
+        """Homes are numbered in one sequence: editing a Project ID renumbers the project and
+        takes its line items with it, and adding a project opens on the next free number
+        instead of an empty box."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "renumber.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("dialog", lambda dialog: dialog.accept())
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+
+                        before = page.evaluate("state.project")
+                        owned = page.evaluate("projectRows().length")
+                        self.assertTrue(owned, "the open project needs line items to move")
+                        editor = page.locator("#editor")
+                        page.locator("#edit-project").click()
+                        expect(editor).to_be_visible()
+                        field = editor.locator('input[name="Project ID"]')
+                        expect(field).to_have_value(before)
+                        expect(field).not_to_have_attribute("readonly", "")   # renaming is allowed now
+                        field.fill("UH-001")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator("#toast")).to_contain_text("Renumbered to UH-001")
+                        expect(page.locator("#project-list")).to_contain_text("UH-001")
+                        expect(page.locator("#project-list")).not_to_contain_text(before)
+                        self.assertEqual(page.evaluate("state.project"), "UH-001")
+                        # the line items came with it, rather than being orphaned by the rename
+                        self.assertEqual(page.evaluate("projectRows().length"), owned)
+                        self.assertEqual(page.evaluate(
+                            """(pid) => state.data.selections.filter((r) => r["Project ID"] === pid).length""",
+                            before), 0, "no line item may be left behind under the old ID")
+
+                        # a new project opens on the next number after the highest one left
+                        ids = page.evaluate("""state.data.projects.map((p) => p["Project ID"])""")
+                        numbers = [int(match.group(1)) for pid in ids
+                                   if (match := re.fullmatch(r"UH-0*(\d+)", pid or ""))]
+                        page.locator("#new-project").click()
+                        expect(editor).to_be_visible()
+                        expect(editor.locator('input[name="Project ID"]')).to_have_value(
+                            f"UH-{max(numbers) + 1:03d}")
+                        page.keyboard.press("Escape")
+                        expect(editor).not_to_be_visible()
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:

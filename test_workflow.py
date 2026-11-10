@@ -352,6 +352,64 @@ class AppTests(unittest.TestCase):
         for bad in [{"Unit Price": "free"}, {"Markup %": "lots"}, {"Markup %": "5000"}]:
             self.assertEqual(self.post("/api/selections", {"row": row["_row"], "values": bad}).status_code, 400, bad)
 
+    def test_renumbering_a_project_takes_its_line_items_with_it(self):
+        """A Project ID is the only thing tying a selection to its project, so renaming one
+        has to move every line item in the same save - and must refuse an ID already in use
+        rather than merge two homes into one."""
+        state = self.state()
+        project = state["projects"][0]
+        old_id = project["Project ID"]
+        owned = [r for r in state["selections"] if r["Project ID"] == old_id]
+        self.assertTrue(owned, "the first project needs line items for this test to mean anything")
+        other = next((p["Project ID"] for p in state["projects"][1:]), None)
+
+        # an ID another project already holds is refused, and nothing moves
+        if other:
+            clash = self.post("/api/projects", {"values": {"Project ID": old_id}, "rename": other})
+            self.assertEqual(clash.status_code, 400, clash.json)
+            self.assertIn("already exists", clash.json["error"])
+            self.assertEqual(len([r for r in self.state()["selections"] if r["Project ID"] == old_id]),
+                             len(owned))
+
+        response = self.post("/api/projects", {"values": {"Project ID": old_id}, "rename": "UH-001"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["project_id"], "UH-001")
+        self.assertEqual(response.json["moved"], len(owned))
+
+        state = self.state()
+        ids = {p["Project ID"] for p in state["projects"]}
+        self.assertIn("UH-001", ids)
+        self.assertNotIn(old_id, ids)
+        self.assertEqual([r["Project ID"] for r in state["selections"] if r["Project ID"] == old_id], [])
+        moved = [r for r in state["selections"] if r["Project ID"] == "UH-001"]
+        self.assertEqual(len(moved), len(owned))
+        # the line items are the same records, not blanked or reordered by the move
+        self.assertEqual([r["Item"] for r in moved], [r["Item"] for r in owned])
+        renamed = next(p for p in state["projects"] if p["Project ID"] == "UH-001")
+        self.assertEqual(renamed["Project Name"], project["Project Name"])
+        self.assertEqual(renamed["_row"], project["_row"])   # renumbered in place
+
+        # a rename to the ID it already has is a no-op rather than an error
+        same = self.post("/api/projects", {"values": {"Project ID": "UH-001"}, "rename": "UH-001"})
+        self.assertEqual(same.status_code, 200, same.json)
+        self.assertEqual(same.json["moved"], 0)
+        # and a project that is no longer there conflicts instead of creating one
+        gone = self.post("/api/projects", {"values": {"Project ID": old_id}, "rename": "UH-009"})
+        self.assertEqual(gone.status_code, 409, gone.json)
+        self.assertNotIn("UH-009", {p["Project ID"] for p in self.state()["projects"]})
+
+    def test_a_renamed_project_still_exports(self):
+        """The spec sheet is fetched by Project ID, so a renumbered project must answer to its
+        new one - the check that the cascade really landed in the workspace."""
+        old_id = self.state()["projects"][0]["Project ID"]
+        self.assertEqual(self.post("/api/projects", {"values": {"Project ID": old_id},
+                                                     "rename": "UH-001"}).status_code, 200)
+        stale = self.client.get(f"/api/selections/pdf?project={old_id}")
+        self.assertEqual(stale.status_code, 400, "the old ID must no longer name a project")
+        fresh = self.client.get("/api/selections/pdf?project=UH-001")
+        self.assertEqual(fresh.status_code, 200, fresh.data[:200])
+        self.assertTrue(fresh.data.startswith(b"%PDF"))
+
     def test_new_project_starts_from_the_spec_template(self):
         import spec_template
         _, template = spec_template.load()

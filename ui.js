@@ -681,9 +681,9 @@ function openEditor(kind, record, prefill = {}) {
   let fields = "", note = "";
   const r = record || prefill;
   if (kind === "project") {
-    fields = field("Project ID", r["Project ID"], { required: true, readonly: !!record, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
-    note = record ? "Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
-      : "Use a unique Project ID, such as UH-104. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.";
+    fields = field("Project ID", r["Project ID"], { required: true, max: 50 }) + field("Project Name", r["Project Name"], { required: true, max: 200 }) + field("Client Name", r["Client Name"]) + field("Presentation Date", r["Presentation Date"]?.slice(0, 10), { type: "date" }) + field("Address", r.Address, { wide: true }) + field("Plan / Elevation", r["Plan / Elevation"]) + field("Designer", r.Designer) + field("Cover Image", r["Cover Image"], { wide: true });
+    note = record ? "Changing the Project ID renumbers this project and moves its line items with it. Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
+      : `The next number in the sequence is filled in for you — change it if this home needs a different one. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.`;
   } else if (kind === "selection") {
     fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit", r.Unit, { choices: ["", ...(state.data.units || [])], custom: true, placeholder: "Name the unit", max: 40 }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
   } else {
@@ -731,15 +731,25 @@ async function saveEditor(event) {
   const { kind, record } = state.editor;
   const values = editorValues();
   if (kind === "selection") values["Project ID"] = state.project;
+  // A renumbered project is still found by the ID it has now, so the new one travels separately.
+  let rename;
+  if (kind === "project" && record && values["Project ID"] !== record["Project ID"]) {
+    const owned = state.data.selections.filter((r) => r["Project ID"] === record["Project ID"]).length;
+    const moving = owned ? `, moving its ${owned} line item${owned === 1 ? "" : "s"} with it` : "";
+    if (!confirm(`Renumber “${record["Project Name"]}” from ${record["Project ID"]} to ${values["Project ID"]}${moving}?\n\nA backup is kept.`)) return;
+    rename = values["Project ID"];
+    values["Project ID"] = record["Project ID"];
+  }
   const custom = kind === "manufacturer" ? {} : { custom_fields: Array.from($("custom-field-rows").children, (row) => ({ name: row.querySelector(".custom-name").value, value: row.querySelector(".custom-value").value })) };
-  setBusy(true, "Saving project details…");
+  setBusy(true, rename ? "Renumbering the project…" : "Saving project details…");
   $("editor-save").disabled = true;
   try {
-    const result = await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record?._row, create: !record, revision: state.editor.revision, ...custom });
+    const result = await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record?._row, create: !record, revision: state.editor.revision, ...(rename ? { rename } : {}), ...custom });
     if (kind === "project") state.project = result.project_id;
     $("editor").close();
     await refresh();
     toast(result.seeded ? `Project created with ${result.seeded} standard line items ready to specify.`
+      : result.moved ? `Renumbered to ${result.project_id}, with ${result.moved} line item${result.moved === 1 ? "" : "s"} moved.`
       : "Project details saved. A backup was preserved.");
   } catch (error) {
     $("editor-error").textContent = error.message;
@@ -845,7 +855,16 @@ $("editor-fields").addEventListener("click", (event) => {
   const toggle = event.target.closest(".choice-toggle");
   if (toggle) choiceMode(toggle.closest(".choice"), toggle.closest(".choice").querySelector("input").disabled);
 });
-$("new-project").addEventListener("click", () => openEditor("project"));
+// Homes are numbered in one sequence, so a new project opens on the next free number rather
+// than a blank box: the highest UH-### in the workspace plus one, zero padded to three digits.
+// It is prefilled, not fixed - a home that needs a different number can still have one.
+const nextProjectId = () => {
+  const used = (state.data?.projects || [])
+    .map((p) => /^UH-0*(\d+)$/.exec(p["Project ID"] || "")?.[1])
+    .filter(Boolean).map(Number);
+  return `UH-${String(used.length ? Math.max(...used) + 1 : 1).padStart(3, "0")}`;
+};
+$("new-project").addEventListener("click", () => openEditor("project", null, { "Project ID": nextProjectId() }));
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("spec-filter").addEventListener("input", renderSpec);
