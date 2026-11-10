@@ -437,6 +437,58 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_cleared_value_is_not_refilled_by_a_read_that_straddled_a_save(self):
+        """A read answered just before a save describes the workspace as it used to be, so
+        drawing it puts a value somebody cleared back on the screen. A read that straddles a
+        write is discarded instead."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "cleared.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        row = int(page.locator(".spec-table tr[data-row]").first.get_attribute("data-row"))
+                        held = page.evaluate(
+                            """async (row) => {
+                                 await api('/api/selections', { row, values: { 'Unit Price': '50' } });
+                                 await refresh();
+                                 const stale = await api('/api/state');   // a body that still carries the 50
+                                 await api('/api/selections', { row, values: { 'Unit Price': '' } });
+                                 await refresh();                         // the page now holds the cleared row
+                                 const real = window.fetch;
+                                 // the poll's read is answered slowly, and with that older body
+                                 window.fetch = (path, options) => String(path).includes('/api/state')
+                                   ? new Promise((done) => setTimeout(() => done(new Response(
+                                       JSON.stringify(stale),
+                                       { status: 200, headers: { 'Content-Type': 'application/json' } })), 100))
+                                   : real(path, options);
+                                 const poll = pollOnce();                 // the read goes out ...
+                                 const write = api('/api/selections', { row, values: { 'Markup %': '1' } });
+                                 await poll;                              // ... and answers after the save started
+                                 const seen = state.data.selections.find((r) => r._row === row)['Unit Price'];
+                                 await write.catch(() => {});
+                                 window.fetch = real;
+                                 return seen;
+                               }""", row)
+                        self.assertEqual(held, "", "a read older than the save refilled the cleared price")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_other_hands_a_dropdown_over_to_a_typed_value(self):
         """Section and Location are lists that cannot name every home: choosing "Other" gives
         way to an empty box, what is typed there is saved on the line item, and a value the

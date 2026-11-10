@@ -33,14 +33,22 @@ function toast(message, error = false) {
 // in hand. Every request now has a deadline, which is generous enough for a cold start on the
 // free hosting plan and still guarantees the promise settles.
 const REQUEST_DEADLINE = 90000;
+// A read answered just before a save landed describes the workspace as it used to be, so
+// rendering it puts the old value back on screen - a cell someone cleared filling itself in
+// again. Every write counts, and a read that straddled one is discarded instead of drawn.
+let writes = 0, writing = 0;
 
 async function api(path, body, binary = false) {
-  const options = body === undefined ? {} : { method: "POST", headers: { "X-UH-Token": token }, body };
-  if (body !== undefined && !(body instanceof FormData)) {
+  const write = body !== undefined;
+  const options = write ? { method: "POST", headers: { "X-UH-Token": token }, body } : {};
+  if (write && !(body instanceof FormData)) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify({ revision: state.data?.revision, ...body });
   }
   options.signal = AbortSignal.timeout(REQUEST_DEADLINE);
+  // Counted as it starts: a read already in flight cannot describe what this write is about to
+  // do, and a write that times out may still have reached the workspace.
+  if (write) { writing++; writes++; }
   let response;
   try {
     response = await fetch(path, options);
@@ -48,6 +56,8 @@ async function api(path, body, binary = false) {
     throw new Error(error?.name === "TimeoutError"
       ? "The workspace did not answer in time. Your change is still here \u2014 press Save to send it again."
       : "Cannot reach the app. Make sure it is running, then retry.");
+  } finally {
+    if (write) writing--;
   }
   if (response.status === 401) {
     // The session ended on the hosted workspace, so collect a new one rather than losing the edit.
@@ -657,12 +667,14 @@ async function importSpecCsv(file) {
 }
 
 let polling = false;
-setInterval(async () => {
-  if (polling || state.busy || specDrag || $("editor").open || document.hidden) return;
+async function pollOnce() {
+  if (polling || state.busy || writing || specDrag || $("editor").open || document.hidden) return;
   if (document.activeElement?.classList?.contains("cell")) return;   // never redraw a cell being edited
   polling = true;
+  const sent = writes;
   try {
     const data = await api("/api/state");
+    if (writes !== sent) return;   // a save landed while this read was in flight, so it is already out of date
     // state.data is null when the very first load failed, so this poll is also the recovery:
     // a workspace must not stay empty because one request happened to land on a bad moment.
     if (!state.busy && !$("editor").open && data.revision !== state.data?.revision) {
@@ -675,7 +687,8 @@ setInterval(async () => {
     $("load-error").textContent = error.message;
     $("load-error").hidden = false;
   } finally { polling = false; }
-}, 2500);
+}
+setInterval(pollOnce, 2500);
 
 function setSidebar(collapsed) {
   document.body.classList.toggle("sidebar-collapsed", collapsed);
