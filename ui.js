@@ -5,10 +5,12 @@ const token = document.querySelector('meta[name="uh-token"]').content;
 const state = { data: null, project: "", view: "selections", page: 0, busy: false, editor: null,
                 specGroup: "Room / Area", specCollapsed: new Set(), focusSelector: null,
                 specPending: new Map(),
+                specRename: null,
                 specLinkEdit: new Set() };
 // The spec sheet's group-by chips: by room, as it opens, or by category. A line item with nothing
 // in that column sits under a placeholder heading, which is a label rather than a stored value.
 const specPlaceholder = () => (state.specGroup === "Section" ? "Other" : "Unassigned");
+const groupLabel = () => (state.specGroup === "Section" ? "category" : "room");
 const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -238,13 +240,29 @@ function renderTable() {
   const rows = projectRows().filter((r) => (!category || r.Section === category) && (!location || r.Location === location) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], r.Location, ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${r.Qty ? `Qty: ${esc(r.Qty)}${r.Unit ? ` ${esc(r.Unit)}` : ""}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${r["Client Status"] ? `<span class="status">${esc(r["Client Status"])}</span>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${qtyUnit(r) ? `Qty: ${esc(qtyUnit(r))}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${r["Client Status"] ? `<span class="status">${esc(r["Client Status"])}</span>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
   $("next-page").disabled = start + 50 >= rows.length || state.busy;
   attachImageErrors();
 }
+
+// A quantity means nothing without what it counts, so the spec sheet, its downloads and the
+// editor show the two as one column. They stay two workspace columns underneath — Qty is the
+// number the Price Schedule multiplies — so the box is split on its leading number when saved.
+// common.py holds the same pair of helpers for the exports and the CSV import.
+const QTY_UNIT = "Qty / Unit";
+const QTY_UNIT_KEYS = ["Qty", "Unit"];
+const QTY_UNIT_RE = /^(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d*\.?\d+)?\s*([\s\S]*)$/;
+const qtyUnit = (row) => QTY_UNIT_KEYS.map((key) => String(row[key] ?? "").trim()).filter(Boolean).join(" ");
+const splitQtyUnit = (text) => {
+  const [, number = "", unit = ""] = QTY_UNIT_RE.exec(String(text).trim());
+  return { Qty: number.replace(/,/g, ""), Unit: unit.trim() };
+};
+// The workspace fields a spec-sheet cell covers, and what it saves to each of them.
+const cellFields = (field) => (field === QTY_UNIT ? QTY_UNIT_KEYS : [field]);
+const cellValues = (field, text) => (field === QTY_UNIT ? splitQtyUnit(text) : { [field]: text });
 
 const SPEC_COLUMNS = [
   { field: "Item", label: "ITEM", placeholder: "Name the selection", width: 200 },
@@ -253,9 +271,9 @@ const SPEC_COLUMNS = [
   { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish", width: 140 },
   // the product URL is stored as it always was; this column is where it is pasted and read
   { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true, width: 120 },
-  { field: "Qty", label: "QTY", placeholder: "1", number: true, width: 64 },
-  // what the quantity counts, beside it: free text, because the unit follows the trade
-  { field: "Unit", label: "UNIT", placeholder: "EA", width: 64 },
+  // the quantity and what it counts, in one box: 7571 means nothing until it says sq ft.
+  // They stay two workspace columns, so the cell splits on its leading number when it is saved.
+  { field: QTY_UNIT, label: "QTY / UNIT", placeholder: "1 EA", pair: QTY_UNIT_KEYS, width: 118 },
   { field: "Unit Price", label: "UNIT PRICE", placeholder: "—", number: true, width: 100 },
   { field: "Markup %", label: "MARKUP %", placeholder: "0", number: true, width: 100 },
 ];
@@ -341,16 +359,24 @@ function renderSpec() {
     const collapsed = state.specCollapsed.has(name);
     const body = items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => {
       const pending = state.specPending.get(r._row) || {};   // unsaved edits outlive every re-render
-      const edited = c.field in pending;
-      const value = String(edited ? pending[c.field] : r[c.field] ?? "");
+      const edited = cellFields(c.field).some((f) => f in pending);
+      const value = c.pair ? qtyUnit({ ...r, ...pending }) : String(edited ? pending[c.field] : r[c.field] ?? "");
       // a saved address shows the words "Product Link", never the raw URL; the pencil reopens the input
       if (c.link && isUrl(value) && !state.specLinkEdit.has(r._row)) {
         return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Product Link ↗</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address">✎</button></div></td>`;
       }
       return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}></td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
+    // The heading is the grouped field's own value, so editing it renames the room or category
+    // on every line item under it. While it is being edited the toggle gives way to the box:
+    // an input cannot live inside a button, and collapsing is not what this click means.
+    const renaming = state.specRename === name;
+    const label = groupLabel();
+    const head = renaming
+      ? `<input class="cell group-rename" data-group-rename="${esc(name)}" value="${esc(name)}" maxlength="200" aria-label="Rename the ${label} ${esc(name)}">`
+      : `<button type="button" class="spec-card-toggle" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3></button>`;
     return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
-      <button type="button" class="spec-card-head" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3><span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><span class="group-total">${total ? money(total) : ""}</span></button>
+      <div class="spec-card-head">${head}<span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><button type="button" class="icon-button spec-rename" data-spec-rename="${esc(name)}" aria-label="Rename the ${label} ${esc(name)}" title="Rename this ${label}">✎</button><span class="group-total">${total ? money(total) : ""}</span></div>
       <div class="spec-body"><table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button></div>
     </article>`;
@@ -523,6 +549,30 @@ function remapPendingSpec(order, all) {
   }));
 }
 
+async function renameSpecGroup(from, to) {
+  const field = state.specGroup;
+  const belongs = (row) => (row[field] || specPlaceholder()) === from;
+  const rows = projectRows().filter(belongs);
+  state.specRename = null;   // closed before anything awaits, so a blur cannot reopen it
+  if (!to || to === from || !rows.length) { renderSpec(); return; }
+  // Typing an existing heading moves these line items into that group, which is the same thing
+  // dragging a row between cards does - but it is not obvious from a renamed heading, so ask.
+  if (projectRows().some((row) => (row[field] || specPlaceholder()) === to)) {
+    const ask = `“${to}” already exists. Move ${rows.length} line item${rows.length === 1 ? "" : "s"} into it?`;
+    if (!confirm(ask)) { renderSpec(); return; }
+  }
+  // The placeholder heading is a label for rows with nothing in that column, never a value.
+  const value = to === specPlaceholder() ? "" : to;
+  const batch = Object.fromEntries(rows.map((row) => [row._row, { [field]: value }]));
+  setBusy(true, `Renaming ${from}…`);
+  try {
+    await persist("/api/selections", { batch },
+                  () => rows.every((row) => projectRows().some((live) => live._row === row._row)));
+    await refresh();
+    toast(`${rows.length} line item${rows.length === 1 ? "" : "s"} now under “${to}”.`);
+  } finally { setBusy(false); }
+}
+
 function restoreFocus() {
   if (!state.focusSelector) return;
   const cell = document.querySelector(state.focusSelector);
@@ -565,7 +615,7 @@ async function saveProjectCustom(input) {
 function dropHeldSpecEdit(row, field) {
   const held = state.specPending.get(row);
   if (!held) return;
-  delete held[field];   // a confirmed save covers whatever this row and field held
+  for (const key of cellFields(field)) delete held[key];   // a confirmed save covers whatever this cell held
   if (!Object.keys(held).length) state.specPending.delete(row);
   specSaveUI();
 }
@@ -574,14 +624,13 @@ async function saveCell(input) {
   const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   if (!record) return;
-  const value = input.value.trim();
-  if (String(record[field] ?? "") === value) { dropHeldSpecEdit(row, field); return; }
+  const value = input.value.trim(), values = cellValues(field, value);
+  if (cellFields(field).every((key) => String(record[key] ?? "") === values[key])) { dropHeldSpecEdit(row, field); return; }
   if (field === "Item" && !value) { toast("An item needs a name.", true); renderSpec(); return; }
   input.classList.add("dirty");
   state.focusSelector = `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
   try {
-    await persist("/api/selections", { row, values: { [field]: value } },
-                 () => projectRows().some((r) => r._row === row));
+    await persist("/api/selections", { row, values }, () => projectRows().some((r) => r._row === row));
     dropHeldSpecEdit(row, field);
     await refresh();
     toast("Saved.");
@@ -622,7 +671,7 @@ function field(name, value = "", options = {}) {
   let control;
   if (options.choices) control = options.custom ? choiceControl(value, options, attrs) : menu(value, options.choices, attrs);
   else if (options.textarea) control = `<textarea ${attrs} aria-label="${esc(name)}" maxlength="4000">${esc(value)}</textarea>`;
-  else control = `<input ${attrs} type="${options.type || "text"}" value="${esc(value)}" maxlength="${options.max || 4000}" ${options.type === "number" ? 'min="0" max="1000000" step="any"' : ""}>`;
+  else control = `<input ${attrs} type="${options.type || "text"}" value="${esc(value)}" maxlength="${options.max || 4000}" placeholder="${esc(options.placeholder || "")}" ${options.type === "number" ? 'min="0" max="1000000" step="any"' : ""}>`;
   return `<label class="field ${options.wide ? "wide" : ""}">${esc(name)}${options.required ? " *" : ""}${control}</label>`;
 }
 
@@ -654,6 +703,11 @@ function choiceMode(wrapper, custom, blank = false) {
 
 function editorValues() {
   const values = Object.fromEntries(new FormData($("editor-form")));
+  // One box over the two columns a quantity is stored in.
+  if (QTY_UNIT in values) {
+    Object.assign(values, splitQtyUnit(values[QTY_UNIT]));
+    delete values[QTY_UNIT];
+  }
   // An "Other" box left empty names nothing new, so the record keeps the value it had.
   for (const wrapper of $("editor-fields").querySelectorAll(".choice")) {
     const box = wrapper.querySelector("input");
@@ -685,7 +739,7 @@ function openEditor(kind, record, prefill = {}) {
     note = record ? "Changing the Project ID renumbers this project and moves its line items with it. Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
       : `The next number in the sequence is filled in for you — change it if this home needs a different one. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.`;
   } else if (kind === "selection") {
-    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field("Qty", r.Qty, { type: "number" }) + field("Unit", r.Unit, { choices: ["", ...(state.data.units || [])], custom: true, placeholder: "Name the unit", max: 40 }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
+    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field(QTY_UNIT, qtyUnit(r), { placeholder: "7571 sq ft", max: 60 }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
@@ -868,18 +922,106 @@ $("new-project").addEventListener("click", () => openEditor("project", null, { "
 $("edit-project").addEventListener("click", () => openEditor("project", selectedProject()));
 $("add-selection").addEventListener("click", () => openEditor("selection"));
 $("spec-filter").addEventListener("input", renderSpec);
-// The download carries the spec sheet as it is on screen, under the same group headings.
-const specQuery = () => `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(state.specGroup)}`;
+
+// Not every sheet is sent for the same reason, so any column can be switched off before a
+// download and the CSV, Word and PDF copies all leave it out. Which columns those are says how
+// one person sends this sheet rather than anything about the home, so - like the column widths -
+// it is remembered in this browser and never written to the workspace. The list itself is the
+// server's one registry (`build_lookbook.HIDEABLE_COLUMNS`), so the chooser cannot offer a
+// column the exports do not know how to leave out.
+const EXPORT_HIDE_KEY = "uh-export-hidden";
+const exportHidden = new Set((() => {
+  try { return JSON.parse(localStorage.getItem(EXPORT_HIDE_KEY)) || []; } catch { return []; }
+})());
+const exportColumns = () => state.data?.export_columns || [];
+// Filtered against that registry on the way out: a name left over from an older version is
+// refused outright, and a download is a plain navigation, so the refusal would land as a page.
+const hiddenColumns = () => exportColumns().filter((c) => exportHidden.has(c.key)).map((c) => c.key);
+const joinWords = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);
+
+function renderExportColumns() {
+  const columns = exportColumns(), hidden = hiddenColumns();
+  $("export-column-list").innerHTML = columns.map((c) => {
+    const off = exportHidden.has(c.key);
+    return `<label class="column-toggle${off ? " off" : ""}"><input type="checkbox" data-column="${esc(c.key)}"${off ? "" : " checked"}><span>${esc(c.label)}</span></label>`;
+  }).join("");
+  $("export-columns-summary").textContent = hidden.length
+    ? `${columns.length - hidden.length} of ${columns.length} · ${hidden.length} left out`
+    : "Every column. Switch one off to leave it out of the files above.";
+  $("export-columns-all").hidden = !hidden.length;
+  // The CSV is the one file that comes back in, and it is matched to its line items by these
+  // three columns: a sheet sent back without them reads as new items rather than as edits.
+  const matched = columns.filter((c) => c.matches && exportHidden.has(c.key)).map((c) => c.label);
+  $("export-columns-warning").hidden = !matched.length;
+  $("export-columns-warning").textContent = matched.length
+    ? `Without ${joinWords(matched)}, a CSV sent back cannot be matched to these line items: importing it would add new ones instead of updating them.`
+    : "";
+}
+
+$("export-column-list").addEventListener("change", (event) => {
+  const box = event.target.closest("input[data-column]");
+  if (!box) return;
+  if (box.checked) exportHidden.delete(box.dataset.column); else exportHidden.add(box.dataset.column);
+  try { localStorage.setItem(EXPORT_HIDE_KEY, JSON.stringify([...exportHidden])); } catch {}
+  renderExportColumns();
+});
+$("export-columns-all").addEventListener("click", () => {
+  exportHidden.clear();
+  try { localStorage.removeItem(EXPORT_HIDE_KEY); } catch {}
+  renderExportColumns();
+});
+
+// Landscape gives nine columns the width they want; portrait files beside the client schedule
+// and prints on a sheet already in the binder. Which one is wanted is how this sheet is sent
+// rather than anything about the home, so - like the hidden columns - it is remembered in this
+// browser. A CSV has no page, so the choice rides only with the Word and PDF copies.
+const ORIENTATION_KEY = "uh-spec-orientation";
+const ORIENTATIONS = ["landscape", "portrait"];
+const loadOrientation = () => {
+  try { const stored = localStorage.getItem(ORIENTATION_KEY); if (ORIENTATIONS.includes(stored)) return stored; } catch {}
+  return ORIENTATIONS[0];
+};
+state.specOrientation = loadOrientation();
+
+function renderExportOrientation() {
+  document.querySelectorAll("#files-dialog [data-orientation]").forEach((chip) =>
+    chip.classList.toggle("active", chip.dataset.orientation === state.specOrientation));
+}
+
+function setExportOrientation(value) {
+  if (!ORIENTATIONS.includes(value)) return;
+  state.specOrientation = value;
+  try { localStorage.setItem(ORIENTATION_KEY, value); } catch {}
+  renderExportOrientation();
+}
+
+// The download carries the spec sheet as it is on screen, under the same group headings and
+// without the columns switched off above.
+const specQuery = () => {
+  const hidden = hiddenColumns();
+  return `?project=${encodeURIComponent(state.project)}&group=${encodeURIComponent(state.specGroup)}`
+    + (hidden.length ? `&hide=${encodeURIComponent(hidden.join(","))}` : "");
+};
+const docQuery = () => `${specQuery()}&orientation=${encodeURIComponent(state.specOrientation)}`;
 const FILE_ACTIONS = {
   csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
-  "spec-docx": () => { window.location.href = `/api/selections/docx${specQuery()}`; },
-  "spec-pdf": () => { window.location.href = `/api/selections/pdf${specQuery()}`; },
+  "spec-docx": () => { window.location.href = `/api/selections/docx${docQuery()}`; },
+  "spec-pdf": () => { window.location.href = `/api/selections/pdf${docQuery()}`; },
   "import-csv": () => $("spec-import-file").click(),
 };
 const NEEDS_PROJECT = new Set(["csv", "spec-docx", "spec-pdf", "import-csv"]);
 
-$("files-button").addEventListener("click", () => { if (state.data && !state.busy) $("files-dialog").showModal(); });
+// Drawn as the dialog opens rather than from `render`: the list only changes when someone
+// clicks it, and rebuilding it under the 2.5s poll would take the focus off a box mid-choice.
+$("files-button").addEventListener("click", () => {
+  if (!state.data || state.busy) return;
+  renderExportColumns();
+  renderExportOrientation();
+  $("files-dialog").showModal();
+});
 $("files-dialog").addEventListener("click", (event) => {
+  const orientation = event.target.closest("[data-orientation]");
+  if (orientation) { setExportOrientation(orientation.dataset.orientation); return; }
   const choice = event.target.closest(".file-choice");
   if (!choice || state.busy) return;
   const key = choice.dataset.file;
@@ -944,23 +1086,47 @@ function holdSpecEdit(input) {
   const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   const pending = state.specPending.get(row) || {};
-  if (record && String(record[field] ?? "") === input.value.trim()) delete pending[field];   // back to the saved value
-  else pending[field] = input.value.trim();
+  for (const [key, value] of Object.entries(cellValues(field, input.value.trim()))) {
+    if (record && String(record[key] ?? "") === value) delete pending[key];   // back to the saved value
+    else pending[key] = value;
+  }
   if (Object.keys(pending).length) state.specPending.set(row, pending);
   else state.specPending.delete(row);
-  input.classList.toggle("dirty", field in pending);
+  input.classList.toggle("dirty", cellFields(field).some((key) => key in pending));
   specSaveUI();
 }
 
 $("spec-groups").addEventListener("change", (event) => {
+  if (event.target.dataset.groupRename !== undefined) {
+    action(() => renameSpecGroup(event.target.dataset.groupRename, event.target.value.trim()));
+    return;
+  }
   if (!event.target.classList.contains("cell")) return;
   if (state.busy) { holdSpecEdit(event.target); return; }   // a save is running — hold this edit for Save
   specSaving++;
   specSaveUI();
   action(() => saveCell(event.target)).finally(() => { specSaving--; specSaveUI(); });
 });
+$("spec-groups").addEventListener("keydown", (event) => {
+  if (event.target.dataset.groupRename === undefined) return;
+  if (event.key === "Escape") {
+    // Taking the box off the page blurs it, and a blurred input whose value has changed fires
+    // change on the way out - which would save the very edit Escape is abandoning. Put the
+    // heading back first, so there is nothing left to commit.
+    event.target.value = event.target.dataset.groupRename;
+    state.specRename = null;
+    renderSpec();
+  }
+  // Enter commits through change when the name differs, and otherwise just closes the box.
+  if (event.key === "Enter") { event.preventDefault(); event.target.blur(); }
+});
 $("spec-groups").addEventListener("focusout", (event) => {
   const input = event.target;
+  if (input.dataset.groupRename !== undefined) {
+    // Still open means the name was left as it was: clicking away abandons it rather than saving.
+    if (state.specRename !== null) { state.specRename = null; renderSpec(); }
+    return;
+  }
   if (!input.classList.contains("cell")) return;
   const column = SPEC_COLUMNS.find((c) => c.field === input.dataset.field);
   if (!column?.link) return;
@@ -1060,6 +1226,12 @@ document.addEventListener("click", (event) => {
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));
+  if (button.dataset.specRename !== undefined) {
+    state.specRename = button.dataset.specRename;
+    state.focusSelector = "#spec-groups .group-rename";
+    renderSpec();
+    restoreFocus();
+  }
   if (button.dataset.linkEdit !== undefined) {
     const row = Number(button.dataset.linkEdit);
     state.specLinkEdit.add(row);

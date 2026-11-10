@@ -37,6 +37,27 @@ def norm_model(s):
     return re.sub(r"[^a-z0-9]", "", clean(s).lower())
 
 
+# A quantity means nothing without what it counts, so the two read as one "Qty / Unit"
+# column on the spec sheet, in its downloads and in the editor. They stay two workspace
+# columns underneath: Qty is the number the Price Schedule multiplies, Unit the free text.
+QTY_UNIT = "Qty / Unit"
+QTY_UNIT_KEYS = ("Qty", "Unit")
+# A leading number - with thousands separators, because people type them - and whatever
+# follows it is the unit. Text with no number in front of it is all unit.
+QTY_UNIT_RE = re.compile(r"^(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d*\.?\d+)?\s*(.*)$", re.DOTALL)
+
+
+def qty_unit(row):
+    """'7571 sq ft': a row's quantity and what it counts, as one column shows them."""
+    return " ".join(part for part in (clean(row.get(key)) for key in QTY_UNIT_KEYS) if part)
+
+
+def split_qty_unit(text):
+    """'7571 sq ft' back into the two columns it is stored in."""
+    number, unit = QTY_UNIT_RE.match(clean(text)).groups()
+    return {"Qty": (number or "").replace(",", ""), "Unit": clean(unit)}
+
+
 class Sheet:
     """Access a sheet's rows as dicts keyed by header, and write back by header."""
 

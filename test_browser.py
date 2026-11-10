@@ -623,6 +623,68 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_group_heading_is_renamed_from_its_pencil(self):
+        """A card's heading is the grouped field's own value, so renaming it rewrites the room
+        on every line item under it. Escape abandons the edit, and clicking away leaves the
+        heading as it was rather than saving a half-typed name."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "heading.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("dialog", lambda dialog: dialog.accept())
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+
+                        card = page.locator(".spec-card").first
+                        # textContent, not innerText: the heading is uppercased by CSS, and the
+                        # stored room is "Whole House" rather than "WHOLE HOUSE".
+                        before = card.locator(".spec-card-head h3").text_content().strip()
+                        rooms = page.evaluate(
+                            """(name) => projectRows().filter((r) => (r["Room / Area"] || "Unassigned") === name).length""",
+                            before)
+                        self.assertTrue(rooms, "the first card needs line items to rename")
+
+                        # Escape abandons the edit
+                        card.locator(".spec-rename").click()
+                        box = card.locator(".group-rename")
+                        expect(box).to_be_focused()
+                        box.fill("Thrown away")
+                        page.keyboard.press("Escape")
+                        expect(card.locator(".spec-card-head h3")).to_have_text(before, ignore_case=True)
+
+                        # and a committed name moves every line item under it
+                        card.locator(".spec-rename").click()
+                        page.locator(".group-rename").fill("Whole Home")
+                        page.keyboard.press("Enter")
+                        expect(page.locator("#toast")).to_contain_text(f"{rooms} line item")
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("Whole Home", ignore_case=True)
+                        self.assertEqual(page.evaluate(
+                            """() => projectRows().filter((r) => r["Room / Area"] === "Whole Home").length"""), rooms)
+                        self.assertEqual(page.evaluate(
+                            """(name) => projectRows().filter((r) => r["Room / Area"] === name).length""",
+                            before), 0)
+                        # it is a real workspace edit, not only on screen
+                        page.reload()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("Whole Home", ignore_case=True)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_a_project_is_renumbered_from_its_editor_and_the_next_one_follows(self):
         """Homes are numbered in one sequence: editing a Project ID renumbers the project and
         takes its line items with it, and adding a project opens on the next free number

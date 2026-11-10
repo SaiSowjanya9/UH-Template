@@ -209,6 +209,17 @@ def asset(name):
     return send_file(BASE / name)
 
 
+# The three columns an exported spec sheet is matched back onto its line items by on import.
+# Leaving one out of a download is the sender's own call, so the chooser offers them like any
+# other column — with a warning, and never switched off to begin with.
+SPEC_MATCH_FIELDS = ("Location", "Room / Area", "Item")
+# What the download chooser offers: the spec-sheet family of build_lookbook's one registry, in
+# its order. Reading the list from there is what stops the app offering a column the exports
+# do not know how to leave out, which `hidden_columns` would then refuse with a 400.
+EXPORT_COLUMNS = [{"key": key, "label": label, "matches": key in SPEC_MATCH_FIELDS}
+                  for key, label, families in build_lookbook.HIDEABLE_COLUMNS if "sheet" in families]
+
+
 @app.get("/api/state")
 def state():
     with store.lock:
@@ -219,6 +230,7 @@ def state():
                        locations=common.location_order(wb),
                        units=unit_order(wb),
                        client_statuses=CLIENT_STATUSES,
+                       export_columns=EXPORT_COLUMNS,
                        revision=revision,
                        workspace=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
@@ -501,11 +513,15 @@ PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 SPEC_CSV_FIELDS = ["Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
-                   "Qty", "Unit", "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
+                   common.QTY_UNIT, "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
                    "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
-# The spec sheet shows the product URL as a Product Link column, hidden under the column's own name.
-CSV_HIDE_KEYS = {PRODUCT_LINK: "Product URL"}
+# Columns the sheet shows under a name of their own: the product URL as Product Link, and the
+# quantity with what it counts as one Qty / Unit column, which is what each is hidden by.
+CSV_HIDE_KEYS = {PRODUCT_LINK: ("Product URL",), common.QTY_UNIT: common.QTY_UNIT_KEYS}
+# Every header an export of this sheet can carry, so a download that hid one half of
+# Qty / Unit - leaving the other behind under its own name - still imports.
+CSV_HEADERS = SPEC_CSV_FIELDS + list(common.QTY_UNIT_KEYS)
 
 
 def hidden_option(value):
@@ -518,17 +534,23 @@ def hidden_option(value):
 
 def csv_fields(hidden):
     """The spec sheet's columns, minus the hidden ones."""
-    return [field for field in SPEC_CSV_FIELDS if CSV_HIDE_KEYS.get(field, field) not in hidden]
+    headers = (build_lookbook.column_header(field, CSV_HIDE_KEYS.get(field, (field,)), hidden)
+               for field in SPEC_CSV_FIELDS)
+    return [header for header in headers if header]
 
 
 def spec_key(row):
-    return (common.clean(row.get("Location")), common.clean(row.get("Room / Area")),
-            common.clean(row.get("Item")))
+    return tuple(common.clean(row.get(field)) for field in SPEC_MATCH_FIELDS)
 
 
 def csv_values(entry, headers):
-    """One CSV line as selection fields; the Product Link column carries the product URL."""
-    values = {field: common.clean(entry.get(field)) for field in SPEC_CSV_FIELDS if field in headers}
+    """One CSV line as selection fields; Qty / Unit splits in two and Product Link carries the URL."""
+    values = {field: common.clean(entry.get(field)) for field in CSV_HEADERS if field in headers}
+    quantity = values.pop(common.QTY_UNIT, None)
+    if quantity is not None:
+        # One column over two workspace fields. A half-hidden export carries the other half
+        # under its own name, so a column naming a field outright wins over the split.
+        values = {**common.split_qty_unit(quantity), **values}
     link = values.pop(PRODUCT_LINK, "")
     if link:
         # Excel writes a formula's displayed text ("Product Link") when it re-saves a CSV, so a
@@ -555,7 +577,7 @@ def export_spec_csv():
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
     writer.writeheader()
     # Product Link is generated from the URL, never copied from the workspace's own link column.
-    writer.writerows({**{field: row.get(field, "") for field in fields},
+    writer.writerows({**{field: build_lookbook.spec_value(row, field) for field in fields},
                       PRODUCT_LINK: hyperlink_formula(row.get("Product URL"))} for row in rows)
     name = re.sub(r"[^A-Za-z0-9_-]", "_", project_id)[:50]
     return send_file(io.BytesIO(buffer.getvalue().encode("utf-8-sig")), as_attachment=True,
@@ -568,6 +590,14 @@ def group_option(value):
     if group not in build_lookbook.SPEC_GROUPS:
         raise ValidationError(f"Group the spec sheet by one of: {', '.join(build_lookbook.SPEC_GROUPS)}.")
     return group
+
+
+def orientation_option(value):
+    """The page a spec-sheet document prints on, as chosen in the export dialog."""
+    try:
+        return build_lookbook.spec_orientation(value)
+    except ValueError as error:
+        raise ValidationError(str(error)) from None
 
 
 def spec_export_rows():
@@ -595,10 +625,11 @@ def export_spec_docx():
     import build_word
     hidden = hidden_option(request.args.get("hide", ""))
     group = group_option(request.args.get("group"))
+    orientation = orientation_option(request.args.get("orientation"))
     project_id, project, rows = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder),
-                                       hidden=hidden, group=group)
+                                       hidden=hidden, group=group, orientation=orientation)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=DOCX_MIME)
 
@@ -608,10 +639,11 @@ def export_spec_pdf():
     """The spec sheet as a printable PDF: the same columns as the Word copy."""
     hidden = hidden_option(request.args.get("hide", ""))
     group = group_option(request.args.get("group"))
+    orientation = orientation_option(request.args.get("orientation"))
     project_id, project, rows = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder),
-                                           hidden=hidden, group=group)
+                                           hidden=hidden, group=group, orientation=orientation)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=PDF_MIME)
 
@@ -630,7 +662,7 @@ def import_spec_csv():
     headers = [common.clean(name) for name in (reader.fieldnames or [])]
     if "Item" not in headers:
         raise ValidationError("The file needs at least an Item column. Export the spec sheet first to see the format.")
-    unknown = [name for name in headers if name and name not in SPEC_CSV_FIELDS]
+    unknown = [name for name in headers if name and name not in CSV_HEADERS]
     if unknown:
         raise ValidationError(f"Unexpected column(s): {', '.join(unknown[:4])}. Export the spec sheet to see the format.")
     incoming = []

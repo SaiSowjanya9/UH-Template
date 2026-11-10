@@ -7,6 +7,7 @@ Usage:
     python build_lookbook.py --project UH-101 --draft                      # internal copy (watermarked)
     python build_lookbook.py --project UH-101 --title "Interior Selections" --prefix IN
     python build_lookbook.py --project UH-101 --spec                       # internal priced spec sheet
+    python build_lookbook.py --project UH-101 --spec --orientation portrait  # ... turned upright
     python build_lookbook.py --project UH-101 --hide "Manufacturer,Qty"      # leave columns out
 
 Output: output/<ProjectID>_<Project Name>_<Schedule title>.pdf
@@ -24,7 +25,7 @@ import ipaddress
 import json
 import re
 import socket
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from pathlib import Path
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
@@ -41,7 +42,8 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
                                 PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
-from common import BASE_DIR, WORKSPACE, Sheet, clean, open_workspace, location_order
+from common import (BASE_DIR, WORKSPACE, QTY_UNIT, QTY_UNIT_KEYS, Sheet, clean, open_workspace,
+                    location_order, qty_unit)
 from workspace_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
@@ -99,16 +101,42 @@ SPEC_TITLE = "Spec Sheet"
 # The printed spec sheet mirrors the app's spec-sheet table, column for column, so the
 # download carries exactly the line items and headings on screen. The grouping field becomes
 # the heading and the lookbook flag a note under the item. (column, width share, the hideable
-# key that drops it); shares are rescaled to what is shown, and build_word.build_spec lays
-# the same registry out in Word.
+# key - or keys, where one column stands over two fields - that drop it); shares are rescaled
+# to what is shown, and build_word.build_spec lays the same registry out in Word.
 SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
                 ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
-                (PRODUCT_LINK, 60, "Product URL"), ("Qty", 30, "Qty"), ("Unit", 34, "Unit"),
+                (PRODUCT_LINK, 60, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
                 ("Unit Price", 50, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
 LAND_BODY_TOP = LAND_H - (PAGE_H - BODY_TOP)   # the same 96pt from the top edge
+# The spec sheet prints either way round, chosen per download: landscape as it always has,
+# because nine columns want the width, or portrait to file beside the client schedule. Only
+# the page changes - the same furniture, the same 96pt from the top edge to the first row,
+# and column widths that are shares of whatever content width is left.
+SPEC_ORIENTATIONS = ("landscape", "portrait")
+SpecPage = namedtuple("SpecPage", "name landscape width height content_w body_top")
+
+
+def spec_orientation(value):
+    """The orientation a spec sheet was asked for; nothing asked for means landscape.
+
+    An unknown name is refused rather than quietly printed landscape: a download that
+    ignores the choice is worse than one that says it cannot honour it.
+    """
+    name = clean(value).lower() or SPEC_ORIENTATIONS[0]
+    if name not in SPEC_ORIENTATIONS:
+        raise ValueError(f"Print the spec sheet in one of: {', '.join(SPEC_ORIENTATIONS)}.")
+    return name
+
+
+def spec_page(orientation="landscape"):
+    """The page that orientation prints on, as the PDF and the Word copy both measure it."""
+    name = spec_orientation(orientation)
+    width, height = (LAND_W, LAND_H) if name == "landscape" else (PAGE_W, PAGE_H)
+    return SpecPage(name, name == "landscape", width, height, width - 2 * M,
+                    height - (PAGE_H - BODY_TOP))
 
 
 # --------------------------------------------------------------------------
@@ -161,7 +189,8 @@ def load_data():
 # the PDF, the PowerPoint twin and the fillable copy; 'sheet' is the spec sheet CSV.
 HIDEABLE_COLUMNS = [
     ("code", "Item code", ("schedule",)),
-    ("Location", "Location headings", ("schedule", "sheet")),
+    # a column on the spec sheet, the section headings on the schedule; one name covers both
+    ("Location", "Location", ("schedule", "sheet")),
     ("Section", "Category", ("sheet",)),
     ("Item", "Item name", ("schedule", "sheet")),
     ("Room / Area", "Room / area", ("schedule", "sheet")),
@@ -229,6 +258,30 @@ def spec_groups(rows, group="Room / Area", hidden=()):
     for row in rows:
         groups.setdefault(clean(row.get(group)) or placeholder, []).append(row)
     return groups
+
+
+def column_header(column, keys, hidden):
+    """A column's header once its hidden fields are taken out, or '' when none is left.
+
+    Only Qty / Unit stands over two workspace fields: hiding one half narrows the column to
+    the other and hiding both drops it, exactly as two separate columns behaved.
+    """
+    shown = [key for key in keys if key not in hidden]
+    if not shown:
+        return ""
+    return column if len(shown) == len(keys) else " / ".join(shown)
+
+
+def spec_columns(hidden=()):
+    """(header, width share) for every spec-sheet column still shown."""
+    shown = [(column_header(column, key if isinstance(key, tuple) else (key,), hidden), share)
+             for column, share, key in SPEC_COLUMNS]
+    return [(header, share) for header, share in shown if header] or [("Item", 1)]
+
+
+def spec_value(row, column):
+    """The text a spec-sheet column shows for a row; Qty / Unit joins the two fields it covers."""
+    return qty_unit(row) if column == QTY_UNIT else clean(row.get(column))
 
 
 def row_widths(hidden, reserved=0):
@@ -723,13 +776,13 @@ def spec_cell(row, column, hidden):
         return Paragraph(f'<link href="{escape(url, {chr(34): "&quot;"})}" '
                          f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>',
                          SPEC_CELL_STYLE)
-    return Paragraph(escape(clean(row.get(column))), SPEC_CELL_STYLE)
+    return Paragraph(escape(spec_value(row, column)), SPEC_CELL_STYLE)
 
 
 def spec_table(items, columns, widths, hidden):
     """A repeated-header table of every priced line item, one row per selection.
 
-    Hairlines run down the column gaps as well as under the rows: nine narrow columns of
+    Hairlines run down the column gaps as well as under the rows: eight narrow columns of
     short values, many of them empty, read as one drifting line of text without them.
     """
     data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
@@ -752,35 +805,38 @@ def spec_table(items, columns, widths, hidden):
     ]))
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area"):
-    """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
-    columns = [(column, share) for column, share, key in SPEC_COLUMNS if key not in hidden]
-    if not columns:
-        columns = [("Item", 1)]
-    widths = [LAND_CONTENT_W * share / sum(share for _, share in columns) for _, share in columns]
-    story = [Band(band_values(project), LAND_CONTENT_W), Spacer(0, BAND_GAP)]
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
+               orientation="landscape"):
+    """The internal spec sheet: the app's line items and columns, under the same headings,
+    on the page orientation the download asked for."""
+    page = spec_page(orientation)
+    columns = spec_columns(hidden)
+    widths = [page.content_w * share / sum(share for _, share in columns) for _, share in columns]
+    story = [Band(band_values(project), page.content_w), Spacer(0, BAND_GAP)]
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
         table = spec_table(items, columns, widths, hidden)
-        story.append(section_block(section, table, LAND_CONTENT_W, LAND_BODY_TOP - BODY_BOTTOM)
+        story.append(section_block(section, table, page.content_w, page.body_top - BODY_BOTTOM)
                      if section else table)
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)
+    # The orientation is part of the name: both copies are downloaded to compare, and two
+    # files called the same thing leave the browser to tell them apart with a "(1)".
     parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
              re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
-             re.sub(r"[^A-Za-z0-9]+", "_", SPEC_TITLE).strip("_")[:60]]
+             re.sub(r"[^A-Za-z0-9]+", "_", SPEC_TITLE).strip("_")[:60], page.name.title()]
     out = destination / ("_".join(part for part in parts if part) + ".pdf")
-    doc = BaseDocTemplate(str(out), pagesize=(LAND_W, LAND_H), leftMargin=M, rightMargin=M,
-                          topMargin=LAND_H - LAND_BODY_TOP, bottomMargin=BODY_BOTTOM,
+    doc = BaseDocTemplate(str(out), pagesize=(page.width, page.height), leftMargin=M, rightMargin=M,
+                          topMargin=page.height - page.body_top, bottomMargin=BODY_BOTTOM,
                           title=f"{clean(project.get('Project Name')) or pid} - {SPEC_TITLE}",
                           author=CFG["company_name"], subject=f"Internal spec sheet for {pid}")
-    frame = Frame(M, BODY_BOTTOM, LAND_CONTENT_W, LAND_BODY_TOP - BODY_BOTTOM, 0, 0, 0, 0, id="spec")
+    frame = Frame(M, BODY_BOTTOM, page.content_w, page.body_top - BODY_BOTTOM, 0, 0, 0, 0, id="spec")
     doc.addPageTemplates([PageTemplate("spec", [frame],
                                        onPage=lambda canvas, document: furniture(canvas, document,
                                                                                  SPEC_TITLE, False,
-                                                                                 landscape=True))])
+                                                                                 landscape=page.landscape))])
     doc.build(story)
     return out
 
@@ -801,7 +857,9 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--project", help="Project ID, e.g. UH-101")
     group.add_argument("--all", action="store_true", help="Every project on the Projects sheet")
-    parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet, landscape")
+    parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet")
+    parser.add_argument("--orientation", default=SPEC_ORIENTATIONS[0], choices=SPEC_ORIENTATIONS,
+                        help="Spec sheet page orientation (default: landscape)")
     parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
@@ -820,7 +878,9 @@ def main():
             if pid not in projects or not spec_rows(wb, pid):
                 print(f"- {pid}: no line items to export, skipped")
                 continue
-            print(f"+ {pid}: {build_spec(pid, projects[pid], spec_rows(wb, pid), hidden=hidden).relative_to(BASE_DIR)}")
+            out = build_spec(pid, projects[pid], spec_rows(wb, pid), hidden=hidden,
+                             orientation=args.orientation)
+            print(f"+ {pid}: {out.relative_to(BASE_DIR)}")
         return
     for pid in (list(projects) if args.all else [args.project]):
         if pid not in projects:

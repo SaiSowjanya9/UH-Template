@@ -161,6 +161,23 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .file-choice strong { display:block; font-size:13px; font-weight:600; color:var(--ink); }
 .file-choice small { display:block; font-size:11px; color:var(--muted); line-height:1.55; margin-top:4px; }
 @media(max-width:700px) { .file-columns { grid-template-columns:1fr; } }
+.file-option { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.file-option-label { font-size:12px; font-weight:600; color:var(--ink); }
+.file-option .chip { padding:6px 13px; }
+.file-option-note { font-size:11px; color:var(--muted); line-height:1.55; margin:7px 0 0; }
+.export-columns { border-top:1px solid var(--line); margin-top:22px; padding-top:18px; }
+.export-columns-head { display:flex; align-items:baseline; gap:10px; margin-bottom:11px; }
+.export-columns-head h3 { font-size:11px; letter-spacing:1.8px; color:var(--muted); text-transform:uppercase; margin:0; }
+.export-columns-head .muted { margin-right:auto; }
+.export-columns-head .text-button { padding:0 2px; }
+.export-column-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px 14px; }
+.column-toggle { display:flex; align-items:center; gap:7px; min-width:0; font-size:12px; padding:3px 4px; border-radius:4px; cursor:pointer; }
+.column-toggle:hover { background:var(--cream); }
+.column-toggle input { accent-color:var(--gold); margin:0; flex:none; }
+.column-toggle span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.column-toggle.off span { color:var(--muted); text-decoration:line-through; }
+.column-warning { color:var(--red); background:#fbede6; border-radius:5px; padding:10px 12px; font-size:11px; line-height:1.6; margin:13px 0 0; }
+@media(max-width:700px) { .export-column-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .details-panel { border:1px solid var(--line); background:white; border-radius:8px; padding:15px 18px 16px; margin-bottom:16px; }
 .details-panel .section-heading { margin-bottom:8px; }
 .details-panel .section-heading h2 { font-size:22px; }
@@ -228,7 +245,15 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .cover-lightbox img { display:block; max-width:calc(94vw - 24px); max-height:calc(92vh - 24px); object-fit:contain; border-radius:4px; }
 .spec-groups { display:flex; flex-direction:column; gap:14px; }
 .spec-card { background:#fff; border:1px solid var(--gold-line); border-radius:9px; overflow:hidden; }
-.spec-card-head { display:flex; align-items:center; gap:12px; width:100%; border:0; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }
+.spec-card-head { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:15px 19px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border-bottom:1px solid var(--gold-line); }
+/* The heading collapses the card; the pencil beside it renames the room or category, so it
+   sits outside that button. While renaming, the box takes the toggle's place. */
+.spec-card-toggle { display:flex; align-items:center; gap:12px; flex:1; min-width:0; border:0; background:none; padding:0; text-align:left; color:inherit; }
+.spec-card-head .count { flex:none; }
+.spec-rename { flex:none; font-size:13px; padding:4px 7px; color:#b7a87f; opacity:.75; }
+.spec-card-head:hover .spec-rename,.spec-rename:focus-visible { opacity:1; }
+.spec-rename:hover { background:#f0ead8; color:var(--gold-ink); }
+.group-rename { flex:1; min-width:0; max-width:320px; font-size:13px; letter-spacing:.4px; text-transform:uppercase; color:#43381f; background:#fff; border-color:var(--gold); }
 .spec-card.collapsed .spec-card-head { border-bottom:0; }
 .spec-card-head .twist { color:var(--gold-ink); font-size:11px; width:14px; transition:transform .15s; }
 .spec-card.collapsed .spec-card-head .twist { transform:rotate(-90deg); }

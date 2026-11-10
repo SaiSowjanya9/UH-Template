@@ -6,6 +6,7 @@ Usage:
     python build_word.py --project UH-101 --draft
     python build_word.py --project UH-101 --fillable
     python build_word.py --project UH-101 --spec
+    python build_word.py --project UH-101 --spec --orientation portrait
     python build_word.py --project UH-101 --title "Interior Selections" --prefix IN
     python build_word.py --project UH-101 --hide "code,Qty,Product URL"
 
@@ -20,8 +21,9 @@ from the PDF.
 
 The fillable copy holds the client details, each line's description and a remove tick in
 content controls tagged with the workspace row, so a marked-up document imports back through
-the same route as the fillable PDF. The spec sheet is the internal landscape column dump and
-is the only Word document here that carries pricing.
+the same route as the fillable PDF. The spec sheet is the internal column dump - landscape
+unless --orientation portrait is asked for - and is the only Word document here that carries
+pricing.
 """
 import argparse
 import datetime as dt
@@ -47,10 +49,11 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             HEADING_OVERHANG, HIDEABLE, ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W,
                             NOTE_STYLE, OUT, PAD_X, PAD_Y,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, SPEC_COLUMNS, SPEC_TITLE, band_values, clean,
-                            code_prefix, description, fit, group_sections, hidden_columns,
-                            load_data, mark_bottom, numbered, presentation_details, product_link,
-                            row_widths, schedule_title, spaced_caps, spec_groups)
+                            SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
+                            band_values, clean, code_prefix, description, fit, group_sections,
+                            hidden_columns, load_data, mark_bottom, numbered, presentation_details,
+                            product_link, row_widths, schedule_title, spaced_caps, spec_columns,
+                            spec_groups, spec_page, spec_value)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -560,15 +563,16 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
     return out
 
 
-def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area"):
-    """The internal spec sheet: the app's line items and columns, landscape, under the same headings."""
-    document = new_document(SPEC_TITLE, landscape=True)
+def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
+               orientation="landscape"):
+    """The internal spec sheet: the app's line items and columns, under the same headings,
+    on the page orientation the download asked for."""
+    page = spec_page(orientation)
+    document = new_document(SPEC_TITLE, landscape=page.landscape)
     width = content_width(document)
     band(document, band_values(project), width)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
-    columns = [(column, share) for column, share, key in SPEC_COLUMNS if key not in hidden]
-    if not columns:
-        columns = [("Item", 1)]
+    columns = spec_columns(hidden)
     widths = [width * share / sum(share for _, share in columns) for _, share in columns]
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
@@ -588,14 +592,14 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                     hyperlink(shape(cell.paragraphs[0], size=8, leading=10.5), url, PRODUCT_LINK,
                               8, COLORS["accent"])
                 elif column != PRODUCT_LINK:
-                    write(cell.paragraphs[0], row.get(column, ""), 8, COLORS["body"], leading=10.5)
+                    write(cell.paragraphs[0], spec_value(row, column), 8, COLORS["body"], leading=10.5)
                 if position < len(items) - 1:
                     cell_rule(cell, "bottom", 0.4, COLORS["hairline"])
             if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
                 write(cells[0].add_paragraph(), "Not in lookbook", 6.5, COLORS["muted"], leading=9)
     destination = finish(document, pid, project, SPEC_TITLE, output_dir,
                          subject=f"Internal spec sheet for {pid}")
-    out = destination / filename(pid, project, SPEC_TITLE)
+    out = destination / filename(pid, project, SPEC_TITLE, parts=(page.name.title(),))
     document.save(out)
     return out
 
@@ -650,6 +654,8 @@ def main():
     parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--fillable", action="store_true", help="Working copy with content controls")
     parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet")
+    parser.add_argument("--orientation", default=SPEC_ORIENTATIONS[0], choices=SPEC_ORIENTATIONS,
+                        help="Spec sheet page orientation (default: landscape)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
     parser.add_argument("--hide", default="",
@@ -664,7 +670,7 @@ def main():
         parser.error("Project not found or no selections match the export options.")
     project, rows = projects[args.project], items[args.project]
     if args.spec:
-        print(build_spec(args.project, project, rows, hidden=hidden))
+        print(build_spec(args.project, project, rows, hidden=hidden, orientation=args.orientation))
     elif args.fillable:
         print(build_fillable(args.project, project, rows, title=args.title, prefix=args.prefix, hidden=hidden))
     else:

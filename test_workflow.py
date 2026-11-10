@@ -228,6 +228,33 @@ class AppTests(unittest.TestCase):
         self.assertIn("Manufacturer", csvlib.DictReader(io.StringIO(everything.data.decode("utf-8-sig"))).fieldnames)
         self.assertEqual(self.client.get(f"/api/selections/csv?project={project}&hide=Nonsense").status_code, 400)
 
+    def test_the_download_chooser_offers_exactly_what_an_export_can_drop(self):
+        """The toggles in the Import & export dialog are build_lookbook's one registry, so the
+        app cannot offer a column the exports would then refuse to leave out."""
+        import csv as csvlib
+        from urllib.parse import quote
+        from build_lookbook import HIDEABLE_COLUMNS
+        offered = self.state()["export_columns"]
+        self.assertEqual([column["key"] for column in offered],
+                         [key for key, _, families in HIDEABLE_COLUMNS if "sheet" in families])
+        self.assertTrue(all(column["label"] for column in offered))
+        # the three a returning CSV is matched on are flagged, so the dialog can say so
+        self.assertEqual({column["key"] for column in offered if column["matches"]},
+                         set(self.module.SPEC_MATCH_FIELDS))
+
+        project = self.state()["selections"][0]["Project ID"]
+        everything = ",".join(column["key"] for column in offered)
+        # Encoded, as the page sends them: 'Model #' and 'Markup %' are a fragment and an
+        # escape to a URL, and arrive as unknown columns if they ever go out raw.
+        for column in offered:
+            response = self.client.get(f"/api/selections/csv?project={project}&hide={quote(column['key'])}")
+            self.assertEqual(response.status_code, 200, column["key"])
+        for name in ["csv", "docx", "pdf"]:   # and hiding every column at once is a legitimate ask
+            response = self.client.get(f"/api/selections/{name}?project={project}&hide={quote(everything)}")
+            self.assertEqual(response.status_code, 200, name)
+        bare = self.client.get(f"/api/selections/csv?project={project}&hide={quote(everything)}")
+        self.assertEqual(next(csvlib.reader(io.StringIO(bare.data.decode("utf-8-sig")))), [])
+
     def test_invalid_project_and_missing_fields_are_rejected(self):
         self.assertEqual(self.post("/api/projects", {"values": {"Project ID": "../outside", "Project Name": "Invalid"}}).status_code, 400)
         self.assertEqual(self.post("/api/selections", {"values": {"Project ID": "UNKNOWN", "Item": "Item"}}).status_code, 400)
@@ -627,6 +654,50 @@ class AppTests(unittest.TestCase):
 
         word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())
         self.assertLess(word.index(spaced("Zulu Suite")), word.index(spaced("Alpha Nook")))
+
+    def test_spec_exports_print_the_orientation_the_download_asks_for(self):
+        """Landscape as the dialog opens, portrait when it is asked for: the same sheet, turned.
+
+        Nine columns want a letter page on its side, but a copy filed with the client
+        schedule has to stand upright, so the choice travels with the download - and the
+        file says which way round it is, so both can sit in one folder.
+        """
+        from docx import Document
+        from pypdf import PdfReader
+        pid = self.state()["projects"][0]["Project ID"]
+        items = [r["Item"] for r in self.state()["selections"] if r["Project ID"] == pid]
+
+        def pdf_page(query):
+            response = self.client.get(f"/api/selections/pdf?project={pid}{query}")
+            self.assertEqual(response.status_code, 200, query)
+            reader = PdfReader(io.BytesIO(response.data))
+            box = reader.pages[0].mediabox
+            return (response, round(float(box.width)), round(float(box.height)),
+                    " ".join(" ".join(page.extract_text() for page in reader.pages).split()))
+
+        def word_page(query):
+            response = self.client.get(f"/api/selections/docx?project={pid}{query}")
+            self.assertEqual(response.status_code, 200, query)
+            section = Document(io.BytesIO(response.data)).sections[0]
+            return (response, round(section.page_width.pt), round(section.page_height.pt),
+                    " ".join(docx_text(response.data).split()))
+
+        for name, read_page in (("PDF", pdf_page), ("Word", word_page)):
+            for query in ("", "&orientation=landscape"):
+                response, width, height, _ = read_page(query)
+                self.assertEqual((width, height), (792, 612), f"{name} {query or 'by default'}")
+                self.assertIn("Landscape", response.headers["Content-Disposition"], name)
+            response, width, height, text = read_page("&orientation=portrait")
+            self.assertEqual((width, height), (612, 792), name)
+            self.assertIn("Portrait", response.headers["Content-Disposition"], name)
+            # turning the page is all that changes: every line item is still on it
+            for item in items:
+                self.assertIn(item, text, f"{name} {item}")
+
+        # an orientation the builders do not know is refused, never quietly printed landscape
+        for route in ("pdf", "docx"):
+            stale = self.client.get(f"/api/selections/{route}?project={pid}&orientation=sideways")
+            self.assertEqual(stale.status_code, 400, route)
 
     def test_unit_is_a_selections_column_the_spec_sheet_carries(self):
         """Qty is a bare number without it: 7571 means nothing until it says sq ft."""
