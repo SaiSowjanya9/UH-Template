@@ -985,6 +985,26 @@ $("sign-out")?.addEventListener("click", () => action(async () => {
 $("previous-page").addEventListener("click", () => { state.page--; renderTable(); });
 $("next-page").addEventListener("click", () => { state.page++; renderTable(); });
 for (const id of ["search", "section-filter", "location-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { state.page = 0; renderTable(); });
+// Every modal closes on Escape, so clicking away from one closes it too — the editor, the
+// settings dialog, the import/export dialog and the cover lightbox alike. A dialog's own
+// padding reports the dialog as the click target, so the pointer is measured against its box
+// instead of trusting the target, and the press has to have started outside as well: dragging
+// to select text in a field and releasing past the edge must not discard a half-filled form.
+const backdropOf = (event) => {
+  const dialog = event.target;
+  if (!(dialog instanceof HTMLDialogElement)) return null;
+  const box = dialog.getBoundingClientRect();
+  const outside = event.clientX < box.left || event.clientX > box.right
+    || event.clientY < box.top || event.clientY > box.bottom;
+  return outside ? dialog : null;
+};
+let pressedBackdrop = null;
+document.addEventListener("pointerdown", (event) => { pressedBackdrop = backdropOf(event); });
+document.addEventListener("click", (event) => {
+  const dialog = backdropOf(event);
+  if (dialog && dialog === pressedBackdrop) dialog.close();
+  pressedBackdrop = null;
+});
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;

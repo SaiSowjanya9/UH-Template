@@ -622,6 +622,66 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_clicking_away_from_a_dialog_closes_it(self):
+        """Clicking outside a modal dismisses it, the way Escape does, for every dialog the
+        app opens. A click on the dialog's own padding is not "outside", and neither is a
+        drag that began in a field and finished past the edge: a half-filled form must not be
+        thrown away by selecting text."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "dismiss.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+
+                        def click_away(dialog):
+                            box = dialog.bounding_box()   # the backdrop, half way up the left margin
+                            page.mouse.click(box["x"] / 2, box["y"] + box["height"] / 2)
+
+                        for opener, selector in [("#files-button", "#files-dialog"),
+                                                 ("#setup-button", "#setup-dialog"),
+                                                 ("#add-selection", "#editor")]:
+                            dialog = page.locator(selector)
+                            page.locator(opener).click()
+                            expect(dialog).to_be_visible()
+                            click_away(dialog)
+                            expect(dialog).not_to_be_visible()
+
+                        editor = page.locator("#editor")
+                        page.locator("#add-selection").click()
+                        expect(editor).to_be_visible()
+                        box = editor.bounding_box()
+                        page.mouse.click(box["x"] + 4, box["y"] + box["height"] / 2)   # its own padding
+                        expect(editor).to_be_visible()
+
+                        item = editor.locator('input[name="Item"]')
+                        item.fill("Half typed")
+                        field = item.bounding_box()
+                        page.mouse.move(field["x"] + 10, field["y"] + field["height"] / 2)
+                        page.mouse.down()
+                        page.mouse.move(box["x"] / 2, field["y"], steps=6)   # a selection released past the edge
+                        page.mouse.up()
+                        expect(editor).to_be_visible()
+                        expect(item).to_have_value("Half typed")
+
+                        click_away(editor)
+                        expect(editor).not_to_be_visible()
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
