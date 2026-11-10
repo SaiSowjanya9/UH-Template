@@ -165,18 +165,31 @@ blocks a deliverable. The product page itself is printed, as a clickable “Prod
 The app's **Import / Export** dialog downloads the selected project's spec sheet. It is a
 landscape page carrying the client details band, the group headings the view is grouped by, and
 one row per line item under the same eight column headers as the screen: ITEM, MANUFACTURER,
-MODEL #, FINISH / COLOR, PRODUCT LINK, QTY, UNIT PRICE and MARKUP %. Pricing is internal, so
-treat the spec sheet as an internal document.
+MODEL #, FINISH / COLOR, PRODUCT LINK, QTY / UNIT, UNIT PRICE and MARKUP %. Pricing is internal,
+so treat the spec sheet as an internal document.
 
 - **Spec sheet · PDF** – `build_lookbook.build_spec`, for reading and printing.
 - **Spec sheet · Word** – `build_word.build_spec`, the same page as editable paragraphs and tables.
 - **Spec sheet · CSV** – the line items for Excel or Sheets, with *Product Link* as a
   `=HYPERLINK(...)` formula. Price it up, save it as UTF-8 CSV and bring it back in: rows are
   matched on location, room and item, matches are updated, new lines are added and nothing is
-  removed.
+  removed. *Qty / Unit* is one column written as “7571 sq ft”: the leading number comes back
+  into *Qty* and the rest into *Unit*, so type both in the one cell.
+
+**Columns in the download** are yours to choose, in the same dialog: every column is on when
+it opens, and switching one off leaves it out of the CSV, Word and PDF copies alike. The choice
+is remembered in your browser until you switch the columns back on. Nothing stops you dropping
+*Item*, *Room / area* or *Location* — the dialog warns that a CSV without them cannot be matched
+back to these line items, so bringing it in would add new ones rather than update them.
+
+**Page orientation** is chosen in the same dialog and applies to the Word and PDF copies:
+*Landscape*, as it opens, gives every column room, and *Portrait* stands the sheet upright to
+file with the client schedule. The choice is remembered in your browser, and the file is named
+`…_Spec_Sheet_Landscape` or `…_Spec_Sheet_Portrait` so both can sit in one folder.
 
 From the command line, `--spec` writes the same sheet (`build_lookbook.py --spec`,
-`build_word.py --spec`) and `--hide "Qty,Unit Price"` leaves columns out.
+`build_word.py --spec`), `--orientation portrait` turns it upright and
+`--hide "Qty,Unit Price"` leaves columns out.
 
 ## The client finish schedule (command line only)
 

@@ -134,6 +134,17 @@ class BrowserTests(unittest.TestCase):
                         page.locator("#spec-save").click()
                         expect(page.locator("#toast")).to_have_text("Everything is already saved.")
 
+                        # Qty / Unit is one box over two workspace columns: 7571 means nothing
+                        # until it says sq ft, but the Price Schedule still needs the bare number.
+                        quantity = page.locator(f'tr[data-row="{moved}"] input.cell[data-field="Qty / Unit"]')
+                        quantity.fill("7571 sq ft")
+                        quantity.blur()
+                        expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
+                        self.assertEqual(page.evaluate(
+                            "(row) => { const r = state.data.selections.find((s) => s._row === row);"
+                            " return [r.Qty, r.Unit]; }", int(moved)), ["7571", "sq ft"])
+                        expect(quantity).to_have_value("7571 sq ft")
+
                         page.route("**/api/selections", lambda route: route.abort())
                         page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).fill("Retry me")
                         page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).blur()
@@ -280,6 +291,140 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_column_switched_off_is_left_out_of_every_download(self):
+        """Not every sheet is sent out for the same reason, so the Import & export dialog can
+        switch any column off first. Nothing is hidden to begin with, the choice is this
+        browser's and holds across a reload, and losing a column the import matches a
+        returning sheet on says so rather than being refused."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "columns.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        warning = page.locator("#export-columns-warning")
+
+                        def open_files():
+                            page.locator("#files-button").click()
+                            expect(page.locator("#files-dialog")).to_be_visible()
+
+                        def csv_header():
+                            """The columns of a CSV downloaded from the open dialog, which closes it."""
+                            with page.expect_download(timeout=30000) as downloading:
+                                page.locator('#files-dialog [data-file="csv"]').click()
+                            return Path(downloading.value.path()).read_text(encoding="utf-8-sig").splitlines()[0].split(",")
+
+                        open_files()
+                        expect(page.locator("#export-column-list input[data-column]")).to_have_count(len(app.EXPORT_COLUMNS))
+                        expect(page.locator("#export-column-list input:not(:checked)")).to_have_count(0)
+                        expect(page.locator("#export-columns-summary")).to_contain_text("Every column")
+                        expect(warning).to_be_hidden()
+                        self.assertIn("Unit Price", csv_header())
+
+                        # 'Model #' is a fragment to a URL and 'Markup %' an escape: both have to
+                        # reach the server as the names of real columns, or it refuses the lot.
+                        open_files()
+                        for column in ["Model #", "Markup %", "Unit Price"]:
+                            page.locator(f'#export-column-list input[data-column="{column}"]').uncheck()
+                        expect(page.locator("#export-columns-summary")).to_contain_text("3 left out")
+                        expect(warning).to_be_hidden()
+                        fields = csv_header()
+                        self.assertNotIn("Model #", fields)
+                        self.assertNotIn("Markup %", fields)
+                        self.assertNotIn("Unit Price", fields)
+                        self.assertIn("Item", fields)
+
+                        open_files()
+                        page.locator('#export-column-list input[data-column="Item"]').uncheck()
+                        expect(warning).to_contain_text("Item name")
+                        page.locator('#export-column-list input[data-column="Item"]').check()
+                        expect(warning).to_be_hidden()
+                        page.keyboard.press("Escape")
+
+                        page.reload()
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        open_files()
+                        expect(page.locator('#export-column-list input[data-column="Model #"]')).not_to_be_checked()
+                        self.assertIn("hide=Model%20%23%2CUnit%20Price%2CMarkup%20%25", page.evaluate("specQuery()"))
+
+                        page.get_by_role("button", name="Switch them all back on").click()
+                        expect(page.locator("#export-column-list input:not(:checked)")).to_have_count(0)
+                        self.assertNotIn("hide=", page.evaluate("specQuery()"))
+                        self.assertIn("Model #", csv_header())
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_the_orientation_chosen_in_the_dialog_is_the_page_that_is_printed(self):
+        """The Word and PDF copies turn on request: landscape as the dialog opens, portrait
+        for a sheet filed with the client schedule. The choice is this browser's and holds
+        across a reload, the file says which way round it is, and a CSV never carries it."""
+        active = re.compile(r"\bactive\b")
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "orientation.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        landscape = page.locator('#files-dialog [data-orientation="landscape"]')
+                        portrait = page.locator('#files-dialog [data-orientation="portrait"]')
+
+                        def open_files():
+                            page.locator("#files-button").click()
+                            expect(page.locator("#files-dialog")).to_be_visible()
+
+                        def downloaded(choice):
+                            """The name of a file downloaded from the open dialog, which closes it."""
+                            with page.expect_download(timeout=30000) as downloading:
+                                page.locator(f'#files-dialog [data-file="{choice}"]').click()
+                            return downloading.value.suggested_filename
+
+                        open_files()
+                        expect(landscape).to_have_class(active)
+                        self.assertTrue(downloaded("spec-pdf").endswith("_Landscape.pdf"))
+
+                        open_files()
+                        portrait.click()
+                        expect(portrait).to_have_class(active)
+                        expect(landscape).not_to_have_class(active)
+                        expect(page.locator("#files-dialog")).to_be_visible()   # a chip is not a download
+                        self.assertTrue(downloaded("spec-pdf").endswith("_Portrait.pdf"))
+
+                        page.reload()
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        open_files()
+                        expect(portrait).to_have_class(active)
+                        self.assertIn("orientation=portrait", page.evaluate("docQuery()"))
+                        self.assertNotIn("orientation", page.evaluate("specQuery()"))
+                        self.assertTrue(downloaded("spec-docx").endswith("_Portrait.docx"))
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_spec_product_link_shows_link_text(self):
         """A pasted address renders as a "Product Link" anchor; the pencil button
         reopens the input so the stored URL can be viewed or changed."""
@@ -367,7 +512,7 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Manufacturer", exact=True).fill("Test Manufacturer")
                         editor.get_by_label("Model #", exact=True).fill("00123-VS")
                         editor.get_by_label("Finish / Color").fill("Stainless")
-                        editor.get_by_label("Qty", exact=True).fill("2")
+                        editor.get_by_label("Qty / Unit", exact=True).fill("2 EA")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
                         # a new project is seeded with the standard template, so filter to the new row

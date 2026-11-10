@@ -112,11 +112,15 @@ LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
 LAND_BODY_TOP = LAND_H - (PAGE_H - BODY_TOP)   # the same 96pt from the top edge
 # The spec sheet prints either way round, chosen per download: landscape as it always has,
-# because nine columns want the width, or portrait to file beside the client schedule. Only
-# the page changes - the same furniture, the same 96pt from the top edge to the first row,
-# and column widths that are shares of whatever content width is left.
+# because this many columns want the width, or portrait to file beside the client schedule.
+# Only the page changes - the same furniture, the same 96pt from the top edge to the first
+# row, and column widths that are shares of whatever content width is left.
 SPEC_ORIENTATIONS = ("landscape", "portrait")
-SpecPage = namedtuple("SpecPage", "name landscape width height content_w body_top")
+# Portrait fits the same columns into three quarters of the width, so its cells are padded
+# tighter: at the full 6pt the narrow numeric columns have barely room for their own heading,
+# and a quantity of 1,250 comes down the Qty column a digit at a time.
+SPEC_PAD_X = {"landscape": PAD_X, "portrait": 4}
+SpecPage = namedtuple("SpecPage", "name landscape width height content_w body_top pad_x")
 
 
 def spec_orientation(value):
@@ -136,7 +140,7 @@ def spec_page(orientation="landscape"):
     name = spec_orientation(orientation)
     width, height = (LAND_W, LAND_H) if name == "landscape" else (PAGE_W, PAGE_H)
     return SpecPage(name, name == "landscape", width, height, width - 2 * M,
-                    height - (PAGE_H - BODY_TOP))
+                    height - (PAGE_H - BODY_TOP), SPEC_PAD_X[name])
 
 
 # --------------------------------------------------------------------------
@@ -779,7 +783,7 @@ def spec_cell(row, column, hidden):
     return Paragraph(escape(spec_value(row, column)), SPEC_CELL_STYLE)
 
 
-def spec_table(items, columns, widths, hidden):
+def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     """A repeated-header table of every priced line item, one row per selection.
 
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
@@ -795,8 +799,8 @@ def spec_table(items, columns, widths, hidden):
     return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
-        ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
-        ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
+        ("LEFTPADDING", (0, 0), (-1, -1), pad_x),
+        ("RIGHTPADDING", (0, 0), (-1, -1), pad_x),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, C["heading_rule"]),
@@ -816,7 +820,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        table = spec_table(items, columns, widths, hidden)
+        table = spec_table(items, columns, widths, hidden, page.pad_x)
         story.append(section_block(section, table, page.content_w, page.body_top - BODY_BOTTOM)
                      if section else table)
 

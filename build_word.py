@@ -577,7 +577,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
             heading(document, section, width, first=index == 0)
-        table = grid(document, widths, pad_y=4)
+        table = grid(document, widths, pad_x=page.pad_x, pad_y=4)
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[0], header=True)
         for cell, (column, _) in zip(titles, columns):

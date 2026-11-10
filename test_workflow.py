@@ -530,11 +530,13 @@ class AppTests(unittest.TestCase):
         # a price edit plus a brand-new line
         edited = [dict(line) for line in lines]
         edited[target]["Unit Price"] = "99.5"
-        edited.append({**{field: "" for field in lines[0]}, "Section": "Garage", "Room / Area": "3-car", "Item": "Imported shelving", "Qty": "2"})
+        edited.append({**{field: "" for field in lines[0]}, "Section": "Garage", "Room / Area": "3-car",
+                       "Item": "Imported shelving", "Qty / Unit": "2 EA"})
         response = send(edited)
         self.assertEqual((response.json["added"], response.json["updated"]), (1, len(lines)))
         state = self.state()
-        self.assertTrue(any(r["Item"] == "Imported shelving" and r["Qty"] == "2" for r in state["selections"]))
+        self.assertTrue(any(r["Item"] == "Imported shelving" and (r["Qty"], r["Unit"]) == ("2", "EA")
+                            for r in state["selections"]))
         self.assertEqual(next(r for r in state["selections"] if r["_row"] == row["_row"])["Unit Price"], "99.5")
 
         # changing the product identity clears the link that described the old one
@@ -580,7 +582,7 @@ class AppTests(unittest.TestCase):
         pid = self.state()["projects"][0]["Project ID"]
         rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
         shown = ["ITEM", "MANUFACTURER", "MODEL #", "FINISH / COLOR", "PRODUCT LINK",
-                 "QTY", "UNIT PRICE", "MARKUP %"]
+                 "QTY / UNIT", "UNIT PRICE", "MARKUP %"]
         absent = ["CLIENT STATUS", "CLIENT NOTES", "INCLUDE IN LOOKBOOK", "PRODUCT NAME"]
 
         pdf = self.client.get(f"/api/selections/pdf?project={pid}")
@@ -658,13 +660,20 @@ class AppTests(unittest.TestCase):
     def test_spec_exports_print_the_orientation_the_download_asks_for(self):
         """Landscape as the dialog opens, portrait when it is asked for: the same sheet, turned.
 
-        Nine columns want a letter page on its side, but a copy filed with the client
+        Eight columns want a letter page on its side, but a copy filed with the client
         schedule has to stand upright, so the choice travels with the download - and the
         file says which way round it is, so both can sit in one folder.
         """
         from docx import Document
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
+        # a long quantity and a five-figure price: portrait's columns are three quarters of
+        # the width, and at the landscape padding a number of this length came down the
+        # column a digit at a time
+        priced = next(r for r in self.state()["selections"] if r["Project ID"] == pid)
+        self.post("/api/selections", {"row": priced["_row"],
+                                      "values": {"Qty": "1250", "Unit": "sq ft",
+                                                 "Unit Price": "12345.67"}})
         items = [r["Item"] for r in self.state()["selections"] if r["Project ID"] == pid]
 
         def pdf_page(query):
@@ -690,9 +699,12 @@ class AppTests(unittest.TestCase):
             response, width, height, text = read_page("&orientation=portrait")
             self.assertEqual((width, height), (612, 792), name)
             self.assertIn("Portrait", response.headers["Content-Disposition"], name)
-            # turning the page is all that changes: every line item is still on it
+            # turning the page is all that changes: every line item is still on it, and the
+            # narrower columns still hold a value rather than wrapping it mid-number
             for item in items:
                 self.assertIn(item, text, f"{name} {item}")
+            for value in ("1250 sq ft", "12345.67"):
+                self.assertIn(value, text, f"{name} {value}")
 
         # an orientation the builders do not know is refused, never quietly printed landscape
         for route in ("pdf", "docx"):
@@ -700,10 +712,21 @@ class AppTests(unittest.TestCase):
             self.assertEqual(stale.status_code, 400, route)
 
     def test_unit_is_a_selections_column_the_spec_sheet_carries(self):
-        """Qty is a bare number without it: 7571 means nothing until it says sq ft."""
+        """Qty is a bare number without it: 7571 means nothing until it says sq ft.
+
+        The two read as one Qty / Unit column everywhere they are shown, and come back
+        apart into the columns they are stored in - Qty stays the number the Price
+        Schedule multiplies.
+        """
         import csv as csvlib
         from pypdf import PdfReader
         from workspace_store import UNITS, unit_list
+        for text, apart in (("7571 sq ft", ("7571", "sq ft")), ("4", ("4", "")), ("EA", ("", "EA")),
+                            ("1,250 LF", ("1250", "LF")), ("2.5gal", ("2.5", "gal")), ("", ("", ""))):
+            self.assertEqual(common.split_qty_unit(text), dict(zip(("Qty", "Unit"), apart)), text)
+        self.assertEqual(common.qty_unit({"Qty": "7571", "Unit": "sq ft"}), "7571 sq ft")
+        self.assertEqual((common.qty_unit({"Qty": "4"}), common.qty_unit({})), ("4", ""))
+
         row = self.state()["selections"][0]
         pid = row["Project ID"]
         saved = self.post("/api/selections", {"row": row["_row"], "values": {"Qty": "7571", "Unit": "sq ft"}})
@@ -711,7 +734,7 @@ class AppTests(unittest.TestCase):
         current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
         self.assertEqual((current["Qty"], current["Unit"]), ("7571", "sq ft"))
 
-        # the seeded list fills the editor's dropdown, and Excel's own
+        # the seeded list fills Excel's own dropdown
         self.assertEqual(self.state()["units"], UNITS)
         wb, _ = self.store.snapshot()
         column, names = unit_list(wb["Lists"])
@@ -727,22 +750,31 @@ class AppTests(unittest.TestCase):
         for name, text in (("PDF", " ".join(" ".join(p.extract_text() for p in PdfReader(
                                 io.BytesIO(self.client.get(f"/api/selections/pdf?project={pid}").data)).pages).split())),
                            ("Word", " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split()))):
-            self.assertIn("UNIT", text, name)
-            self.assertIn("sq ft", text, name)
+            self.assertIn("QTY / UNIT", text, name)
+            self.assertIn("7571 sq ft", text, name)
 
-        # the CSV carries it beside Qty and brings it back unchanged
+        # the CSV carries one column too, and splits it back into the two on the way in
         export, lines = self.exported_spec_csv(pid)
-        self.assertEqual(list(lines[0])[list(lines[0]).index("Qty") + 1], "Unit")
-        mine = next(l for l in lines if l["Qty"] == "7571")
-        self.assertEqual(mine["Unit"], "sq ft")
-        again = self.send_spec_csv(pid, [{**l, "Unit": "SQ"} if l is mine else l for l in lines])
+        self.assertIn("Qty / Unit", lines[0])
+        self.assertNotIn("Qty", lines[0])
+        mine = next(l for l in lines if l["Qty / Unit"] == "7571 sq ft")
+        again = self.send_spec_csv(pid, [{**l, "Qty / Unit": "1,250 SQ"} if l is mine else l for l in lines])
         self.assertEqual(again.status_code, 200, again.json)
-        self.assertEqual(next(r for r in self.state()["selections"] if r["_row"] == row["_row"])["Unit"], "SQ")
+        current = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual((current["Qty"], current["Unit"]), ("1250", "SQ"))
 
-        # and it can be left out of a download like any other spec-sheet column
+        # either half can be left out of a download, which narrows the column to the other
         hidden = self.client.get(f"/api/selections/csv?project={pid}&hide=Unit")
         self.assertEqual(hidden.status_code, 200)
-        self.assertNotIn("Unit", list(csvlib.DictReader(io.StringIO(hidden.data.decode("utf-8-sig"))))[0])
+        narrowed = list(csvlib.DictReader(io.StringIO(hidden.data.decode("utf-8-sig"))))[0]
+        self.assertIn("Qty", narrowed)
+        for gone in ("Unit", "Qty / Unit"):
+            self.assertNotIn(gone, narrowed)
+        # and a download that kept only one half still imports under that name
+        back = self.send_spec_csv(pid, list(csvlib.DictReader(io.StringIO(hidden.data.decode("utf-8-sig")))))
+        self.assertEqual(back.status_code, 200, back.json)
+        kept = next(r for r in self.state()["selections"] if r["_row"] == row["_row"])
+        self.assertEqual((kept["Qty"], kept["Unit"]), ("1250", "SQ"))
 
     def test_unit_column_is_added_to_a_workspace_that_predates_it(self):
         """A workspace saved before the column existed gains it, and its list, on the next save."""
