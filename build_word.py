@@ -73,6 +73,8 @@ TBLPR_ORDER = ("w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblS
                "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook")
 TRPR_ORDER = ("w:cnfStyle", "w:divId", "w:gridBefore", "w:gridAfter", "w:wBefore", "w:wAfter",
               "w:cantSplit", "w:trHeight", "w:tblHeader", "w:tblCellSpacing", "w:jc", "w:hidden")
+SETTINGS_ORDER = ("w:writeProtection", "w:view", "w:zoom", "w:displayBackgroundShape",
+                  "w:defaultTabStop", "w:characterSpacingControl", "w:compat", "w:rsids")
 
 PAGE_FIELD = ('<w:fldSimple {ns} w:instr=" PAGE "><w:r><w:rPr>'
               '<w:rFonts w:ascii="{family}" w:hAnsi="{family}"/><w:sz w:val="{half}"/>'
@@ -326,8 +328,21 @@ def furniture(section, title, draft, content_w):
                                                half=15, color=COLORS["muted"])))
 
 
+def paper(document):
+    """The cream sheet, as Word expresses it: a document background it has to be told to show.
+
+    Word still treats a page colour as a screen setting, so a printed copy needs 'Print
+    background colors and images'; the band, rules and type carry the theme regardless.
+    """
+    background = OxmlElement("w:background")
+    background.set(qn("w:color"), COLORS["paper"])
+    document.element.insert(0, background)          # w:background precedes w:body
+    property_element(document.settings.element, "w:displayBackgroundShape", SETTINGS_ORDER)
+
+
 def new_document(title, draft=False, landscape=False):
     document = Document()
+    paper(document)
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = FAMILY, Pt(DESC[0])
     normal.font.color.rgb = RGBColor.from_string(COLORS["body"])

@@ -167,6 +167,8 @@ class Deck:
 
     def page(self):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        slide.background.fill.solid()               # the cream sheet the PDF prints on
+        slide.background.fill.fore_color.rgb = RGBColor.from_string(COLORS["paper"])
         logo_width = picture(slide, CFG.get("logo_print_path") or CFG.get("logo_path"), M, 734.4, height=LOGO_H)
         if not logo_width:
             label(slide, M, 738, 200, CFG["company_name"], 13, COLORS["dark"], bold=True)
@@ -288,7 +290,8 @@ def main():
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
-    parser.add_argument("--hide", default="", help=f"Columns to leave out, comma separated: {', '.join(HIDEABLE)}")
+    parser.add_argument("--hide", default="",
+                        help="Columns to leave out, comma separated: " + ", ".join(HIDEABLE).replace("%", "%%"))
     args = parser.parse_args()
     try:
         hidden = hidden_columns(args.hide)

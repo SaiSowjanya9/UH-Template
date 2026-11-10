@@ -6,16 +6,16 @@
   "logo_print_path": "brand_assets/uh-wordmark-print.png",
   "logo_mark_path": "brand_assets/uh-symbol.png",
   "colors": {
-    "dark": "#2F3337",
-    "accent": "#C9A24A",
-    "text": "#2F3337",
-    "body": "#444444",
-    "muted": "#7A7E82",
-    "band": "#F5F5F3",
-    "hairline": "#E3E3E1",
-    "heading_rule": "#9A9A9A",
-    "field_rule": "#BDBDBD",
-    "paper": "#FFFFFF"
+    "dark": "#2E2A1F",
+    "accent": "#8D7342",
+    "text": "#2E2A1F",
+    "body": "#4A4028",
+    "muted": "#857D69",
+    "band": "#F4EEE1",
+    "hairline": "#E8E1D0",
+    "heading_rule": "#AA8960",
+    "field_rule": "#AA8960",
+    "paper": "#FAF8F1"
   },
   "fonts": {
     "family": "Arial",

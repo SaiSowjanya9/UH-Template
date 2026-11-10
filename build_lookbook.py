@@ -408,12 +408,19 @@ def brand_image(canvas, source, x, y, height=None, width=None):
     return width
 
 
+def paper(canvas, page_w, page_h):
+    """The studio's cream sheet, laid under everything else; reportlab leaves paper white."""
+    canvas.setFillColor(C["paper"])
+    canvas.rect(0, 0, page_w, page_h, stroke=0, fill=1)
+
+
 def furniture(canvas, doc, title, draft, landscape=False):
     """Header and footer, repeated on every page. Positions hang off the page edges so the
     same furniture fits the landscape spec sheet."""
     page_w, page_h = (LAND_W, LAND_H) if landscape else (PAGE_W, PAGE_H)
     content_w = page_w - 2 * M
     canvas.saveState()
+    paper(canvas, page_w, page_h)
     logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M,
                              page_h - 57.6, height=LOGO_H)
     if not logo_width:
@@ -446,6 +453,7 @@ def cover_page(canvas, doc, image, project, title, draft):
     """Opening page when a project has a cover image: brand header, the home's rendering
     aspect-fit inside a hairline frame, then the project and client centred underneath."""
     canvas.saveState()
+    paper(canvas, PAGE_W, PAGE_H)
     logo_width = brand_image(canvas, CFG.get("logo_print_path") or CFG.get("logo_path"), M, 734.4, height=LOGO_H)
     if not logo_width:
         place(canvas, M, 738, CFG["company_name"], FONT_BB, 13, C["dark"])
@@ -544,10 +552,10 @@ class Band(Flowable):
 class Heading(Flowable):
     """Letter-spaced section heading with a rule running past the right margin."""
 
-    def __init__(self, text, width=CONTENT_W):
+    def __init__(self, text, width=CONTENT_W, keep=True):
         super().__init__()
         self.text, self.width = spaced_caps(text), width
-        self.keepWithNext = 1
+        self.keepWithNext = 1 if keep else 0
 
     def wrap(self, *_):
         return self.width, HEADING_H
@@ -559,6 +567,18 @@ class Heading(Flowable):
         canvas.setLineWidth(0.5)
         canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 10) + HEADING_GAP, 8,
                     self.width + HEADING_OVERHANG, 8)
+
+
+def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM):
+    """A section heading with its rows: the rows may split across pages, but the heading is
+    never left stranded at the foot of one.
+
+    reportlab's own keepWithNext pairs the heading with the *whole* table, so a section longer
+    than a page moved itself - and left the page it was on empty below the client band. A
+    maxHeight of the frame tells KeepTogether to split the rows in place instead, and only
+    break the page when the heading itself no longer fits.
+    """
+    return KeepTogether([Heading(text, width, keep=False), table], maxHeight=frame_h)
 
 
 class SignOff(Flowable):
@@ -640,9 +660,8 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
     for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        if section:
-            story.append(Heading(section))
-        story.append(rows_table(items, draft, hidden))
+        table = rows_table(items, draft, hidden)
+        story.append(section_block(section, table) if section else table)
     story += detail_flowables(project, rows, hidden)
     story.append(Spacer(0, SECTION_GAP))
     story.append(KeepTogether([Paragraph(escape(clean(SCHEDULE.get("note"))), NOTE_STYLE), Spacer(0, 16),
@@ -717,9 +736,9 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Location")
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        if section:
-            story.append(Heading(section, LAND_CONTENT_W))
-        story.append(spec_table(items, columns, widths, hidden))
+        table = spec_table(items, columns, widths, hidden)
+        story.append(section_block(section, table, LAND_CONTENT_W, LAND_BODY_TOP - BODY_BOTTOM)
+                     if section else table)
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)
