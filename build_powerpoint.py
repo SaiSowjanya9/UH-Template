@@ -29,13 +29,14 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.utils import simpleSplit
 
 from branding import load_logo
-from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTENT_W, FIELD_GAP,
-                            FIELD_W, FONT_B, FONT_BB, HIDEABLE, HEADING_GAP, HEADING_H, HEADING_OVERHANG,
-                            ITEM_W, LOGO_H, M, MARK_W,
+from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTACT_X, CONTENT_W,
+                            FIELD_GAP, FIELD_W, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE, HIDEABLE,
+                            HEADING_GAP, HEADING_H, HEADING_OVERHANG, ITEM_W, LOGO_H, M, MARK_W,
                             OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, PRODUCT_LINK, SCHEDULE, SECTION_GAP,
                             SIGN_H, SIGN_W, SIGN_X, band_values, clean, code_prefix,
-                            description, fit, group_sections, hidden_columns, load_data, numbered,
-                            presentation_details, product_link, row_widths, schedule_title, spaced_caps)
+                            description, fit, group_sections, hidden_columns, load_data, mark_bottom,
+                            numbered, presentation_details, product_link, row_widths, schedule_title,
+                            spaced_caps)
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
 FONTS = CFG.get("fonts", {})
@@ -179,10 +180,11 @@ class Deck:
         label(slide, M, 736.56, CONTENT_W, title, size, COLORS["dark"], align=PP_ALIGN.RIGHT)
         rule(slide, M, PAGE_W - M, 720, COLORS["dark"], 0.8)
         rule(slide, M, PAGE_W - M, 44.64, COLORS["hairline"])
-        has_mark = picture(slide, CFG.get("logo_mark_path"), M, 24.48, width=MARK_W)
-        label(slide, 64.8 if has_mark else M, 28.8, 400, CFG.get("contact_line", ""), 7.5, COLORS["muted"])
-        label(slide, PAGE_W - M - 100, 28.8, 100, f"Page {len(self.prs.slides)}", 7.5, COLORS["muted"],
-              align=PP_ALIGN.RIGHT)
+        has_mark = picture(slide, CFG.get("logo_mark_path"), M, mark_bottom(), width=MARK_W)
+        label(slide, CONTACT_X if has_mark else M, FOOT_BASE, 400, CFG.get("contact_line", ""),
+              FOOT_SIZE, COLORS["muted"])
+        label(slide, PAGE_W - M - 100, FOOT_BASE, 100, f"Page {len(self.prs.slides)}", FOOT_SIZE,
+              COLORS["muted"], align=PP_ALIGN.RIGHT)
         if self.draft:
             mark = textbox(slide, PAGE_W / 2 - 200, PAGE_H / 2 + 60, 400, 140, "DRAFT", 120,
                            COLORS["band"], bold=True, align=PP_ALIGN.CENTER)

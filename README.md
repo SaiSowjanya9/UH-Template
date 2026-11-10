@@ -24,7 +24,7 @@ Close Excel before saving through the app. Every workspace write creates a backu
 
 Product links are typed or pasted by you — there is no automated search and no link-verification status. A row either has a **Product URL** or it does not.
 
-The supplied projects and contact details are examples. Replace the branding/contact placeholders in `lookbook_config.json` and restart the app before preparing client deliverables.
+The supplied projects are examples. The footer contact line printed on every deliverable lives in `lookbook_config.json`; edit it there, along with the rest of the branding, and restart the app.
 
 ## Project and selection custom fields
 

@@ -33,7 +33,7 @@ from xml.sax.saxutils import escape
 from docx import Document
 from docx.enum.section import WD_ORIENT
 from docx.enum.table import WD_ALIGN_VERTICAL
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
@@ -43,13 +43,14 @@ from reportlab.pdfbase import pdfmetrics
 
 from build_form import HIDDEN_FIELD, REMOVE_W, form_band_values
 from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_STYLE, CODE_W,
-                            CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, HEADING_OVERHANG, HIDEABLE,
-                            ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W, NOTE_STYLE, OUT, PAD_X, PAD_Y,
+                            CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE,
+                            HEADING_OVERHANG, HIDEABLE, ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W,
+                            NOTE_STYLE, OUT, PAD_X, PAD_Y,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
                             SIGN_H, SIGN_W, SIGN_X, SPEC_COLUMNS, SPEC_TITLE, band_values, clean,
                             code_prefix, description, fit, group_sections, hidden_columns,
-                            load_data, numbered, presentation_details, product_link, row_widths,
-                            schedule_title, spaced_caps, spec_groups)
+                            load_data, mark_bottom, numbered, presentation_details, product_link,
+                            row_widths, schedule_title, spaced_caps, spec_groups)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -209,8 +210,12 @@ def write(paragraph, text, size=None, color=None, bold=False, **geometry):
     return paragraph
 
 
-def picture(paragraph, source, height=None, width=None):
-    """Logo at its supplied aspect ratio; returns the drawn width, or 0 when missing."""
+def picture(paragraph, source, height=None, width=None, shift=0):
+    """Logo at its supplied aspect ratio; returns the drawn width, or 0 when missing.
+
+    An inline picture stands on the baseline, so `shift` drops it (negative) or raises it
+    (positive) by that many points - Word stores the offset in half-points.
+    """
     image = load_logo(source)
     if image is None:
         return 0
@@ -220,7 +225,12 @@ def picture(paragraph, source, height=None, width=None):
     iw, ih = image.size
     height = height if height is not None else width * ih / iw
     width = width if width is not None else height * iw / ih
-    paragraph.add_run().add_picture(stream, width=Pt(width), height=Pt(height))
+    run = paragraph.add_run()
+    run.add_picture(stream, width=Pt(width), height=Pt(height))
+    if shift:
+        offset = OxmlElement("w:position")
+        offset.set(qn("w:val"), str(round(shift * 2)))
+        run._r.get_or_add_rPr().append(offset)
     return width
 
 
@@ -318,14 +328,16 @@ def furniture(section, title, draft, content_w):
 
     foot = section.footer
     foot.is_linked_to_previous = False
-    line = shape(plain(foot.paragraphs[0]), size=7.5, leading=11)
+    line = shape(plain(foot.paragraphs[0]), size=FOOT_SIZE, leading=11)
+    # the symbol hangs below the words, so the line is a floor Word may grow rather than a cage
+    line.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
     line.paragraph_format.tab_stops.add_tab_stop(Pt(content_w), WD_TAB_ALIGNMENT.RIGHT)
     rule(line, "top", 0.5, COLORS["hairline"])
-    if picture(line, CFG.get("logo_mark_path"), width=MARK_W):
-        run_text(line, "   ", 7.5, COLORS["muted"])
-    run_text(line, f"{clean(CFG.get('contact_line', ''))}\tPage ", 7.5, COLORS["muted"])
+    if picture(line, CFG.get("logo_mark_path"), width=MARK_W, shift=mark_bottom() - FOOT_BASE):
+        run_text(line, "   ", FOOT_SIZE, COLORS["muted"])
+    run_text(line, f"{clean(CFG.get('contact_line', ''))}\tPage ", FOOT_SIZE, COLORS["muted"])
     line._p.append(parse_xml(PAGE_FIELD.format(ns=nsdecls("w"), family=escape(FAMILY, {'"': "&quot;"}),
-                                               half=15, color=COLORS["muted"])))
+                                               half=round(FOOT_SIZE * 2), color=COLORS["muted"])))
 
 
 def paper(document):

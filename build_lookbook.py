@@ -50,6 +50,9 @@ CONTENT_W = PAGE_W - 2 * M       # 518.4
 BODY_TOP, BODY_BOTTOM = 696, 56  # flowing content area between the header and footer rules
 HEAD_RULE_Y, FOOT_RULE_Y = 720, 44.64
 LOGO_H, MARK_W = 20.16, 11.52
+FOOT_SIZE, FOOT_BASE = 7.5, 28.8     # footer type size, and the baseline it is set on
+MARK_GAP = 6.48                      # gap between the footer symbol and the contact line
+CONTACT_X = M + MARK_W + MARK_GAP    # where the contact line starts, clear of the symbol
 CODE_W, ITEM_W = 50.4, 144
 PAD_X, PAD_Y = 6, 6.5            # table cell padding
 BAND_H, FIELD_W, FIELD_GAP = 56, 113.4, 14.4
@@ -409,6 +412,19 @@ def brand_image(canvas, source, x, y, height=None, width=None):
     return width
 
 
+def mark_bottom(width=MARK_W):
+    """Bottom edge that centres the footer symbol on the contact line beside it.
+
+    A line of type is centred on its cap middle, not on its baseline, so standing the
+    symbol on the baseline - or on the same bottom edge as the words - leaves it hanging
+    below them. Word and PowerPoint set their footer symbol from this too.
+    """
+    cap = FOOT_SIZE * pdfmetrics.getFont(FONT_B).face.capHeight / 1000
+    image = load_logo(CFG.get("logo_mark_path"))
+    height = width * image.size[1] / image.size[0] if image is not None else 0
+    return FOOT_BASE + (cap - height) / 2
+
+
 def paper(canvas, page_w, page_h):
     """The studio's cream sheet, laid under everything else; reportlab leaves paper white."""
     canvas.setFillColor(C["paper"])
@@ -437,9 +453,10 @@ def furniture(canvas, doc, title, draft, landscape=False):
     canvas.setStrokeColor(C["hairline"])
     canvas.setLineWidth(0.5)
     canvas.line(M, FOOT_RULE_Y, page_w - M, FOOT_RULE_Y)
-    has_mark = brand_image(canvas, CFG.get("logo_mark_path"), M, 24.48, width=MARK_W)
-    place(canvas, 64.8 if has_mark else M, 28.8, CFG.get("contact_line", ""), FONT_B, 7.5, C["muted"])
-    place(canvas, page_w - M, 28.8, f"Page {doc.page}", FONT_B, 7.5, C["muted"], "right")
+    has_mark = brand_image(canvas, CFG.get("logo_mark_path"), M, mark_bottom(), width=MARK_W)
+    place(canvas, CONTACT_X if has_mark else M, FOOT_BASE, CFG.get("contact_line", ""), FONT_B,
+          FOOT_SIZE, C["muted"])
+    place(canvas, page_w - M, FOOT_BASE, f"Page {doc.page}", FONT_B, FOOT_SIZE, C["muted"], "right")
     if draft:
         canvas.setFillColor(C["accent"])
         canvas.setFillAlpha(0.07)
@@ -512,9 +529,9 @@ def cover_page(canvas, doc, image, project, title, draft):
     canvas.setStrokeColor(C["hairline"])
     canvas.setLineWidth(0.5)
     canvas.line(M, FOOT_RULE_Y, PAGE_W - M, FOOT_RULE_Y)
-    canvas.setFont(FONT_B, 7.5)
+    canvas.setFont(FONT_B, FOOT_SIZE)
     canvas.setFillColor(C["muted"])
-    canvas.drawCentredString(PAGE_W / 2, 28.8, CFG.get("contact_line", ""))
+    canvas.drawCentredString(PAGE_W / 2, FOOT_BASE, CFG.get("contact_line", ""))
     if draft:
         canvas.setFillColor(C["accent"])
         canvas.setFillAlpha(0.07)
