@@ -1,0 +1,50 @@
+# Ask Render for a deploy of whatever has just landed on main.
+#
+# The service has autoDeploy enabled, yet pushes were reaching GitHub without ever reaching the
+# host: the site served a commit from hours earlier, so a fix that was correct in the repo looked
+# broken in a downloaded PDF. Render only redeploys on a push while its GitHub connection is
+# live, so this asks outright instead - the same call `deploy_render.py` makes by hand.
+#
+# Code only. Environment variables still go through `deploy_render.py`, which reads .env and is
+# the single place hosted settings live; a secret must never be committed here.
+name: Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and let a newer commit cancel an in-flight run: Render supersedes a
+# running build anyway, so the last push is the one that should win.
+concurrency:
+  group: render-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Until the repository variable RENDER_SERVICE_ID exists there is nothing to call. Skipping
+    # keeps every push green instead of marking it failed for a setting nobody has added yet.
+    # (`secrets` cannot be read in an `if`, which is why the variable is what gates this.)
+    if: vars.RENDER_SERVICE_ID != ''
+    steps:
+      - name: Ask Render to deploy this commit
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY}" ]; then
+            echo "RENDER_API_KEY is not set as a repository secret; nothing to deploy."
+            exit 0
+          fi
+          # --fail-with-body so a rejected key or a wrong service id fails the run loudly,
+          # rather than printing Render's error and reporting success.
+          curl --silent --show-error --fail-with-body \
+            --request POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data '{"clearCache":"do_not_clear"}' \
+            --output response.json
+          commit="$(jq -r '.commit.id // "branch head"' response.json)"
+          echo "Render accepted deploy $(jq -r '.id // "?"' response.json) for ${commit:0:8}"

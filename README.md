@@ -74,6 +74,14 @@ the app itself needs a host such as Render (`render.yaml` is included).
    `.env` values and then deploys whatever is at the top of `main`, so re-running it after a
    `git push` is how the host is brought up to date. Use `--plan starter` to avoid the free
    plan's sleeping, and `--region` to match your Supabase project.
+7. Optional, and worth it: let a push deploy itself. `.github/workflows/deploy.yml` asks Render
+   for a deploy of each commit that lands on `main`. Add `RENDER_API_KEY` as a repository
+   **secret** and your service id (`srv-…`, from the service's dashboard URL) as a repository
+   **variable** named `RENDER_SERVICE_ID`; until the variable exists the job skips, so pushes
+   stay green. It ships code only — environment values still go through `deploy_render.py`.
+   Without this, **pushing to GitHub does not update the site**: Render's own auto-deploy only
+   fires while its GitHub connection is live, and a site left on an older commit looks exactly
+   like a bug that was already fixed.
 
 **It must run as exactly one process.** The workspace is saved whole, so a second worker would
 race the first's saves. `wsgi.py` is the entry point and `waitress-serve --threads=8` is the
