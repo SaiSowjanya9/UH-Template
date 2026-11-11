@@ -810,6 +810,12 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
     short values, many of them empty, read as one drifting line of text without them. They
     are black at the studio weights, because this sheet prints on white.
+
+    The gaps are secondary structure and read that way: half the weight of a row rule, and
+    drawn only between the horizontal ones, from the heading rule down to the last row rule.
+    At a full 0.4pt from the top of the headings to the foot of the last row they were the
+    loudest thing on the page, and both ends stopped in mid-air - above the headings, where
+    no rule closes the table, and below the final row rule.
     """
     data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
@@ -827,7 +833,7 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, SHEET["rule"]),
         ("LINEBELOW", (0, 1), (-1, -2), 0.4, SHEET["rule"]),
-        ("LINEAFTER", (0, 0), (-2, -1), 0.4, SHEET["rule"]),
+        ("LINEAFTER", (0, 1), (-2, -2), 0.2, SHEET["rule"]),
     ]))
 
 

@@ -1052,6 +1052,35 @@ def pdf_ink(path):
     return fills, rules
 
 
+def rule_segments(path):
+    """Every stroked rule on each page as (width, x1, y1, x2, y2), in page coordinates.
+
+    A table's rules are drawn inside a translated canvas, so the `cm` offsets have to be
+    followed before a vertical's ends can be compared with the horizontals it lands on.
+    A Product Link underline is stroked without setting a width at all, which is the PDF's
+    own default of 1pt - not an unknown - so it is reported as that rather than as None.
+    """
+    from pypdf import PdfReader
+    pages = []
+    for page in PdfReader(str(path)).pages:
+        stream = page.get_contents().get_data().decode("latin-1")
+        segments, width, stack, x, y = [], 1.0, [], 0.0, 0.0
+        for line in stream.splitlines():
+            if line == "q":
+                stack.append((x, y, width))
+            elif line == "Q" and stack:
+                x, y, width = stack.pop()
+            elif match := re.fullmatch(r"1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm", line):
+                x, y = x + float(match[1]), y + float(match[2])
+            elif match := re.fullmatch(r"([\d.]+) w", line):
+                width = float(match[1])
+            elif match := re.fullmatch(r"n (-?[\d.]+) (-?[\d.]+) m (-?[\d.]+) (-?[\d.]+) l S", line):
+                segments.append((width, round(x + float(match[1]), 1), round(y + float(match[2]), 1),
+                                 round(x + float(match[3]), 1), round(y + float(match[4]), 1)))
+        pages.append(segments)
+    return pages
+
+
 def rgb(value):
     """'#AA8960' as the fractions a PDF operator carries."""
     return tuple(round(int(value.lstrip("#")[index:index + 2], 16) / 255, 3) for index in (0, 2, 4))
@@ -1137,6 +1166,29 @@ class ScheduleTests(unittest.TestCase):
                 if column == build_lookbook.PRODUCT_LINK:
                     printed = max(printed, pdfmetrics.stringWidth(column, build_lookbook.FONT_B, cell.fontSize))
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
+
+    def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
+        """The gaps between columns are secondary structure, so they are the lightest rule on
+        the sheet - half a row rule - and both ends close on a horizontal rule instead of
+        stopping in mid-air above the headings or below the last row.
+
+        Long enough to split, so the repeated heading on each later page is measured too.
+        """
+        import build_lookbook
+        rows = self.rows(60, **{"Room / Area": "Whole House"})
+        with tempfile.TemporaryDirectory() as folder:
+            pages = rule_segments(build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
+                                                            Path(folder), orientation="portrait"))
+        self.assertGreater(len(pages), 1, "the sheet needs to split to check a repeated heading")
+        for number, segments in enumerate(pages, 1):
+            across = {y1 for _, _, y1, _, y2 in segments if y1 == y2}
+            down = [(width, min(y1, y2), max(y1, y2)) for width, x1, y1, x2, y2 in segments if x1 == x2]
+            self.assertTrue(down, f"page {number} has no column gaps")
+            for width, foot, head in down:
+                self.assertLess(width, min(w for w, _, y1, _, y2 in segments if y1 == y2),
+                                f"page {number}: a column gap is not lighter than every row rule")
+                self.assertIn(foot, across, f"page {number}: a column gap stops in mid-air at its foot")
+                self.assertIn(head, across, f"page {number}: a column gap stops in mid-air at its head")
 
     def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
         """The internal sheet is the one document on plain paper: a white page ruled in black
