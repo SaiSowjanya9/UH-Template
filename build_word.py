@@ -55,7 +55,8 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             group_sections, hidden_columns, is_details_group, load_data,
                             mark_bottom, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps, spec_columns, spec_widths,
-                            spec_groups, spec_heading, spec_page, spec_value, DETAIL_COLS)
+                            spec_groups, spec_heading, spec_page, spec_value, DETAIL_COLS,
+                            SPEC_HEADING_TRACK)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -204,10 +205,21 @@ def shape(paragraph, size=None, leading=None, align=None, before=0, after=0, ind
     return paragraph
 
 
-def run_text(paragraph, text, size, color, bold=False):
+def letterspace(run, points):
+    """Expanded character spacing, in points; Word stores it in twentieths of a point."""
+    node = OxmlElement("w:spacing")
+    node.set(qn("w:val"), twips(points))
+    rpr = run._r.get_or_add_rPr()
+    sz = rpr.find(qn("w:sz"))            # w:spacing sits just before w:sz in the schema
+    rpr.insert(list(rpr).index(sz) if sz is not None else len(rpr), node)
+
+
+def run_text(paragraph, text, size, color, bold=False, track=0):
     run = paragraph.add_run(str(text or ""))
     run.font.name, run.font.size, run.font.bold = FAMILY, Pt(size), bold
     run.font.color.rgb = RGBColor.from_string(color)
+    if track:
+        letterspace(run, track)
     return run
 
 
@@ -411,8 +423,13 @@ def filename(pid, project, title, rev=None, parts=(), suffix=""):
 # --------------------------------------------------------------------------
 # Schedule blocks
 # --------------------------------------------------------------------------
-def band(document, values, content_w, controls=False):
-    """Client / project / address / date fields under the header."""
+def band(document, values, content_w, controls=False, value_size=9, value_font=FONT_B,
+         value_bold=False):
+    """Client / project / address / date fields under the header.
+
+    The spec sheet asks for its own type in the box - a bigger, bolder value - so the
+    client details read as their own element rather than more line-item text.
+    """
     widths = [content_w / 4] * 4
     table = grid(document, widths, pad_x=0, pad_y=0)
     cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
@@ -424,24 +441,28 @@ def band(document, values, content_w, controls=False):
         margins(cell._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
                 top=17, left=BAND_INSET, bottom=0, right=BAND_INSET)
         write(cell.paragraphs[0], field, 6.5, COLORS["muted"], bold=True, leading=8)
-        line = shape(cell.add_paragraph(), size=9, leading=13, before=7)
+        line = shape(cell.add_paragraph(), size=value_size, leading=value_size + 4, before=7)
         rule(line, "bottom", 0.5, COLORS["field_rule"])
         tag = field.lower().replace(" / ", "_").replace(" ", "_")
         # project_lot prints two workspace columns at once, so it is shown but never editable
         if controls and tag != "project_lot":
-            control(line, tag, value, alias=field.title(), size=9, color=COLORS["text"])
+            control(line, tag, value, alias=field.title(), size=value_size, color=COLORS["text"])
         else:
-            run_text(line, fit(value, FONT_B, 9, field_w)[1], 9, COLORS["text"])
+            run_text(line, fit(value, value_font, value_size, field_w)[1], value_size,
+                     COLORS["text"], bold=value_bold)
     return table
 
 
-def heading(document, text, content_w, first=False):
-    """Letter-spaced section heading whose rule runs from the text past the right margin."""
+def heading(document, text, content_w, first=False, track=0):
+    """Letter-spaced section heading whose rule runs from the text past the right margin.
+    `track` writes plain uppercase letters with expanded spacing instead - the tighter
+    spacing the spec sheet's own headings use."""
     paragraph = shape(document.add_paragraph(), size=ITEM[0], leading=ITEM[1],
                       before=0 if first else SECTION_GAP, indent=PAD_X, keep=True)
     paragraph.paragraph_format.tab_stops.add_tab_stop(
         Pt(content_w + HEADING_OVERHANG), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.LINES)
-    run_text(paragraph, f"{spaced_caps(text)} \t", ITEM[0], COLORS["dark"], bold=True)
+    spaced = clean(text).upper() if track else spaced_caps(text)
+    run_text(paragraph, f"{spaced} \t", ITEM[0], COLORS["dark"], bold=True, track=track)
     return paragraph
 
 
@@ -602,13 +623,14 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     page = spec_page(orientation)
     document = new_document(SPEC_TITLE, landscape=page.landscape, sheet=True)
     width = content_width(document)
-    band(document, band_values(project), width)
+    band(document, band_values(project), width, value_size=11, value_font=FONT_BB,
+         value_bold=True)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
     columns = spec_columns(hidden)
     widths = spec_widths(columns, width)
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
-            heading(document, section, width, first=index == 0)
+            heading(document, section, width, first=index == 0, track=SPEC_HEADING_TRACK)
         if is_details_group(section):
             spec_details(document, items, width, hidden, page.landscape)
             continue
@@ -616,7 +638,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[0], header=True)
         for cell, (column, _) in zip(titles, columns):
-            write(cell.paragraphs[0], spec_heading(column), SPEC_HEAD[0], COLORS["muted"], bold=True,
+            write(cell.paragraphs[0], spec_heading(column), SPEC_HEAD[0], COLORS["dark"], bold=True,
                   leading=SPEC_HEAD[1])
             cell_rule(cell, "bottom", 0.5, SHEET["rule"])
         for position, row in enumerate(items):

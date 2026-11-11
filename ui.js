@@ -1332,14 +1332,38 @@ const pendingSpecCount = () => [...state.specPending.values()].reduce((sum, valu
 
 let specSaving = 0;   // an autosave still writing re-renders itself; an early redraw would flash stale values
 
+// The save pill is a notification at the top right, not a fixture: "Saving…" and the unsaved
+// count hold while they are true, and "All changes saved" flashes for a few seconds on the
+// way out of a save, then fades away. A quiet sheet shows nothing, and the 2.5s poll landing
+// on one must not keep bringing the pill back.
+let saveMode = "hidden", saveFlashTimer;
+
 function specSaveUI() {
   const count = pendingSpecCount(), saving = state.busy || specSaving > 0;
   $("spec-save").textContent = count ? `Save changes (${count})` : "Save";
   const status = $("spec-save-status");
-  status.className = `save-status${saving ? " saving" : count ? " pending" : ""}`;
-  status.textContent = saving ? "Saving…"
-    : count ? `${count} unsaved change${count === 1 ? "" : "s"}`
-    : projectRows().length ? "All changes saved" : "";
+  const mode = saving ? "saving" : count ? "pending" : projectRows().length ? "saved" : "hidden";
+  if (mode === "saved" && saveMode === "saved") return;   // the flash is up - let it fade
+  const was = saveMode;
+  saveMode = mode;
+  clearTimeout(saveFlashTimer);
+  // "saved" only announces itself after a save actually ran; landing on an already-quiet
+  // sheet (load, a project switch, the poll) shows nothing.
+  if (mode === "hidden" || (mode === "saved" && was !== "pending" && was !== "saving")) {
+    status.hidden = true;
+    return;
+  }
+  status.hidden = false;
+  status.className = `save-status${mode === "saving" ? " saving" : mode === "pending" ? " pending" : ""}`;
+  status.textContent = mode === "saving" ? "Saving…"
+    : mode === "pending" ? `${count} unsaved change${count === 1 ? "" : "s"}`
+    : "All changes saved";
+  if (mode === "saved") {
+    saveFlashTimer = setTimeout(() => {
+      status.classList.add("fading");
+      saveFlashTimer = setTimeout(() => { status.hidden = true; status.classList.remove("fading"); }, 450);
+    }, 3200);
+  }
 }
 
 async function specSaveAll() {

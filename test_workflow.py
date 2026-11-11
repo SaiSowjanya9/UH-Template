@@ -616,8 +616,9 @@ class AppTests(unittest.TestCase):
             text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
             return " ".join(text.split())
 
-        # the heading is letter-spaced on the page, exactly as the schedule's are
-        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        # the spec sheet tracks its headings instead of letter-spacing them: plain caps,
+        # a small space after each letter rather than a full space between them
+        spaced = lambda value: value.upper()
         self.assertIn(spaced(row["Section"]), headings("Section"))
         self.assertIn(spaced(row["Room / Area"]), headings("Room / Area"))
         self.assertIn(spaced(row["Room / Area"]), headings(""))   # the chip the view opens on
@@ -642,7 +643,7 @@ class AppTests(unittest.TestCase):
 
         pdf = self.client.get(f"/api/selections/pdf?project={pid}")
         text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
-        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        spaced = lambda value: value.upper()
         self.assertIn(spaced("PROJECT"), text)              # the heading still prints
         self.assertNotIn("MANUFACTURER", text)              # but no line-item table follows
         for row in rows[:3]:
@@ -683,7 +684,7 @@ class AppTests(unittest.TestCase):
         pdf = self.client.get(f"/api/selections/pdf?project={pid}")
         self.assertEqual(pdf.status_code, 200)
         text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
-        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        spaced = lambda value: value.upper()
         self.assertLess(text.index(spaced("Zulu Suite")), text.index(spaced("Alpha Nook")))
 
         word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())

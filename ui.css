@@ -222,6 +222,9 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-client-head .muted { margin:0; font-size:11px; }
 .spec-client-fields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
 .spec-client-fields .field { margin-bottom:0; }
+/* The client details read at their own size and weight, the way the spec sheet's
+   client band prints its values larger and bolder than the line items. */
+.spec-client-fields .field input { font-size:14px; font-weight:600; color:#3c3320; }
 @media(max-width:900px) { .spec-client-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:480px) { .spec-client-fields { grid-template-columns:1fr; } .spec-client-head { flex-direction:column; gap:2px; } }
 .spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
@@ -232,7 +235,11 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
 #spec-view .spec-toolbar .heading-actions { gap:4px; }
 .spec-toolbar .toolbar-divider { width:1px; height:20px; background:var(--gold-line); margin:0 6px; flex:none; }
-.save-status { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); white-space:nowrap; padding:0 5px; }
+/* The save pill floats at the top right like a notification: "Saving…" and the unsaved
+   count hold while they are true, and "All changes saved" stays only long enough to be
+   seen before fading away. */
+.save-status { position:fixed; top:88px; right:25px; z-index:30; display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); background:#fffdf6; border:1px solid var(--line); border-radius:999px; padding:9px 16px; box-shadow:0 8px 30px #3a2f1429; white-space:nowrap; transition:opacity .45s ease; }
+.save-status.fading { opacity:0; }
 .save-status::before { content:""; width:7px; height:7px; border-radius:50%; background:#97a468; flex:none; }
 .save-status.pending { color:var(--gold-ink); }
 .save-status.pending::before { background:var(--gold); }
@@ -269,7 +276,7 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
    they get, instead of the browser re-dividing the row every time a cell's text changes. The
    table's own min-width is written inline, from the sum of those columns. */
 .spec-table { width:100%; border-collapse:collapse; table-layout:fixed; }
-.spec-table th { position:relative; user-select:none; text-align:left; font-size:11px; letter-spacing:1.3px; font-weight:600; color:#a2906c; padding:10px 10px 8px; border-bottom:1px solid #f0e9da; background:#fdfbf6; }
+.spec-table th { position:relative; user-select:none; text-align:left; font-size:11px; letter-spacing:.7px; font-weight:700; color:#544723; padding:10px 10px 8px; border-bottom:1px solid #e8dfc8; background:#fdfbf6; }
 .spec-table th .th-label { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 /* Every header ends in a divider that is also its resize handle. It has to look grabbable
    before anyone thinks to try: a ruled edge at rest, the whole set darkening the moment the

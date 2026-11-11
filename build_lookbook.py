@@ -104,7 +104,11 @@ NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PA
 # smaller than the data they head - 7pt against 10 - because the longest of them
 # (MANUFACTURER) is what sets a column's minimum width, and at 8pt it took the room an item
 # name needs. build_word reads all three off these styles, so one change moves both documents.
-SPEC_HEAD_STYLE = style("spec_head", 7, 9.5, C["muted"], font=FONT_BB)
+# Column heads go darker than the data they head: at the muted gold they read as just
+# another small value, and a header nobody can pick out is no header at all.
+SPEC_HEAD_STYLE = style("spec_head", 7, 9.5, C["dark"], font=FONT_BB)
+# The details box's field labels keep the client band's own muted gold instead.
+DETAIL_HEAD_STYLE = style("detail_head", 7, 9.5, C["muted"], font=FONT_BB)
 SPEC_CELL_STYLE = style("spec_cell", 10, 13, C["body"])
 SPEC_NOTE_STYLE = style("spec_note", 8, 10.5, C["muted"])
 
@@ -130,6 +134,9 @@ SPEC_LABELS = {"Size / Configuration": "Size / Config"}
 # client band above it: labelled values on cream, each with the band's own gold underline.
 DETAILS_GROUP = "PROJECT"
 DETAIL_COLS = 4                     # band-style fields across, like the client band itself
+# The spec sheet's section headings track their letters instead of spacing between them:
+# the same look the schedule's letter-spaced headings have, at about half the air.
+SPEC_HEADING_TRACK = 1.2
 
 
 def spec_heading(column):
@@ -506,10 +513,11 @@ def spaced_caps(text):
     return "   ".join(" ".join(word) for word in clean(text).upper().split())
 
 
-def place(canvas, x, y, text, font, size, color, align="left"):
+def place(canvas, x, y, text, font, size, color, align="left", track=0):
     canvas.setFont(font, size)
     canvas.setFillColor(color)
-    (canvas.drawRightString if align == "right" else canvas.drawString)(x, y, clean(text))
+    (canvas.drawRightString if align == "right" else
+     canvas.drawString)(x, y, clean(text), charSpace=track)
 
 
 def fit(text, font, size, width, minimum=6.5):
@@ -670,9 +678,12 @@ def cover_page(canvas, doc, image, project, title, draft):
 class Band(Flowable):
     """Client / project / address / date fields under the header."""
 
-    def __init__(self, values, width=CONTENT_W):
+    def __init__(self, values, width=CONTENT_W, value_size=9, value_font=FONT_B):
         super().__init__()
+        # The spec sheet asks for its own type in the box - a bigger, bolder value - so the
+        # client details read as their own element rather than more line-item text.
         self.values, self.width = values, width
+        self.value_size, self.value_font = value_size, value_font
 
     def wrap(self, *_):
         return self.width, BAND_H
@@ -685,19 +696,24 @@ class Band(Flowable):
         for index, (label, value) in enumerate(self.values):
             x = 10.8 + index * (field_w + FIELD_GAP)
             place(canvas, x, 33.5, label, FONT_BB, 6.5, C["muted"])
-            size, shown = fit(value, FONT_B, 9, field_w)
-            place(canvas, x, 17, shown, FONT_B, size, C["text"])
+            size, shown = fit(value, self.value_font, self.value_size, field_w)
+            place(canvas, x, 17, shown, self.value_font, size, C["text"])
             canvas.setStrokeColor(C["field_rule"])
             canvas.setLineWidth(0.5)
             canvas.line(x, 11, x + field_w, 11)
 
 
 class Heading(Flowable):
-    """Letter-spaced section heading with a rule running past the right margin."""
+    """Letter-spaced section heading with a rule running past the right margin.
 
-    def __init__(self, text, width=CONTENT_W, keep=True, rule=None):
+    `track` draws plain uppercase letters with a small space after each in place of a full
+    space between them - the tighter spacing the spec sheet's own headings use.
+    """
+
+    def __init__(self, text, width=CONTENT_W, keep=True, rule=None, track=0):
         super().__init__()
-        self.text, self.width = spaced_caps(text), width
+        self.text = clean(text).upper() if track else spaced_caps(text)
+        self.width, self.track = width, track
         self.keepWithNext = 1 if keep else 0
         self.rule = rule or C["heading_rule"]
 
@@ -706,14 +722,16 @@ class Heading(Flowable):
 
     def draw(self):
         canvas = self.canv
-        place(canvas, PAD_X, 5, self.text, FONT_BB, 10, C["dark"])
+        place(canvas, PAD_X, 5, self.text, FONT_BB, 10, C["dark"], track=self.track)
+        text_w = (pdfmetrics.stringWidth(self.text, FONT_BB, 10)
+                  + self.track * max(0, len(self.text) - 1))
         canvas.setStrokeColor(self.rule)
         canvas.setLineWidth(0.5)
-        canvas.line(PAD_X + pdfmetrics.stringWidth(self.text, FONT_BB, 10) + HEADING_GAP, 8,
-                    self.width + HEADING_OVERHANG, 8)
+        canvas.line(PAD_X + text_w + HEADING_GAP, 8, self.width + HEADING_OVERHANG, 8)
 
 
-def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM, rule=None):
+def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM, rule=None,
+                  track=0):
     """A section heading with its rows: the rows may split across pages, but the heading is
     never left stranded at the foot of one.
 
@@ -722,7 +740,8 @@ def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM, 
     maxHeight of the frame tells KeepTogether to split the rows in place instead, and only
     break the page when the heading itself no longer fits.
     """
-    return KeepTogether([Heading(text, width, keep=False, rule=rule), table], maxHeight=frame_h)
+    return KeepTogether([Heading(text, width, keep=False, rule=rule, track=track), table],
+                        maxHeight=frame_h)
 
 
 class SignOff(Flowable):
@@ -897,7 +916,7 @@ def spec_details(items, width, hidden, landscape=True):
             mark = (f'<link href="{escape(url, {chr(34): "&quot;"})}" '
                     f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>')
             value = f"{value} · {mark}" if value else mark
-        cells.append([Paragraph(escape(clean(row.get("Item")).upper()), SPEC_HEAD_STYLE),
+        cells.append([Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE),
                       Paragraph(value or " ", SPEC_CELL_STYLE)])
     cells += [" "] * (-len(cells) % cols)     # blank underlined fields, as an empty band field
     data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
@@ -920,7 +939,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     page = spec_page(orientation)
     columns = spec_columns(hidden)
     widths = spec_widths(columns, page.content_w)
-    story = [Band(band_values(project), page.content_w), Spacer(0, BAND_GAP)]
+    story = [Band(band_values(project), page.content_w, value_size=11, value_font=FONT_BB),
+             Spacer(0, BAND_GAP)]
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
@@ -928,7 +948,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                  if is_details_group(section)
                  else spec_table(items, columns, widths, hidden, page.pad_x))
         story.append(section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
-                                   rule=SHEET["rule"]) if section else block)
+                                   rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
+                     if section else block)
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)
