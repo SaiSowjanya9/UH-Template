@@ -1116,6 +1116,28 @@ class ScheduleTests(unittest.TestCase):
                                (build_powerpoint.DESC, 10)]:
                 self.assertEqual(spec[0], size)
 
+    def test_every_spec_sheet_heading_prints_on_one_line(self):
+        """A heading that wraps reads as two columns - PRODUCT over LINK - so each share is
+        wide enough for its own heading, and PRODUCT LINK for the words in its cells too.
+
+        Portrait is what decides them: the same columns in three quarters of the width, with
+        tighter cell padding. Hiding a column only ever widens the rest, so the full set is
+        the tight case, and Word lays out the same shares in the same font metrics.
+        """
+        import build_lookbook
+        from reportlab.pdfbase import pdfmetrics
+        columns = build_lookbook.spec_columns()
+        total = sum(share for _, share in columns)
+        head, cell = build_lookbook.SPEC_HEAD_STYLE, build_lookbook.SPEC_CELL_STYLE
+        for name in build_lookbook.SPEC_ORIENTATIONS:
+            page = build_lookbook.spec_page(name)
+            for column, share in columns:
+                room = share / total * page.content_w - 2 * page.pad_x
+                printed = pdfmetrics.stringWidth(column.upper(), build_lookbook.FONT_BB, head.fontSize)
+                if column == build_lookbook.PRODUCT_LINK:
+                    printed = max(printed, pdfmetrics.stringWidth(column, build_lookbook.FONT_B, cell.fontSize))
+                self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
+
     def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
         """The internal sheet is the one document on plain paper: a white page ruled in black
         at the studio weights, with the client details box left exactly as it was - cream,

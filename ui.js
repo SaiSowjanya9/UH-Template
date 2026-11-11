@@ -1010,13 +1010,34 @@ const FILE_ACTIONS = {
   "import-csv": () => $("spec-import-file").click(),
 };
 const NEEDS_PROJECT = new Set(["csv", "spec-docx", "spec-pdf", "import-csv"]);
+const FILE_NAMES = {
+  csv: "Spec sheet · CSV", "spec-docx": "Spec sheet · Word", "spec-pdf": "Spec sheet · PDF",
+  "import-csv": "Spec sheet · CSV, brought in",
+};
+// A file is chosen first and sent on OK, rather than downloading the moment it is clicked:
+// the orientation and the columns below are part of the same decision, and picking the file
+// first used to mean closing the dialog with settings still to make. Cleared each time the
+// dialog opens, so OK can never repeat the last download by accident.
+let fileChoice = null;
+
+function renderFileChoice() {
+  document.querySelectorAll("#files-dialog .file-choice").forEach((card) => {
+    const chosen = card.dataset.file === fileChoice;
+    card.classList.toggle("selected", chosen);
+    card.setAttribute("aria-pressed", String(chosen));
+  });
+  $("files-chosen").textContent = fileChoice ? FILE_NAMES[fileChoice] : "Choose a file above.";
+  $("files-ok").disabled = !fileChoice;
+}
 
 // Drawn as the dialog opens rather than from `render`: the list only changes when someone
 // clicks it, and rebuilding it under the 2.5s poll would take the focus off a box mid-choice.
 $("files-button").addEventListener("click", () => {
   if (!state.data || state.busy) return;
+  fileChoice = null;
   renderExportColumns();
   renderExportOrientation();
+  renderFileChoice();
   $("files-dialog").showModal();
 });
 $("files-dialog").addEventListener("click", (event) => {
@@ -1024,10 +1045,14 @@ $("files-dialog").addEventListener("click", (event) => {
   if (orientation) { setExportOrientation(orientation.dataset.orientation); return; }
   const choice = event.target.closest(".file-choice");
   if (!choice || state.busy) return;
-  const key = choice.dataset.file;
-  if (NEEDS_PROJECT.has(key) && !selectedProject()) { toast("Choose a project first.", true); return; }
+  fileChoice = choice.dataset.file;
+  renderFileChoice();
+});
+$("files-ok").addEventListener("click", () => {
+  if (!fileChoice || state.busy) return;
+  if (NEEDS_PROJECT.has(fileChoice) && !selectedProject()) { toast("Choose a project first.", true); return; }
   $("files-dialog").close();
-  FILE_ACTIONS[key]();
+  FILE_ACTIONS[fileChoice]();
 });
 $("spec-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];

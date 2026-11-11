@@ -53,6 +53,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             band_values, clean, code_prefix, description, fit, group_sections,
                             hidden_columns, load_data, mark_bottom, numbered, presentation_details,
                             product_link, row_widths, schedule_title, spaced_caps, spec_columns,
+                            spec_widths,
                             spec_groups, spec_page, spec_value)
 from branding import load_logo
 
@@ -576,7 +577,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     band(document, band_values(project), width)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
     columns = spec_columns(hidden)
-    widths = [width * share / sum(share for _, share in columns) for _, share in columns]
+    widths = spec_widths(columns, width)
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
             heading(document, section, width, first=index == 0)

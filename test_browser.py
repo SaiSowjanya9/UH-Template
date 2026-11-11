@@ -318,9 +318,10 @@ class BrowserTests(unittest.TestCase):
                             expect(page.locator("#files-dialog")).to_be_visible()
 
                         def csv_header():
-                            """The columns of a CSV downloaded from the open dialog, which closes it."""
+                            """The columns of a CSV chosen in the open dialog and sent by OK, which closes it."""
+                            page.locator('#files-dialog [data-file="csv"]').click()
                             with page.expect_download(timeout=30000) as downloading:
-                                page.locator('#files-dialog [data-file="csv"]').click()
+                                page.locator("#files-ok").click()
                             return Path(downloading.value.path()).read_text(encoding="utf-8-sig").splitlines()[0].split(",")
 
                         open_files()
@@ -367,6 +368,59 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_file_is_chosen_first_and_sent_on_ok(self):
+        """The file, the page it prints on and the columns it carries are one decision, so a
+        card only chooses and OK sends: picking the file first used to close the dialog with
+        the rest of that decision still to make. Reopening forgets the choice, so OK can
+        never repeat the last download by accident, and bringing a sheet in is the same two
+        steps."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "confirm.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        dialog, ok = page.locator("#files-dialog"), page.locator("#files-ok")
+                        card = page.locator('#files-dialog [data-file="spec-pdf"]')
+
+                        page.locator("#files-button").click()
+                        expect(dialog).to_be_visible()
+                        expect(ok).to_be_disabled()            # nothing chosen yet
+                        card.click()
+                        expect(card).to_have_attribute("aria-pressed", "true")
+                        expect(dialog).to_be_visible()         # chosen, not sent
+                        expect(ok).to_be_enabled()
+                        # the rest of the decision is still there to make, and OK carries it
+                        page.locator('#files-dialog [data-orientation="portrait"]').click()
+                        page.locator('#export-column-list input[data-column="Markup %"]').uncheck()
+                        with page.expect_download(timeout=30000) as downloading:
+                            ok.click()
+                        self.assertTrue(downloading.value.suggested_filename.endswith("_Portrait.pdf"))
+                        expect(dialog).not_to_be_visible()
+
+                        page.locator("#files-button").click()
+                        expect(ok).to_be_disabled()
+                        expect(card).to_have_attribute("aria-pressed", "false")
+                        page.locator('#files-dialog [data-file="import-csv"]').click()
+                        with page.expect_file_chooser() as chooser:
+                            ok.click()
+                        self.assertTrue(chooser.value)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_the_orientation_chosen_in_the_dialog_is_the_page_that_is_printed(self):
         """The Word and PDF copies turn on request: landscape as the dialog opens, portrait
         for a sheet filed with the client schedule. The choice is this browser's and holds
@@ -395,9 +449,10 @@ class BrowserTests(unittest.TestCase):
                             expect(page.locator("#files-dialog")).to_be_visible()
 
                         def downloaded(choice):
-                            """The name of a file downloaded from the open dialog, which closes it."""
+                            """The name of a file chosen in the open dialog and sent by OK, which closes it."""
+                            page.locator(f'#files-dialog [data-file="{choice}"]').click()
                             with page.expect_download(timeout=30000) as downloading:
-                                page.locator(f'#files-dialog [data-file="{choice}"]').click()
+                                page.locator("#files-ok").click()
                             return downloading.value.suggested_filename
 
                         open_files()
@@ -527,17 +582,19 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
                         expect(page.locator("#selection-rows")).to_contain_text("Product Link")
-                        # the spec sheet is the deliverable now, downloaded from the files dialog
+                        # the spec sheet is the deliverable now: chosen in the files dialog, sent by OK
                         page.locator("#files-button").click()
+                        page.locator('#files-dialog [data-file="spec-pdf"]').click()
                         with page.expect_download(timeout=30000) as download_info:
-                            page.locator('#files-dialog [data-file="spec-pdf"]').click()
+                            page.locator("#files-ok").click()
                         download = download_info.value
                         self.assertTrue(download.suggested_filename.endswith(".pdf"))
                         self.assertIn("Spec_Sheet", download.suggested_filename)
                         download.save_as(Path(folder) / "download.pdf")
                         page.locator("#files-button").click()
+                        page.locator('#files-dialog [data-file="csv"]').click()
                         with page.expect_download(timeout=30000) as download_info:
-                            page.locator('#files-dialog [data-file="csv"]').click()
+                            page.locator("#files-ok").click()
                         download = download_info.value
                         self.assertTrue(download.suggested_filename.endswith(".csv"))
                         download.save_as(Path(folder) / "download.csv")

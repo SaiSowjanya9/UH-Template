@@ -84,15 +84,15 @@
     <div class="file-columns">
       <section>
         <h3>Send out</h3>
-        <button class="file-choice" data-file="csv"><strong>Spec sheet · CSV</strong><small>Line items for Excel or Sheets, to price up and bring back.</small></button>
-        <button class="file-choice" data-file="spec-docx"><strong>Spec sheet · Word</strong><small>The same line items laid out to read and print. Internal: it shows pricing.</small></button>
-        <button class="file-choice" data-file="spec-pdf"><strong>Spec sheet · PDF</strong><small>Every line item and column as a printable PDF. Internal: it shows pricing.</small></button>
+        <button type="button" class="file-choice" data-file="csv" aria-pressed="false"><strong>Spec sheet · CSV</strong><small>Line items for Excel or Sheets, to price up and bring back.</small></button>
+        <button type="button" class="file-choice" data-file="spec-docx" aria-pressed="false"><strong>Spec sheet · Word</strong><small>The same line items laid out to read and print. Internal: it shows pricing.</small></button>
+        <button type="button" class="file-choice" data-file="spec-pdf" aria-pressed="false"><strong>Spec sheet · PDF</strong><small>Every line item and column as a printable PDF. Internal: it shows pricing.</small></button>
         <div class="file-option"><span class="file-option-label">Page orientation</span><div class="chip-group" role="group" aria-label="Page orientation for the Word and PDF copies"><button type="button" class="chip" data-orientation="landscape">Landscape</button><button type="button" class="chip" data-orientation="portrait">Portrait</button></div></div>
         <p class="file-option-note">The Word and PDF copies only. Landscape gives every column room; portrait matches the client schedule.</p>
       </section>
       <section>
         <h3>Bring in</h3>
-        <button class="file-choice" data-file="import-csv"><strong>Spec sheet · CSV</strong><small>Updates matching line items and adds new ones. Nothing is removed.</small></button>
+        <button type="button" class="file-choice" data-file="import-csv" aria-pressed="false"><strong>Spec sheet · CSV</strong><small>Updates matching line items and adds new ones. Nothing is removed.</small></button>
       </section>
     </div>
     <section class="export-columns">
@@ -101,6 +101,7 @@
       <p id="export-columns-warning" class="column-warning" role="status" hidden></p>
     </section>
     <p class="form-note">Downloads and imports apply to the project selected in the sidebar.</p>
+    <div class="dialog-actions"><span id="files-chosen" class="muted" role="status"></span><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="files-ok" class="button primary" disabled>OK</button></div>
   </dialog>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>

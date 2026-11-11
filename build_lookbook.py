@@ -109,10 +109,13 @@ SPEC_TITLE = "Spec Sheet"
 # the heading and the lookbook flag a note under the item. (column, width share, the hideable
 # key - or keys, where one column stands over two fields - that drop it); shares are rescaled
 # to what is shown, and build_word.build_spec lays the same registry out in Word.
+# Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
+# in its cells as well. A heading that wraps reads as two columns - PRODUCT over LINK - and
+# portrait decides the numbers: three quarters of the landscape width, with tighter padding.
 SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
                 ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
-                (PRODUCT_LINK, 60, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
-                ("Unit Price", 50, "Unit Price"), ("Markup %", 46, "Markup %")]
+                (PRODUCT_LINK, 75, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
+                ("Unit Price", 60, "Unit Price"), ("Markup %", 60, "Markup %")]
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
@@ -292,6 +295,16 @@ def spec_columns(hidden=()):
 def spec_value(row, column):
     """The text a spec-sheet column shows for a row; Qty / Unit joins the two fields it covers."""
     return qty_unit(row) if column == QTY_UNIT else clean(row.get(column))
+
+
+def spec_widths(columns, content_w):
+    """What each spec-sheet column gets of the page: its share of the width on offer.
+
+    The shares themselves are what keep a heading - and Product Link's own two words - off a
+    second line; see `SPEC_COLUMNS`. Both builders measure through here so they cannot drift.
+    """
+    total = sum(share for _, share in columns)
+    return [content_w * share / total for _, share in columns]
 
 
 def row_widths(hidden, reserved=0):
@@ -824,7 +837,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     on the page orientation the download asked for."""
     page = spec_page(orientation)
     columns = spec_columns(hidden)
-    widths = [page.content_w * share / sum(share for _, share in columns) for _, share in columns]
+    widths = spec_widths(columns, page.content_w)
     story = [Band(band_values(project), page.content_w), Spacer(0, BAND_GAP)]
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:

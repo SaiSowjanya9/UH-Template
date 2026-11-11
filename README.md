@@ -162,7 +162,9 @@ blocks a deliverable. The product page itself is printed, as a clickable “Prod
 
 ## The internal spec sheet
 
-The app's **Import / Export** dialog downloads the selected project's spec sheet. It is a
+The app's **Import / Export** dialog downloads the selected project's spec sheet: choose the
+file, set the page and the columns below it, then press **OK**. Clicking a file only chooses
+it, so nothing is sent until OK, and Cancel leaves without doing anything. It is a
 landscape page carrying the client details band, the group headings the view is grouped by, and
 one row per line item under the same eight column headers as the screen: ITEM, MANUFACTURER,
 MODEL #, FINISH / COLOR, PRODUCT LINK, QTY / UNIT, UNIT PRICE and MARKUP %. Pricing is internal,
