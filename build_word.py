@@ -51,11 +51,11 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             SPEC_NOTE_STYLE,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
                             SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
-                            band_values, clean, code_prefix, description, fit, group_sections,
-                            hidden_columns, load_data, mark_bottom, numbered, presentation_details,
-                            product_link, row_widths, schedule_title, spaced_caps, spec_columns,
-                            spec_widths,
-                            spec_groups, spec_heading, spec_page, spec_value)
+                            band_values, clean, code_prefix, description, detail_value, fit,
+                            group_sections, hidden_columns, is_details_group, load_data,
+                            mark_bottom, numbered, presentation_details, product_link, row_widths,
+                            schedule_title, spaced_caps, spec_columns, spec_widths,
+                            spec_groups, spec_heading, spec_page, spec_value, DETAIL_COLS)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -569,6 +569,32 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
     return out
 
 
+def spec_details(document, items, content_w, hidden, landscape=True):
+    """A project's own figures print like the client band above them: labelled values on
+    cream, each field underlined like a band field - not a ruled table of line items.
+    Long names and values wrap inside their field, so nothing shrinks or clips."""
+    cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
+    widths = [content_w / cols] * cols
+    table = grid(document, widths, pad_x=BAND_INSET, pad_y=7)
+    for start in range(0, len(items), cols):
+        cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
+        keep_whole(table.rows[-1])
+        for cell, row in zip(cells, items[start:start + cols] + [None] * cols):
+            shade(cell, COLORS["band"])
+            write(cell.paragraphs[0], clean(row.get("Item")).upper() if row else "",
+                  SPEC_HEAD[0], COLORS["muted"], bold=True, leading=SPEC_HEAD[1])
+            line = shape(cell.add_paragraph(), size=SPEC_CELL[0], leading=SPEC_CELL[1], before=5)
+            rule(line, "bottom", 0.5, COLORS["field_rule"])
+            if not row:
+                continue                    # a blank underlined field, as in the PDF twin
+            run_text(line, detail_value(row, hidden), SPEC_CELL[0], COLORS["body"])
+            url = product_link(row, hidden)
+            if url:
+                if detail_value(row, hidden):
+                    run_text(line, "  ·  ", SPEC_CELL[0], COLORS["muted"])
+                hyperlink(line, url, PRODUCT_LINK, SPEC_CELL[0], COLORS["accent"])
+
+
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
                orientation="landscape"):
     """The internal spec sheet: the app's line items and columns, under the same headings,
@@ -583,6 +609,9 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
             heading(document, section, width, first=index == 0)
+        if is_details_group(section):
+            spec_details(document, items, width, hidden, page.landscape)
+            continue
         table = grid(document, widths, pad_x=page.pad_x, pad_y=4)
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[0], header=True)
@@ -601,8 +630,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                 elif column != PRODUCT_LINK:
                     write(cell.paragraphs[0], spec_value(row, column), SPEC_CELL[0], COLORS["body"],
                           leading=SPEC_CELL[1])
-                if position < len(items) - 1:
-                    cell_rule(cell, "bottom", 0.4, SHEET["rule"])
+                cell_rule(cell, "bottom", 0.5 if position == len(items) - 1 else 0.4,
+                          SHEET["rule"])
             if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
                 write(cells[0].add_paragraph(), "Not in lookbook", SPEC_NOTE[0], COLORS["muted"],
                       leading=SPEC_NOTE[1])

@@ -12,6 +12,10 @@ const state = { data: null, project: "", view: "selections", page: 0, busy: fals
 // in that column sits under a placeholder heading, which is a label rather than a stored value.
 const specPlaceholder = () => (state.specGroup === "Section" ? "Other" : "Unassigned");
 const groupLabel = () => (state.specGroup === "Section" ? "category" : "room");
+// A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
+// not line items, so it is drawn like the client details box above the cards instead of as
+// a table, matching the spec-sheet exports (DETAILS_GROUP in build_lookbook.py).
+const isDetailsGroup = (name) => String(name || "").trim().toUpperCase() === "PROJECT";
 // A room is not a record of its own: it is on the sheet because line items name it. So a room
 // added from the toolbar is held here - the project and field it belongs to, with the heading
 // itself - and drawn as an empty card until its first line item puts it in the workspace.
@@ -336,12 +340,29 @@ function specGroups(rows) {
   for (const row of rows) groups.set(row[key] || placeholder, []);
   for (const row of rows) groups.get(row[key] || placeholder).push(row);
   // A heading held in the browser has no line items yet, so it joins the sheet as an empty group;
-  // once a line item names it, the workspace is what puts it on screen.
-  for (const held of heldGroups()) if (!groups.has(held.name)) groups.set(held.name, []);
+  // once a line item names it, the workspace is what puts it on screen. A card somebody dragged
+  // into place remembers the heading it follows - null says it leads the sheet - and a held
+  // heading with no memory lands where it always did, after the last card.
+  const keys = [...groups.keys()];
+  const slots = new Map();
+  for (const held of heldGroups()) {
+    if (groups.has(held.name)) continue;
+    let at;
+    if (held.after === null) at = slots.get(null) ?? 0;
+    else if (held.after === undefined) at = keys.length;
+    else {
+      const anchor = keys.indexOf(held.after);
+      at = anchor < 0 ? keys.length : (slots.get(held.after) ?? anchor + 1);
+    }
+    keys.splice(at, 0, held.name);
+    slots.set(held.after, at + 1);
+    groups.set(held.name, []);
+  }
+  const ordered = keys.map((name) => [name, groups.get(name)]);
   // Categories print in the order the Lists sheet names them; rooms keep the order of the line items.
-  if (key !== "Section") return [...groups];
+  if (key !== "Section") return ordered;
   const order = state.data.sections || [];
-  return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+  return ordered.sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
 }
 
 // A room being named: the card is already on the sheet, with a box where its heading will be, so
@@ -374,7 +395,28 @@ function addSpecGroup(name) {
   const accepted = groupName(name);
   if (accepted) state.specHeld.push({ field: state.specGroup, project: state.project, name: accepted });
   renderSpec();
-  if (accepted) toast(`“${accepted}” added. Add a line item to keep this ${groupLabel()}.`);
+  if (accepted) toast(`“${accepted}” added at the end — drag its card to place it. Add a line item to keep this ${groupLabel()}.`);
+}
+
+// One figure in the project box: the item is the field's label and Size / Configuration its
+// value, like the client details fields above; every other filled spec column follows as the
+// small print - the same words the PDF and Word copies put in their box. Pending edits show
+// in place like any spec cell, and the whole figure can still be dragged like a line item.
+function specDetail(row) {
+  const pending = state.specPending.get(row._row) || {};
+  const merged = { ...row, ...pending };
+  const dirty = (field) => cellFields(field).some((key) => key in pending);
+  const extras = SPEC_COLUMNS.filter((c) => c.field !== "Item" && c.field !== "Size / Configuration")
+    .map((c) => {
+      if (c.link) return isUrl(merged[c.field]) ? `<a class="product-link" href="${esc(merged[c.field])}" target="_blank" rel="noopener noreferrer" title="${esc(merged[c.field])}">Product Link ↗</a>` : "";
+      const value = c.pair ? qtyUnit(merged) : String(merged[c.field] ?? "").trim();
+      return value ? esc(value) : "";
+    }).filter(Boolean).join(" · ");
+  return `<div class="spec-detail" data-row="${row._row}" draggable="true">
+    <div class="detail-head"><input class="cell detail-name${dirty("Item") ? " dirty" : ""}" data-row="${row._row}" data-field="Item" value="${esc(merged.Item)}" maxlength="4000" aria-label="Item name" placeholder="Name the detail"><span class="detail-actions"><button type="button" class="text-button" data-edit="${row._row}" aria-label="Open ${esc(row.Item)}">Open</button><button type="button" class="icon-button" data-spec-remove="${row._row}" aria-label="Remove ${esc(row.Item)}">×</button></span></div>
+    <input class="cell detail-value${dirty("Size / Configuration") ? " dirty" : ""}" data-row="${row._row}" data-field="Size / Configuration" value="${esc(merged["Size / Configuration"])}" maxlength="4000" aria-label="Value for ${esc(merged.Item) || "the detail"}" placeholder="Value, e.g. 3,819 sq ft">
+    ${extras ? `<div class="detail-extra">${extras}</div>` : ""}
+  </div>`;
 }
 
 function renderSpec() {
@@ -408,7 +450,8 @@ function renderSpec() {
   $("spec-groups").innerHTML = groups.map(([name, items]) => {
     const total = items.reduce((sum, r) => sum + lineTotal(r), 0);
     const collapsed = state.specCollapsed.has(name);
-    const body = items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => {
+    const details = items.length > 0 && isDetailsGroup(name);
+    const body = details ? "" : items.map((r) => `<tr data-row="${r._row}" draggable="true"><td class="drag-col"><span class="drag-handle" title="Drag row to reorder" aria-hidden="true">⠿</span></td>${SPEC_COLUMNS.map((c) => {
       const pending = state.specPending.get(r._row) || {};   // unsaved edits outlive every re-render
       const edited = cellFields(c.field).some((f) => f in pending);
       const value = c.pair ? qtyUnit({ ...r, ...pending }) : String(edited ? pending[c.field] : r[c.field] ?? "");
@@ -423,17 +466,23 @@ function renderSpec() {
     // an input cannot live inside a button, and collapsing is not what this click means.
     const renaming = state.specRename === name;
     const label = groupLabel();
+    // Room order is line-item order, so a room card can be dragged into place; categories
+    // follow the Lists sheet and their order cannot be moved here.
+    const grip = state.specGroup === "Section" ? ""
+      : `<span class="drag-handle card-grip" draggable="true" title="Drag to reorder this ${label}" aria-hidden="true">⠿</span>`;
     const head = renaming
       ? `<input class="cell group-rename" data-group-rename="${esc(name)}" value="${esc(name)}" maxlength="200" aria-label="Rename the ${label} ${esc(name)}">`
       : `<button type="button" class="spec-card-toggle" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3></button>`;
     // Only a heading added from the toolbar has no line items, so an empty card is one still
     // held in this browser: it says so in place of the table, and its × stops holding it.
     const held = !items.length;
-    return `<article class="spec-card${collapsed ? " collapsed" : ""}${held ? " held" : ""}" data-spec-name="${esc(name)}">
-      <div class="spec-card-head">${head}<span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><button type="button" class="icon-button spec-rename" data-spec-rename="${esc(name)}" aria-label="Rename the ${label} ${esc(name)}" title="Rename this ${label}">✎</button>${held ? `<button type="button" class="icon-button spec-discard" data-spec-discard="${esc(name)}" aria-label="Remove the empty ${label} ${esc(name)}" title="Remove this empty ${label}">×</button>` : ""}<span class="group-total">${total ? money(total) : ""}</span></div>
+    return `<article class="spec-card${collapsed ? " collapsed" : ""}${held ? " held" : ""}${details ? " details" : ""}" data-spec-name="${esc(name)}">
+      <div class="spec-card-head">${grip}${head}<span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><button type="button" class="icon-button spec-rename" data-spec-rename="${esc(name)}" aria-label="Rename the ${label} ${esc(name)}" title="Rename this ${label}">✎</button>${held ? `<button type="button" class="icon-button spec-discard" data-spec-discard="${esc(name)}" aria-label="Remove the empty ${label} ${esc(name)}" title="Remove this empty ${label}">×</button>` : ""}<span class="group-total">${total ? money(total) : ""}</span></div>
       <div class="spec-body">${held
-        ? `<p class="spec-card-note">Nothing in this ${label} yet, so it is only on this screen. Add a line item below — or drag one in from another card — and the workspace keeps it.</p>`
-        : `<table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table>`}</div>
+        ? `<p class="spec-card-note">Nothing in this ${label} yet, so it is only on this screen. Drag the card by its grip to place it, then add a line item below — or drag one in from another card — and the workspace keeps it there.</p>`
+        : details
+          ? `<div class="spec-details-box">${items.map(specDetail).join("")}</div>`
+          : `<table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table>`}</div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button></div>
     </article>`;
   }).join("") + (state.specNaming ? namingCard() : "");
@@ -491,25 +540,45 @@ function specDragEvents() {
   const zone = $("spec-groups");
   zone.addEventListener("mousedown", (event) => { specPress = event.target; }, true);
   zone.addEventListener("dragstart", (event) => {
-    const tr = event.target;
-    if (!tr.matches || !tr.matches("tr[data-row]")) return;   // child drag such as selected input text
+    const grip = event.target.closest ? event.target.closest(".card-grip") : null;
+    if (grip) {   // a card's grip moves the whole room, not a line item
+      const card = grip.closest(".spec-card");
+      if (state.busy || !card) { event.preventDefault(); return; }
+      specDrag = { card: card.dataset.specName };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", specDrag.card);
+      requestAnimationFrame(() => card.classList.add("dragging"));
+      return;
+    }
+    const rowEl = event.target;
+    if (!rowEl.matches || !rowEl.matches("tr[data-row],.spec-detail[data-row]")) return;   // child drag such as selected input text
     if (state.busy || (specPress && specPress.closest("input,textarea,select,button,a"))) {
       event.preventDefault();   // presses on cells/buttons keep their normal behavior
       return;
     }
-    specDrag = { row: Number(tr.dataset.row), group: tr.closest(".spec-card")?.dataset.specName };
+    specDrag = { row: Number(rowEl.dataset.row), group: rowEl.closest(".spec-card")?.dataset.specName };
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", String(specDrag.row));
-    requestAnimationFrame(() => tr.classList.add("dragging"));
+    requestAnimationFrame(() => rowEl.classList.add("dragging"));
   });
   zone.addEventListener("dragover", (event) => {
     if (!specDrag) return;
+    if (specDrag.card !== undefined) {
+      const over = event.target.closest(".spec-card[data-spec-name]");
+      if (!over || over.dataset.specName === specDrag.card) { clearDropMarks(); return; }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      clearDropMarks();
+      const rect = over.getBoundingClientRect();
+      over.classList.add(event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
+      return;
+    }
     const card = event.target.closest(".spec-card");
     if (!card) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     clearDropMarks();
-    const tr = event.target.closest("tr[data-row]");
+    const tr = event.target.closest("tr[data-row],.spec-detail[data-row]");
     if (tr && Number(tr.dataset.row) !== specDrag.row) {
       const rect = tr.getBoundingClientRect();
       tr.classList.add(event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
@@ -519,9 +588,16 @@ function specDragEvents() {
   });
   zone.addEventListener("drop", (event) => {
     if (!specDrag) return;
+    if (specDrag.card !== undefined) {
+      const over = event.target.closest(".spec-card[data-spec-name]");
+      if (over) event.preventDefault();
+      const after = over ? event.clientY >= over.getBoundingClientRect().top + over.getBoundingClientRect().height / 2 : false;
+      finishGroupDrop(over ? over.dataset.specName : null, after);
+      return;
+    }
     const card = event.target.closest(".spec-card");
     if (card) event.preventDefault();
-    const tr = event.target.closest("tr[data-row]");
+    const tr = event.target.closest("tr[data-row],.spec-detail[data-row]");
     if (tr && Number(tr.dataset.row) === specDrag.row) { specDrag = null; clearDropMarks(); return; }
     const after = tr ? event.clientY >= tr.getBoundingClientRect().top + tr.getBoundingClientRect().height / 2 : false;
     finishSpecDrop(tr ? Number(tr.dataset.row) : null, after, card);
@@ -544,8 +620,14 @@ function finishSpecDrop(target, after, card) {
   const order = all.filter((r) => r !== from);
   let index;
   if (target === null) {   // dropped on the group card: land after its last visible item
-    const last = card?.querySelector("tbody tr[data-row]:last-of-type");
-    index = last ? order.indexOf(Number(last.dataset.row)) + 1 : order.length;
+    const rows = card?.querySelectorAll("tr[data-row],.spec-detail[data-row]");
+    const last = rows?.length ? rows[rows.length - 1] : null;
+    if (last) index = order.indexOf(Number(last.dataset.row)) + 1;
+    else {
+      // An empty card still has a place: the row lands just past the heading it follows.
+      const held = heldGroups().find((h) => h.name === card?.dataset.specName);
+      index = held ? dropIndexFor(held, order) : order.length;
+    }
   } else {
     index = order.indexOf(target) + (after ? 1 : 0);
     if (index < 0) index = order.length;
@@ -559,6 +641,10 @@ function finishSpecDrop(target, after, card) {
     if (targetGroup !== current) {
       updates[from] = { [state.specGroup]: targetGroup === specPlaceholder() ? "" : targetGroup };
     }
+    // Dropping onto an empty card makes it real where it sits, so the held headings that
+    // were keeping its place follow the group the row just made.
+    const held = heldGroups().find((h) => h.name === targetGroup);
+    if (held) reanchorHeld(held);
   }
   if (!Object.keys(updates).length && order.every((row, i) => row === all[i])) return;
   // Land the row now: the server round-trip on a hosted workspace takes a moment,
@@ -605,6 +691,96 @@ function remapPendingSpec(order, all) {
   }));
 }
 
+// The row position a held heading's place works out to: just past the last line item of the
+// heading it follows, the top of the sheet when it leads, and the end when it was never placed.
+function dropIndexFor(held, order) {
+  if (held.after === undefined) return order.length;
+  if (held.after === null) return 0;
+  const rows = new Map(projectRows().map((r) => [r._row, r]));
+  const anchorLast = [...order].reverse().find((rn) =>
+    (rows.get(rn)?.[held.field] || (held.field === "Section" ? "Other" : "Unassigned")) === held.after);
+  return anchorLast === undefined ? order.length : order.indexOf(anchorLast) + 1;
+}
+
+// A held heading becomes real the moment a line item names it: the held headings that
+// followed it in the same place now follow the group itself, or the order jumps.
+function reanchorHeld(held) {
+  const run = state.specHeld.filter((h) =>
+    h.field === held.field && h.project === held.project && h.after === held.after);
+  for (const h of run.slice(run.indexOf(held) + 1)) h.after = held.name;
+}
+
+function finishGroupDrop(targetName, after) {
+  const name = specDrag?.card;
+  specDrag = null;
+  clearDropMarks();
+  if (!name) return;
+  if (state.busy) { toast("Wait for the current save to finish, then drag again.", true); return; }
+  const cards = specGroups(projectRows()).map(([groupName]) => groupName);
+  const order = cards.filter((n) => n !== name);
+  let index = targetName ? order.indexOf(targetName) + (after ? 1 : 0) : order.length;
+  if (index < 0) index = order.length;
+  order.splice(index, 0, name);
+  if (order.every((n, i) => n === cards[i])) return;
+  // A real card moves as a block of its line items; a held card has none, so it remembers
+  // the heading it now follows - null leads the sheet - and the held run keeps the same
+  // left-to-right reading it was dropped in.
+  const held = new Map(heldGroups().map((h) => [h.name, h]));
+  const real = new Set(projectRows().map((r) => r[state.specGroup] || specPlaceholder()));
+  const sequence = [], groupOrder = [];
+  let lastReal = null;
+  for (const n of order) {
+    const h = real.has(n) ? null : held.get(n);
+    if (h) { h.after = lastReal; sequence.push(h); }
+    else { lastReal = n; groupOrder.push(n); }
+  }
+  state.specHeld = state.specHeld
+    .filter((h) => !(h.field === state.specGroup && h.project === state.project))
+    .concat(sequence);
+  const all = projectRows().map((r) => r._row);
+  const block = new Map(groupOrder.map((g) => [g, []]));
+  for (const r of projectRows()) {
+    const g = r[state.specGroup] || specPlaceholder();
+    if (block.has(g)) block.get(g).push(r._row);
+  }
+  const moved = groupOrder.flatMap((g) => block.get(g));
+  if (all.some((r) => !moved.includes(r))) { renderSpec(); return; }
+  if (moved.every((r, i) => r === all[i])) { renderSpec(); return; }   // only held cards moved
+  // Land the cards now, like a dragged line item: the workspace round-trip takes a moment.
+  const byRow = new Map(projectRows().map((r) => [r._row, r]));
+  const positions = all.slice().sort((a, b) => a - b);
+  const next = new Map(state.data.selections.map((r) => [r._row, r]));
+  positions.forEach((pos, i) => next.set(pos, byRow.get(moved[i])));
+  state.data = { ...state.data, selections: [...next.values()] };
+  renderSpec();
+  const label = groupLabel();
+  action(async () => {
+    try {
+      // The same swap stays valid against a newer revision, so persist retries it for us.
+      await persist("/api/selections/order", { project: state.project, order: moved });
+    } catch (error) {
+      await refresh().catch(() => {});
+      throw error;
+    }
+    remapPendingSpec(moved, all);
+    await refresh();
+    toast(`${label[0].toUpperCase()}${label.slice(1)} moved.`);
+  });
+}
+
+// The editor appends a new line item at the end of the sheet, so a room that was dragged
+// into place while it was empty would jump to the foot the moment its first line item
+// landed. The new row moves to the place the empty card was keeping instead.
+async function placeNewSpecRow(row, held) {
+  if (held.after === undefined) return;
+  const all = projectRows().map((r) => r._row);
+  const order = all.filter((r) => r !== row);
+  const index = dropIndexFor(held, order);
+  if (index === order.length) return;   // it already landed where the card was keeping its place
+  order.splice(index, 0, row);
+  await persist("/api/selections/order", { project: state.project, order });
+}
+
 async function renameSpecGroup(from, to) {
   const field = state.specGroup;
   const belongs = (row) => (row[field] || specPlaceholder()) === from;
@@ -628,6 +804,8 @@ async function renameSpecGroup(from, to) {
   }
   // The placeholder heading is a label for rows with nothing in that column, never a value.
   const value = to === specPlaceholder() ? "" : to;
+  // Held cards anchored to this heading follow it to its new name.
+  state.specHeld.forEach((h) => { if (h.field === field && h.project === state.project && h.after === from) h.after = to; });
   const batch = Object.fromEntries(rows.map((row) => [row._row, { [field]: value }]));
   setBusy(true, `Renaming ${from}…`);
   try {
@@ -860,12 +1038,22 @@ async function saveEditor(event) {
     values["Project ID"] = record["Project ID"];
   }
   const custom = kind === "manufacturer" ? {} : { custom_fields: Array.from($("custom-field-rows").children, (row) => ({ name: row.querySelector(".custom-name").value, value: row.querySelector(".custom-value").value })) };
+  // If this new line item names a heading still held on screen, its card was keeping a place.
+  const targetHeld = kind === "selection" && !record
+    ? state.specHeld.find((h) => h.project === state.project
+        && h.name === (values[h.field] || (h.field === "Section" ? "Other" : "Unassigned")))
+    : null;
   setBusy(true, rename ? "Renumbering the project…" : "Saving project details…");
   $("editor-save").disabled = true;
   try {
     const result = await api(`/api/${{ project: "projects", selection: "selections", manufacturer: "manufacturers" }[kind]}`, { values, row: record?._row, create: !record, revision: state.editor.revision, ...(rename ? { rename } : {}), ...custom });
     if (kind === "project") state.project = result.project_id;
     $("editor").close();
+    if (targetHeld) {
+      reanchorHeld(targetHeld);
+      // Saved is saved: if placing it misses, the line item simply sits at the end.
+      try { await placeNewSpecRow(result.row, targetHeld); } catch {}
+    }
     await refresh();
     toast(result.seeded ? `Project created with ${result.seeded} standard line items ready to specify.`
       : result.moved ? `Renumbered to ${result.project_id}, with ${result.moved} line item${result.moved === 1 ? "" : "s"} moved.`

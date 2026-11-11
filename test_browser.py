@@ -291,6 +291,157 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_rooms_can_be_reordered_and_a_new_room_placed(self):
+        """A room card drags by its grip to where it belongs - including one still held on
+        screen - and the order it lands in is the line-item order the workspace keeps."""
+        def drag(page, source, target, after=False):
+            page.evaluate("""([source, target, after]) => {
+                const grip = document.querySelector(`.spec-card[data-spec-name=${CSS.escape(source)}] .card-grip`);
+                const card = document.querySelector(`.spec-card[data-spec-name=${CSS.escape(target)}]`);
+                const rect = card.getBoundingClientRect();
+                const y = after ? rect.bottom - 2 : rect.top + 2;
+                const dt = new DataTransfer();
+                grip.dispatchEvent(new DragEvent("dragstart", {bubbles: true, dataTransfer: dt}));
+                card.dispatchEvent(new DragEvent("dragover", {bubbles: true, dataTransfer: dt, clientY: y}));
+                card.dispatchEvent(new DragEvent("drop", {bubbles: true, dataTransfer: dt, clientY: y}));
+                card.dispatchEvent(new DragEvent("dragend", {bubbles: true, dataTransfer: dt}));
+            }""", [source, target, after])
+
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "reorder.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors, orders = [], []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("request", lambda r: orders.append(r.url) if r.url.endswith("/api/selections/order") else None)
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+                        headings = page.locator(".spec-card-head h3")
+                        expect(headings.first).to_be_attached()
+                        names = headings.all_text_contents()
+
+                        # the last room leads the sheet once its card is dropped above the first
+                        drag(page, names[-1], names[0])
+                        expect(page.locator("#toast")).to_have_text("Room moved.", timeout=15000)
+                        self.assertEqual(headings.all_text_contents(), [names[-1]] + names[:-1])
+                        self.assertEqual(len(orders), 1)
+                        page.reload()
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator(".spec-card-head h3").first).to_be_attached()
+                        self.assertEqual(page.locator(".spec-card-head h3").all_text_contents(), [names[-1]] + names[:-1])
+
+                        # a room being named lands at the end, then drags where it belongs
+                        page.locator("#spec-add-group").click()
+                        page.locator(".group-new").fill("Pantry")
+                        page.locator(".group-new").press("Enter")
+                        card = page.locator('.spec-card[data-spec-name="Pantry"]')
+                        expect(card).to_have_class(re.compile("held"))
+                        drag(page, "Pantry", names[-1])
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("Pantry")
+                        self.assertEqual(len(orders), 1)   # an empty room moves nothing on the sheet
+
+                        # and its first line item lands where the card was placed, not at the end
+                        page.locator('[data-spec-add="Pantry"]').click()
+                        editor = page.locator("#editor")
+                        editor.locator('[name="Item"]').fill("Shelf pins")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("Pantry")
+                        expect(card).not_to_have_class(re.compile("held"))
+                        self.assertGreaterEqual(len(orders), 2)   # placing the line item is a real reorder
+                        page.reload()
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("Pantry")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
+    def test_the_project_room_renders_as_a_details_box(self):
+        """A group headed PROJECT holds the home's figures, not line items, so it draws like
+        the client details box above it - labelled values in a wrapped cream box rather than
+        a ruled table - and the figures still take the same inline edits and drags."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "details.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            # this copy predates the workspace's own PROJECT room, so give two rows one
+            import openpyxl
+            wb = openpyxl.load_workbook(workspace)
+            sheet = wb["Selections"]
+            headers = [cell.value for cell in sheet[1]]
+            room, item = headers.index("Room / Area") + 1, headers.index("Item") + 1
+            sheet.cell(2, room).value = "PROJECT"
+            sheet.cell(3, room).value = "PROJECT"
+            sheet.cell(2, item).value = "Conditioned area, first floor"
+            sheet.cell(3, item).value = "Open terrace"
+            wb.save(workspace)
+            wb.close()
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        card = page.locator('.spec-card.details[data-spec-name="PROJECT"]')
+                        expect(card).to_be_attached()
+                        box = card.locator(".spec-details-box")
+                        expect(box).to_be_visible()
+                        expect(card.locator(".spec-table")).to_have_count(0)   # figures, not a table
+                        expect(box.locator(".spec-detail")).to_have_count(2)
+                        name = box.locator(".spec-detail .detail-name").first
+                        expect(name).to_have_value("Conditioned area, first floor")
+
+                        # an edit in the box saves like any spec cell
+                        name.fill("Heated area")
+                        name.blur()
+                        expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
+                        expect(name).to_have_value("Heated area")
+
+                        # and a figure still drags out of the box into a line-item group
+                        page.evaluate("""() => {
+                            const detail = document.querySelector('.spec-detail[data-row]');
+                            const target = document.querySelector('.spec-card:not(.details) tr[data-row]');
+                            const rect = target.getBoundingClientRect();
+                            const dt = new DataTransfer();
+                            detail.dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
+                            detail.dispatchEvent(new DragEvent("dragstart", {bubbles: true, dataTransfer: dt}));
+                            target.dispatchEvent(new DragEvent("dragover", {bubbles: true, dataTransfer: dt, clientY: rect.top + 2}));
+                            target.dispatchEvent(new DragEvent("drop", {bubbles: true, dataTransfer: dt, clientY: rect.top + 2}));
+                            target.dispatchEvent(new DragEvent("dragend", {bubbles: true, dataTransfer: dt}));
+                        }""")
+                        expect(page.locator("#toast")).to_have_text("Line item moved.", timeout=15000)
+                        expect(box.locator(".spec-detail")).to_have_count(1)
+
+                        output = app.BASE / "output"
+                        output.mkdir(exist_ok=True)
+                        page.screenshot(path=str(output / "spec-details-box.png"), full_page=True)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_a_column_switched_off_is_left_out_of_every_download(self):
         """Not every sheet is sent out for the same reason, so the Import & export dialog can
         switch any column off first. Nothing is hidden to begin with, the choice is this

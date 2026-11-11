@@ -125,6 +125,11 @@ SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
 # A printed heading shorter than its column name, for the one name long enough to need it:
 # 'Size / Configuration' at full length is wider than any portrait share can carry.
 SPEC_LABELS = {"Size / Configuration": "Size / Config"}
+# A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
+# not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
+# client band above it: labelled values on cream, each with the band's own gold underline.
+DETAILS_GROUP = "PROJECT"
+DETAIL_COLS = 4                     # band-style fields across, like the client band itself
 
 
 def spec_heading(column):
@@ -313,6 +318,28 @@ def spec_columns(hidden=()):
 def spec_value(row, column):
     """The text a spec-sheet column shows for a row; Qty / Unit joins the two fields it covers."""
     return qty_unit(row) if column == QTY_UNIT else clean(row.get(column))
+
+
+def is_details_group(name):
+    """The heading that marks a project's own figures rather than a set of line items."""
+    return clean(name).upper() == DETAILS_GROUP
+
+
+def detail_value(row, hidden):
+    """The words a details field carries: every spec column still shown except the item
+    name it is labelled with and the link, joined like a description."""
+    bits = []
+    for column, _, keys in SPEC_COLUMNS:
+        if column in ("Item", PRODUCT_LINK):
+            continue
+        keys = keys if isinstance(keys, tuple) else (keys,)
+        shown = [key for key in keys if key not in hidden]
+        if not shown:
+            continue
+        value = spec_value(row, column) if len(shown) == len(keys) else clean(row.get(shown[0]))
+        if value:
+            bits.append(value)
+    return " · ".join(bits)
 
 
 def spec_widths(columns, content_w):
@@ -830,10 +857,11 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     are black at the studio weights, because this sheet prints on white.
 
     The gaps are secondary structure and read that way: half the weight of a row rule, and
-    drawn only between the horizontal ones, from the heading rule down to the last row rule.
-    At a full 0.4pt from the top of the headings to the foot of the last row they were the
-    loudest thing on the page, and both ends stopped in mid-air - above the headings, where
-    no rule closes the table, and below the final row rule.
+    drawn only between the horizontal ones, from the heading rule down to the rule that
+    closes the last row. That closing rule repeats the heading's weight, so the table ends
+    the way it opened and nothing stops in mid-air; an open foot read as a row still
+    waiting for its line. There is still no rule above the headings - a section's own
+    heading rule, or the band above an unsectioned sheet, does that job.
     """
     data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
@@ -851,7 +879,37 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, SHEET["rule"]),
         ("LINEBELOW", (0, 1), (-1, -2), 0.4, SHEET["rule"]),
-        ("LINEAFTER", (0, 1), (-2, -2), 0.2, SHEET["rule"]),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, SHEET["rule"]),
+        ("LINEAFTER", (0, 1), (-2, -1), 0.2, SHEET["rule"]),
+    ]))
+
+
+def spec_details(items, width, hidden, landscape=True):
+    """A project's own figures print like the client band above them: labelled values on
+    cream, each field underlined like a band field - not a ruled table of line items.
+    Long names and values wrap inside their field, so nothing shrinks or clips."""
+    cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
+    cells = []
+    for row in items:
+        value = escape(detail_value(row, hidden))
+        url = product_link(row, hidden)
+        if url:
+            mark = (f'<link href="{escape(url, {chr(34): "&quot;"})}" '
+                    f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>')
+            value = f"{value} · {mark}" if value else mark
+        cells.append([Paragraph(escape(clean(row.get("Item")).upper()), SPEC_HEAD_STYLE),
+                      Paragraph(value or " ", SPEC_CELL_STYLE)])
+    cells += [" "] * (-len(cells) % cols)     # blank underlined fields, as an empty band field
+    data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
+    return Table(data, colWidths=[width / cols] * cols, style=TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), C["band"]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (0, -1), 10.8),          # the band's own inset
+        ("LEFTPADDING", (1, 0), (-1, -1), FIELD_GAP),    # the gap between two fields
+        ("RIGHTPADDING", (-1, 0), (-1, -1), 10.8),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),         # the underline needs air, as in the band
+        ("LINEBELOW", (0, 0), (-1, -1), 0.5, C["field_rule"]),
     ]))
 
 
@@ -866,9 +924,11 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        table = spec_table(items, columns, widths, hidden, page.pad_x)
-        story.append(section_block(section, table, page.content_w, page.body_top - BODY_BOTTOM,
-                                   rule=SHEET["rule"]) if section else table)
+        block = (spec_details(items, page.content_w, hidden, page.landscape)
+                 if is_details_group(section)
+                 else spec_table(items, columns, widths, hidden, page.pad_x))
+        story.append(section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
+                                   rule=SHEET["rule"]) if section else block)
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)

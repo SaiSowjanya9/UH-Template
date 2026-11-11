@@ -626,6 +626,38 @@ class AppTests(unittest.TestCase):
             self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&group={group}").status_code, 400)
             self.assertEqual(self.client.get(f"/api/selections/docx?project={pid}&group={group}").status_code, 400)
 
+    def test_the_project_group_prints_as_a_details_box_not_a_table(self):
+        """Rows under a heading called PROJECT are the home's own figures, not line items:
+        the spec sheet draws them like the client band above - labelled values on cream -
+        rather than as a ruled table of columns, in the PDF and the Word copy alike."""
+        from pypdf import PdfReader
+        pid = self.state()["projects"][0]["Project ID"]
+        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
+        wb, revision = self.store.snapshot()
+        sheet = common.Sheet(wb["Selections"])
+        for row, data in sheet.rows():
+            if common.clean(data.get("Project ID")) == pid:
+                sheet.set(row, "Room / Area", "PROJECT")
+        self.store.save(wb, revision)
+
+        pdf = self.client.get(f"/api/selections/pdf?project={pid}")
+        text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
+        spaced = lambda value: " ".join(" ".join(word) for word in value.upper().split())
+        self.assertIn(spaced("PROJECT"), text)              # the heading still prints
+        self.assertNotIn("MANUFACTURER", text)              # but no line-item table follows
+        for row in rows[:3]:
+            self.assertIn(row["Item"].upper(), text, row["Item"])
+        # a figure's other filled fields follow its value, like the band's own fields
+        sample = next((r["Size / Configuration"] for r in rows if r.get("Size / Configuration")), None)
+        if sample:
+            self.assertIn(sample, text)
+
+        word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())
+        self.assertIn("PROJECT", word)
+        self.assertNotIn("MANUFACTURER", word)
+        for row in rows[:3]:
+            self.assertIn(row["Item"].upper(), word, row["Item"])
+
     def test_spec_exports_keep_the_order_the_view_shows(self):
         """A download must read top to bottom like the screen, which is workspace order.
 
