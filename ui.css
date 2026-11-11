@@ -227,13 +227,15 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .spec-client-fields .field input { font-size:14px; font-weight:600; color:#3c3320; }
 @media(max-width:900px) { .spec-client-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:480px) { .spec-client-fields { grid-template-columns:1fr; } .spec-client-head { flex-direction:column; gap:2px; } }
-.spec-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+/* The toolbar pins to the top of the sheet while it scrolls, so the filters and Save stay
+   in reach. While the busy banner is up it yields a banner's height so the two never overlap. */
+.spec-toolbar { position:sticky; top:0; z-index:8; display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; padding:14px 0; background:var(--paper); box-shadow:0 1px 0 var(--line); }
+#busy-banner:not([hidden]) ~ #spec-view .spec-toolbar { top:64px; }
 .spec-toolbar .search-field { flex:1; min-width:220px; }
 .chip-group { display:inline-flex; background:var(--cream); border:1px solid var(--gold-line); border-radius:999px; padding:3px; }
 .chip { border:0; background:none; border-radius:999px; padding:7px 15px; font-size:11px; font-weight:600; color:var(--gold-ink); }
 .chip.active { background:var(--gold); color:#fff; }
 .spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
-#spec-view .spec-toolbar .heading-actions { gap:4px; }
 .spec-toolbar .toolbar-divider { width:1px; height:20px; background:var(--gold-line); margin:0 6px; flex:none; }
 /* The save pill floats at the top right like a notification: "Saving…" and the unsaved
    count hold while they are true, and "All changes saved" stays only long enough to be

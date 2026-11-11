@@ -1347,6 +1347,9 @@ function specSaveUI() {
   const was = saveMode;
   saveMode = mode;
   clearTimeout(saveFlashTimer);
+  // While a whole-workspace operation runs, the busy banner carries the message; the pill
+  // stays out of its way but still tracks the transition so "saved" flashes afterwards.
+  if (state.busy) { status.hidden = true; return; }
   // "saved" only announces itself after a save actually ran; landing on an already-quiet
   // sheet (load, a project switch, the poll) shows nothing.
   if (mode === "hidden" || (mode === "saved" && was !== "pending" && was !== "saving")) {
