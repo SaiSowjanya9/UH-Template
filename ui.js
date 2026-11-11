@@ -280,7 +280,7 @@ const SPEC_COLUMNS = [
   { field: "Model #", label: "MODEL", placeholder: "Model / SKU", width: 115 },
   { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish", width: 140 },
   // the product's dimensions or configuration, between the finish and its link as on the sheet
-  { field: "Size / Configuration", label: "SIZE / CONFIG", placeholder: "48 in, 6 burners", width: 130 },
+  { field: "Size / Configuration", label: "SIZE / CONFIG", placeholder: "Size / config", width: 130 },
   // the product URL is stored as it always was; this column is where it is pasted and read
   { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true, width: 120 },
   // the quantity and what it counts, in one box: 7571 means nothing until it says sq ft.
