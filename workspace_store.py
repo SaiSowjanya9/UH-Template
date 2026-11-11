@@ -21,7 +21,7 @@ from common import Sheet, clean
 
 PROJECT_FIELDS = ["Project ID", "Project Name", "Client Name", "Address", "Plan / Elevation", "Designer", "Presentation Date", "Cover Image"]
 SELECTION_FIELDS = ["Project ID", "Section", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color", "Qty", "Product URL", "Product Name", "Image URL", "Client Notes", "Include in Lookbook"]
-IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color"]
+IDENTITY_FIELDS = ["Item", "Product Name", "Manufacturer", "Model #", "Finish / Color", "Size / Configuration"]
 BACKUP_KEEP = 30
 # Columns the product-lookup feature owned. They are no longer read or written, and
 # drop_retired_columns removes them from any workspace written before the feature went.
@@ -33,10 +33,10 @@ BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: the one status a selection carries.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location", "Unit"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location", "Unit", "Size / Configuration"]
 # Where in the home a selection belongs - the schedule's grouping. Kept out of Section so
 # Section stays a pure trade category; the seeded list lives on Lists under "Locations".
-LOCATIONS = ["1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
+LOCATIONS = ["Entire Home", "1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
 LOCATIONS_HEADER = "Locations"
 MAX_LOCATIONS = 30          # the Location dropdown covers Lists!E2:E31
 # What a Qty counts: each, square feet, roofing squares, linear feet, gallons, a lot price.

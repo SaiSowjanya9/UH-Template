@@ -117,10 +117,19 @@ SPEC_TITLE = "Spec Sheet"
 # Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
 # in its cells as well. A heading that wraps reads as two columns - PRODUCT over LINK - and
 # portrait decides the numbers: three quarters of the landscape width, with tighter padding.
-SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
-                ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
-                (PRODUCT_LINK, 85, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
-                ("Unit Price", 65, "Unit Price"), ("Markup %", 64, "Markup %")]
+SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
+                ("Model #", 42, "Model #"), ("Finish / Color", 61.5, "Finish / Color"),
+                ("Size / Configuration", 56, "Size / Configuration"),
+                (PRODUCT_LINK, 63, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
+                ("Unit Price", 52, "Unit Price"), ("Markup %", 46, "Markup %")]
+# A printed heading shorter than its column name, for the one name long enough to need it:
+# 'Size / Configuration' at full length is wider than any portrait share can carry.
+SPEC_LABELS = {"Size / Configuration": "Size / Config"}
+
+
+def spec_heading(column):
+    """The label a spec column prints over itself, uppercased."""
+    return SPEC_LABELS.get(column, column).upper()
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
@@ -131,9 +140,10 @@ LAND_BODY_TOP = LAND_H - (PAGE_H - BODY_TOP)   # the same 96pt from the top edge
 # row, and column widths that are shares of whatever content width is left.
 SPEC_ORIENTATIONS = ("landscape", "portrait")
 # Portrait fits the same columns into three quarters of the width, so its cells are padded
-# tighter: at the full 6pt the narrow numeric columns have barely room for their own heading,
-# and a quantity of 1,250 comes down the Qty column a digit at a time.
-SPEC_PAD_X = {"landscape": PAD_X, "portrait": 4}
+# tighter: with nine columns to a narrower page, the narrow numeric ones have barely room
+# for their own heading even at 3pt, and a quantity of 1,250 comes down the Qty column a
+# digit at a time at the full 6.
+SPEC_PAD_X = {"landscape": PAD_X, "portrait": 3}
 SpecPage = namedtuple("SpecPage", "name landscape width height content_w body_top pad_x")
 
 
@@ -216,6 +226,9 @@ HIDEABLE_COLUMNS = [
     ("Product Name", "Product name", ("schedule",)),
     ("Model #", "Model number", ("schedule", "sheet")),
     ("Finish / Color", "Finish / color", ("schedule", "sheet")),
+    # the product's dimensions or configuration, shown as its own spec column and
+    # folded into the client schedule's description sentence
+    ("Size / Configuration", "Size / configuration", ("schedule", "sheet")),
     ("Qty", "Quantity", ("schedule", "sheet")),
     ("Client Notes", "Client notes", ("schedule", "sheet")),
     ("Product URL", "Product link", ("schedule", "sheet")),
@@ -346,7 +359,7 @@ def description(row, include_quantity=True, hidden=()):
     if model and product != model and model.lower() not in identity.lower():
         identity = f"{identity} (Model {model})".strip()
     quantity_segment = quantity(row) if include_quantity and "Qty" not in hidden else ""
-    segments = [identity, finish, quantity_segment, shown("Client Notes")]
+    segments = [identity, finish, shown("Size / Configuration"), quantity_segment, shown("Client Notes")]
     return " \u2013 ".join(segment for segment in segments if segment)
 
 
@@ -822,7 +835,7 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     loudest thing on the page, and both ends stopped in mid-air - above the headings, where
     no rule closes the table, and below the final row rule.
     """
-    data = [[Paragraph(escape(column.upper()), SPEC_HEAD_STYLE) for column, _ in columns]]
+    data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
         cells = [spec_cell(row, column, hidden) for column, _ in columns]
         if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":

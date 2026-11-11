@@ -21,11 +21,12 @@ from workspace_store import (CLIENT_STATUSES, SELECTION_FIELDS, WorkspaceStore,
 
 # Columns the user fills in by hand versus those the app maintains.
 ENTRY_COLUMNS = ["Project ID", "Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #",
-                 "Finish / Color", "Qty", "Unit Price", "Markup %", "Client Notes",
+                 "Finish / Color", "Size / Configuration", "Qty", "Unit Price", "Markup %", "Client Notes",
                  "Include in Lookbook", "Client Status"]
 WIDTHS = {"Selections": {"Image URL": 32, "Product Name": 30, "Client Notes": 28,
                          "Include in Lookbook": 17, "Client Status": 15, "Unit Price": 12,
-                         "Markup %": 11, "Description Override": 40, "Location": 14},
+                         "Markup %": 11, "Description Override": 40, "Location": 14,
+                         "Size / Configuration": 20},
           "Projects": {"Cover Image": 30, "Presentation Date": 18}}
 
 INSTRUCTIONS = [
@@ -52,6 +53,8 @@ INSTRUCTIONS = [
     ("Manufacturer     Brand name. Add its official domain on the Manufacturers sheet.", ""),
     ("Model #          Manufacturer model or SKU. Needed for automatic product lookup.", ""),
     ("Finish / Color   For example Matte Black or SW 7010.", ""),
+    ("Size / Configuration   The product's dimensions or configuration, for example "
+     "48 in, 6 sealed burners + griddle.", ""),
     ("Qty              Leave blank or 1 to hide the quantity from the client schedule.", ""),
     ("Unit Price       Cost per unit. The Price Schedule multiplies it by Qty and adds the markup.", ""),
     ("Markup %         Percentage added to the line, for example 15. Leave blank for none.", ""),
@@ -74,7 +77,7 @@ INSTRUCTIONS = [
     ("On the Projects sheet, Total Items is a formula.", ""),
     ("", ""),
     ("Rules worth knowing", "heading"),
-    ("- Changing Item, Product Name, Manufacturer, Model # or Finish clears the old link and "
+    ("- Changing Item, Product Name, Manufacturer, Model #, Finish or Size clears the old link and "
      "image, because they no longer describe the same product.", ""),
     ("- Close this workspace in Excel before saving from the web app; the app will not write "
      "to a file Excel has open.", ""),

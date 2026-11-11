@@ -513,8 +513,8 @@ PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 SPEC_CSV_FIELDS = ["Section", "Location", "Room / Area", "Item", "Manufacturer", "Model #", "Finish / Color",
-                   common.QTY_UNIT, "Unit Price", "Markup %", PRODUCT_LINK, "Client Notes", "Client Status",
-                   "Include in Lookbook"]
+                   "Size / Configuration", common.QTY_UNIT, "Unit Price", "Markup %", PRODUCT_LINK,
+                   "Client Notes", "Client Status", "Include in Lookbook"]
 CSV_ROW_LIMIT = 5000
 # Columns the sheet shows under a name of their own: the product URL as Product Link, and the
 # quantity with what it counts as one Qty / Unit column, which is what each is hidden by.

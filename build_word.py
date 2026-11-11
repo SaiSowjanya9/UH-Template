@@ -55,7 +55,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_S
                             hidden_columns, load_data, mark_bottom, numbered, presentation_details,
                             product_link, row_widths, schedule_title, spaced_caps, spec_columns,
                             spec_widths,
-                            spec_groups, spec_page, spec_value)
+                            spec_groups, spec_heading, spec_page, spec_value)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -587,7 +587,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[0], header=True)
         for cell, (column, _) in zip(titles, columns):
-            write(cell.paragraphs[0], column.upper(), SPEC_HEAD[0], COLORS["muted"], bold=True,
+            write(cell.paragraphs[0], spec_heading(column), SPEC_HEAD[0], COLORS["muted"], bold=True,
                   leading=SPEC_HEAD[1])
             cell_rule(cell, "bottom", 0.5, SHEET["rule"])
         for position, row in enumerate(items):

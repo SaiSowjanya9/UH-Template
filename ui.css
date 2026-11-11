@@ -309,6 +309,15 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .spec-line-total { font-size:13px; font-weight:600; color:#43381f; padding-right:9px; white-space:nowrap; }
 .spec-actions { display:flex; gap:2px; justify-content:flex-end; white-space:nowrap; }
 .spec-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 15px; background:#fdfbf6; border-top:1px solid #f0e9da; }
+/* A room added from the toolbar has no line items yet, so its card is held in this browser:
+   dashed while it is empty, with a note where the table will be. */
+.spec-card.held { border-style:dashed; }
+.spec-card.held .spec-card-head { background:#fdfbf6; }
+.spec-card.naming .spec-card-head { padding:11px 19px; }
+.spec-card-note { margin:0; padding:15px 19px; font-size:13px; line-height:1.55; color:var(--muted); }
+.spec-discard { flex:none; font-size:15px; line-height:1; padding:3px 7px; color:#b7a87f; }
+.spec-card-head:hover .spec-discard,.spec-discard:focus-visible { color:var(--gold-ink); }
+.spec-discard:hover { background:#f0ead8; color:var(--gold-ink); }
 .spec-total { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:18px 0 30px; padding:18px 22px; background:linear-gradient(90deg,var(--cream-deep),var(--cream)); border:1px solid var(--gold-line); border-radius:9px; }
 .spec-total span { font-size:11px; letter-spacing:1.4px; font-weight:600; color:var(--gold-ink); text-transform:uppercase; }
 .spec-total small { display:block; font-size:11px; letter-spacing:.6px; color:var(--muted); text-transform:none; font-weight:400; margin-top:3px; }

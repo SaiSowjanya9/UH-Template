@@ -14,7 +14,7 @@ BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 SECTIONS = ["Exterior", "Roofing", "Windows & Doors", "Kitchen", "Appliances",
             "Bathrooms", "Flooring", "Lighting", "Paint", "Interior Doors & Trim",
             "Hardware", "Other"]
-LOCATIONS = ["1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
+LOCATIONS = ["Entire Home", "1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
 
 wb = Workbook()
 

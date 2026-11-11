@@ -6,11 +6,17 @@ const state = { data: null, project: "", view: "selections", page: 0, busy: fals
                 specGroup: "Room / Area", specCollapsed: new Set(), focusSelector: null,
                 specPending: new Map(),
                 specRename: null,
+                specHeld: [], specNaming: false,
                 specLinkEdit: new Set() };
 // The spec sheet's group-by chips: by room, as it opens, or by category. A line item with nothing
 // in that column sits under a placeholder heading, which is a label rather than a stored value.
 const specPlaceholder = () => (state.specGroup === "Section" ? "Other" : "Unassigned");
 const groupLabel = () => (state.specGroup === "Section" ? "category" : "room");
+// A room is not a record of its own: it is on the sheet because line items name it. So a room
+// added from the toolbar is held here - the project and field it belongs to, with the heading
+// itself - and drawn as an empty card until its first line item puts it in the workspace.
+// state.specNaming is the one card whose heading is still being typed.
+const heldGroups = () => state.specHeld.filter((g) => g.field === state.specGroup && g.project === state.project);
 const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
@@ -269,6 +275,8 @@ const SPEC_COLUMNS = [
   { field: "Manufacturer", label: "BRAND", placeholder: "Brand", width: 125 },
   { field: "Model #", label: "MODEL", placeholder: "Model / SKU", width: 115 },
   { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish", width: 140 },
+  // the product's dimensions or configuration, between the finish and its link as on the sheet
+  { field: "Size / Configuration", label: "SIZE / CONFIG", placeholder: "48 in, 6 burners", width: 130 },
   // the product URL is stored as it always was; this column is where it is pasted and read
   { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true, width: 120 },
   // the quantity and what it counts, in one box: 7571 means nothing until it says sq ft.
@@ -327,10 +335,46 @@ function specGroups(rows) {
   const groups = new Map();
   for (const row of rows) groups.set(row[key] || placeholder, []);
   for (const row of rows) groups.get(row[key] || placeholder).push(row);
+  // A heading held in the browser has no line items yet, so it joins the sheet as an empty group;
+  // once a line item names it, the workspace is what puts it on screen.
+  for (const held of heldGroups()) if (!groups.has(held.name)) groups.set(held.name, []);
   // Categories print in the order the Lists sheet names them; rooms keep the order of the line items.
   if (key !== "Section") return [...groups];
   const order = state.data.sections || [];
   return [...groups].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+}
+
+// A room being named: the card is already on the sheet, with a box where its heading will be, so
+// naming one reads exactly like renaming one. The box keeps the `cell` class, which is what holds
+// the 2.5s poll off an input that has focus.
+const namingCard = () => `<article class="spec-card held naming">
+  <div class="spec-card-head"><input class="cell group-rename group-new" data-group-new="" value="" maxlength="200" autocomplete="off" placeholder="Name this ${groupLabel()}" aria-label="Name the new ${groupLabel()}"><span class="count">New</span></div>
+  <div class="spec-body"><p class="spec-card-note">Type a name and press Enter. Escape leaves it out.</p></div>
+</article>`;
+
+// A heading has to work as the field's own value, so three names are refused rather than added:
+// a blank one, the placeholder heading (a label for line items with nothing in that column) and
+// a heading already on this sheet - nothing would be added in any of those cases.
+function groupName(name, except) {
+  const label = groupLabel();
+  if (!name) return "";
+  if (name === specPlaceholder()) {
+    toast(`“${name}” is where line items with no ${label} sit, so it cannot name one.`, true);
+    return "";
+  }
+  if (specGroups(projectRows()).some(([heading]) => heading === name && heading !== except)) {
+    toast(`“${name}” is already on this sheet.`, true);
+    return "";
+  }
+  return name;
+}
+
+function addSpecGroup(name) {
+  state.specNaming = false;   // closed before anything re-renders, so a blur cannot reopen it
+  const accepted = groupName(name);
+  if (accepted) state.specHeld.push({ field: state.specGroup, project: state.project, name: accepted });
+  renderSpec();
+  if (accepted) toast(`“${accepted}” added. Add a line item to keep this ${groupLabel()}.`);
 }
 
 function renderSpec() {
@@ -338,7 +382,11 @@ function renderSpec() {
   document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
-  const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Room / Area"], r.Section, r.Location, r["Client Notes"]].join(" ").toLowerCase().includes(query));
+  // A held heading that line items now name belongs to the workspace, so stop holding it.
+  const named = new Set(all.map((r) => r[state.specGroup] || specPlaceholder()));
+  state.specHeld = state.specHeld.filter((held) =>
+    !(held.field === state.specGroup && held.project === state.project && named.has(held.name)));
+  const rows = all.filter((r) => !query || [r.Item, r.Manufacturer, r["Model #"], r["Finish / Color"], r["Size / Configuration"], r["Room / Area"], r.Section, r.Location, r["Client Notes"]].join(" ").toLowerCase().includes(query));
   const groups = specGroups(rows);
   const heading = state.specGroup === "Section"
     ? (groups.length === 1 ? "category" : "categories")
@@ -348,7 +396,10 @@ function renderSpec() {
     : "";
   $("spec-summary").hidden = state.view !== "spec" || !all.length;
   $("spec-add").disabled = !selectedProject() || state.busy;
-  if (!all.length) {
+  // The same button adds a room or a category, whichever the sheet is grouped by.
+  $("spec-add-group").textContent = `+ Add ${groupLabel()}`;
+  $("spec-add-group").disabled = !selectedProject() || state.busy;
+  if (!all.length && !heldGroups().length && !state.specNaming) {
     $("spec-groups").innerHTML = '<div class="empty-state"><div class="empty-icon">▤</div><h3>Nothing specified yet</h3><p>Add your first line item to start building this home’s specification.</p></div>';
     $("spec-total").textContent = "—";
     specSaveUI();
@@ -375,12 +426,17 @@ function renderSpec() {
     const head = renaming
       ? `<input class="cell group-rename" data-group-rename="${esc(name)}" value="${esc(name)}" maxlength="200" aria-label="Rename the ${label} ${esc(name)}">`
       : `<button type="button" class="spec-card-toggle" data-spec-toggle="${esc(name)}" aria-expanded="${!collapsed}"><span class="twist" aria-hidden="true">▾</span><h3>${esc(name)}</h3></button>`;
-    return `<article class="spec-card${collapsed ? " collapsed" : ""}" data-spec-name="${esc(name)}">
-      <div class="spec-card-head">${head}<span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><button type="button" class="icon-button spec-rename" data-spec-rename="${esc(name)}" aria-label="Rename the ${label} ${esc(name)}" title="Rename this ${label}">✎</button><span class="group-total">${total ? money(total) : ""}</span></div>
-      <div class="spec-body"><table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>
+    // Only a heading added from the toolbar has no line items, so an empty card is one still
+    // held in this browser: it says so in place of the table, and its × stops holding it.
+    const held = !items.length;
+    return `<article class="spec-card${collapsed ? " collapsed" : ""}${held ? " held" : ""}" data-spec-name="${esc(name)}">
+      <div class="spec-card-head">${head}<span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span><button type="button" class="icon-button spec-rename" data-spec-rename="${esc(name)}" aria-label="Rename the ${label} ${esc(name)}" title="Rename this ${label}">✎</button>${held ? `<button type="button" class="icon-button spec-discard" data-spec-discard="${esc(name)}" aria-label="Remove the empty ${label} ${esc(name)}" title="Remove this empty ${label}">×</button>` : ""}<span class="group-total">${total ? money(total) : ""}</span></div>
+      <div class="spec-body">${held
+        ? `<p class="spec-card-note">Nothing in this ${label} yet, so it is only on this screen. Add a line item below — or drag one in from another card — and the workspace keeps it.</p>`
+        : `<table class="spec-table">${specColgroup()}<thead><tr><th class="drag-col"><span class="sr-only">Reorder</span></th>${SPEC_COLUMNS.map((c) => `<th${c.number ? ' class="num"' : ""}><span class="th-label" title="${esc(c.label)}">${c.label}</span><button type="button" class="col-grip" data-grip="${esc(c.field)}" title="Drag to set the width of this column, double-click to reset it" aria-label="Set the width of the ${esc(c.label)} column"></button></th>`).join("")}<th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table>`}</div>
       <div class="spec-foot"><button class="text-button" data-spec-add="${esc(name)}">+ Add to ${esc(name)}</button></div>
     </article>`;
-  }).join("");
+  }).join("") + (state.specNaming ? namingCard() : "");
   applySpecWidths();
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
@@ -554,6 +610,15 @@ async function renameSpecGroup(from, to) {
   const belongs = (row) => (row[field] || specPlaceholder()) === from;
   const rows = projectRows().filter(belongs);
   state.specRename = null;   // closed before anything awaits, so a blur cannot reopen it
+  // A card with no line items is still held in this browser, so its heading is renamed here
+  // instead of on rows there are none of.
+  const held = !rows.length && heldGroups().find((g) => g.name === from);
+  if (held) {
+    const accepted = to === from ? "" : groupName(to, from);
+    if (accepted) held.name = accepted;
+    renderSpec();
+    return;
+  }
   if (!to || to === from || !rows.length) { renderSpec(); return; }
   // Typing an existing heading moves these line items into that group, which is the same thing
   // dragging a row between cards does - but it is not obvious from a renamed heading, so ask.
@@ -739,7 +804,7 @@ function openEditor(kind, record, prefill = {}) {
     note = record ? "Changing the Project ID renumbers this project and moves its line items with it. Cover Image accepts an uploaded image, a public image URL, or a local file path, and shows beside this project."
       : `The next number in the sequence is filled in for you — change it if this home needs a different one. A new project starts with the standard room-by-room line items, ready for you to specify. Cover Image accepts an uploaded image, a public URL, or a local file path.`;
   } else if (kind === "selection") {
-    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field(QTY_UNIT, qtyUnit(r), { placeholder: "7571 sq ft", max: 60 }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
+    fields = field("Item", r.Item, { required: true }) + field("Section", r.Section || state.data.sections[0] || OTHER_CHOICE, { choices: state.data.sections, custom: true, placeholder: "Name the section" }) + field("Location", r.Location, { choices: ["", ...(state.data.locations || [])], custom: true, placeholder: "Name the location" }) + field("Room / Area", r["Room / Area"]) + field(QTY_UNIT, qtyUnit(r), { placeholder: "7571 sq ft", max: 60 }) + field("Unit Price", r["Unit Price"], { type: "number" }) + field("Markup %", r["Markup %"], { type: "number" }) + field("Manufacturer", r.Manufacturer) + field("Model #", r["Model #"]) + field("Finish / Color", r["Finish / Color"]) + field("Size / Configuration", r["Size / Configuration"]) + (state.view === "spec" ? "" : field("Include in Lookbook", r["Include in Lookbook"] || "Yes", { choices: ["Yes", "No"] })) + field("Client Status", r["Client Status"] || "Proposed", { choices: state.data.client_statuses || ["Proposed"] }) + field("Product URL", r["Product URL"], { wide: true, type: "url" }) + field("Product Name", r["Product Name"], { wide: true }) + field("Image URL", r["Image URL"], { wide: true }) + field("Client Notes", r["Client Notes"], { wide: true, textarea: true });
   } else {
     fields = field("Manufacturer", r.Manufacturer, { required: true, readonly: !!record }) + field("Official Domain", r["Official Domain"], { required: true }) + field("Notes", r.Notes, { wide: true, textarea: true });
     note = "Use the official domain only (for example, brand.com), not a retailer or search page.";
@@ -1060,6 +1125,15 @@ $("spec-import-file").addEventListener("change", (event) => {
   action(() => importSpecCsv(file));
 });
 $("spec-add").addEventListener("click", () => openEditor("selection"));
+// A room is added to the sheet before it is added to the workspace: the card appears at once with
+// its heading in a box, and the first line item named under it is what makes it real.
+$("spec-add-group").addEventListener("click", () => {
+  if (state.busy || !selectedProject()) return;
+  state.specNaming = true;
+  state.focusSelector = "#spec-groups .group-new";
+  renderSpec();
+  restoreFocus();
+});
 
 $("spec-expand").addEventListener("click", () => { state.specCollapsed.clear(); renderSpec(); });
 $("spec-collapse").addEventListener("click", () => {
@@ -1122,6 +1196,10 @@ function holdSpecEdit(input) {
 }
 
 $("spec-groups").addEventListener("change", (event) => {
+  if (event.target.dataset.groupNew !== undefined) {
+    addSpecGroup(event.target.value.trim());
+    return;
+  }
   if (event.target.dataset.groupRename !== undefined) {
     action(() => renameSpecGroup(event.target.dataset.groupRename, event.target.value.trim()));
     return;
@@ -1133,13 +1211,15 @@ $("spec-groups").addEventListener("change", (event) => {
   action(() => saveCell(event.target)).finally(() => { specSaving--; specSaveUI(); });
 });
 $("spec-groups").addEventListener("keydown", (event) => {
-  if (event.target.dataset.groupRename === undefined) return;
+  const naming = event.target.dataset.groupNew !== undefined;
+  if (!naming && event.target.dataset.groupRename === undefined) return;
   if (event.key === "Escape") {
     // Taking the box off the page blurs it, and a blurred input whose value has changed fires
     // change on the way out - which would save the very edit Escape is abandoning. Put the
-    // heading back first, so there is nothing left to commit.
-    event.target.value = event.target.dataset.groupRename;
-    state.specRename = null;
+    // heading back first - a card being named never had one - so there is nothing left to commit.
+    event.target.value = naming ? "" : event.target.dataset.groupRename;
+    if (naming) state.specNaming = false;
+    else state.specRename = null;
     renderSpec();
   }
   // Enter commits through change when the name differs, and otherwise just closes the box.
@@ -1147,6 +1227,11 @@ $("spec-groups").addEventListener("keydown", (event) => {
 });
 $("spec-groups").addEventListener("focusout", (event) => {
   const input = event.target;
+  if (input.dataset.groupNew !== undefined) {
+    // Still open means nothing was typed, so clicking away leaves the card out, as Escape does.
+    if (state.specNaming) { state.specNaming = false; renderSpec(); }
+    return;
+  }
   if (input.dataset.groupRename !== undefined) {
     // Still open means the name was left as it was: clicking away abandons it rather than saving.
     if (state.specRename !== null) { state.specRename = null; renderSpec(); }
@@ -1238,8 +1323,8 @@ document.addEventListener("click", (event) => {
   if (button.classList.contains("close-dialog")) { button.closest("dialog").close(); return; }
   if (state.busy || !state.data) return;
   if (button.dataset.view) { state.view = button.dataset.view; render(); }
-  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); $("search").value = ""; $("section-filter").value = ""; $("location-filter").value = ""; render(); }
-  if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); renderSpec(); }
+  if (button.dataset.project) { state.project = button.dataset.project; state.page = 0; state.specLinkEdit.clear(); state.specNaming = false; $("search").value = ""; $("section-filter").value = ""; $("location-filter").value = ""; render(); }
+  if (button.dataset.group) { state.specGroup = button.dataset.group; state.specCollapsed.clear(); state.specNaming = false; renderSpec(); }
   if (button.dataset.specToggle !== undefined) {
     const name = button.dataset.specToggle;
     state.specCollapsed.has(name) ? state.specCollapsed.delete(name) : state.specCollapsed.add(name);
@@ -1251,6 +1336,13 @@ document.addEventListener("click", (event) => {
     openEditor("selection", null, prefill);
   }
   if (button.dataset.specRemove) action(() => removeSpecRow(Number(button.dataset.specRemove)));
+  // An empty card was never in the workspace, so letting it go is a change of mind, not a delete.
+  if (button.dataset.specDiscard !== undefined) {
+    const name = button.dataset.specDiscard;
+    state.specHeld = state.specHeld.filter((held) =>
+      !(held.field === state.specGroup && held.project === state.project && held.name === name));
+    renderSpec();
+  }
   if (button.dataset.specRename !== undefined) {
     state.specRename = button.dataset.specRename;
     state.focusSelector = "#spec-groups .group-rename";

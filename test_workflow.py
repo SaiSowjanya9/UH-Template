@@ -1162,7 +1162,8 @@ class ScheduleTests(unittest.TestCase):
             page = build_lookbook.spec_page(name)
             for column, share in columns:
                 room = share / total * page.content_w - 2 * page.pad_x
-                printed = pdfmetrics.stringWidth(column.upper(), build_lookbook.FONT_BB, head.fontSize)
+                printed = pdfmetrics.stringWidth(build_lookbook.spec_heading(column),
+                                                 build_lookbook.FONT_BB, head.fontSize)
                 if column == build_lookbook.PRODUCT_LINK:
                     printed = max(printed, pdfmetrics.stringWidth(column, build_lookbook.FONT_B, cell.fontSize))
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")

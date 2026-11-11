@@ -887,6 +887,93 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_a_room_is_added_from_the_toolbar_and_kept_by_its_first_line_item(self):
+        """A room is on the sheet because line items name it, so a new one is held in this
+        browser as an empty card: its first line item is what puts it in the workspace. The
+        name has to be usable as the field's own value, and an empty card can be let go."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "rooms.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.on("dialog", lambda dialog: dialog.accept())
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator("#spec-view")).to_be_visible()
+
+                        # the button names whatever the sheet is grouped by
+                        add_group = page.locator("#spec-add-group")
+                        expect(add_group).to_have_text("+ Add room")
+                        rows = page.evaluate("() => projectRows().length")
+
+                        add_group.click()
+                        box = page.locator(".group-new")
+                        expect(box).to_be_focused()
+                        box.fill("Wine Cellar")
+                        page.keyboard.press("Enter")
+                        card = page.locator('.spec-card[data-spec-name="Wine Cellar"]')
+                        expect(card).to_have_count(1)
+                        expect(card.locator(".count")).to_have_text("0 items")
+                        # held in the browser only: nothing has been written yet
+                        self.assertEqual(page.evaluate(
+                            """() => projectRows().filter((r) => r["Room / Area"] === "Wine Cellar").length"""), 0)
+                        self.assertEqual(page.evaluate("() => projectRows().length"), rows)
+
+                        # a room already on the sheet adds nothing, because there is nothing to add
+                        cards = page.locator(".spec-card").count()
+                        add_group.click()
+                        page.locator(".group-new").fill("Powder Room")
+                        page.keyboard.press("Enter")
+                        expect(page.locator("#toast")).to_contain_text("already on this sheet")
+                        expect(page.locator('.spec-card[data-spec-name="Powder Room"]')).to_have_count(1)
+                        expect(page.locator(".spec-card")).to_have_count(cards)
+
+                        # an empty card can simply be let go again
+                        add_group.click()
+                        page.locator(".group-new").fill("Storage")
+                        page.keyboard.press("Enter")
+                        storage = page.locator('.spec-card[data-spec-name="Storage"]')
+                        expect(storage).to_have_count(1)
+                        storage.locator(".spec-discard").click()
+                        expect(storage).to_have_count(0)
+
+                        # the first line item under it is what makes the room real
+                        card.get_by_role("button", name="+ Add to Wine Cellar").click()
+                        editor = page.locator("#editor")
+                        expect(editor).to_be_visible()
+                        expect(editor.locator('input[name="Room / Area"]')).to_have_value("Wine Cellar")
+                        editor.locator('input[name="Item"]').fill("Cellar Door Hardware")
+                        editor.get_by_role("button", name="Save changes").click()
+                        expect(editor).not_to_be_visible()
+                        expect(card.locator(".count")).to_have_text("1 item")
+                        expect(card.locator(".spec-discard")).to_have_count(0)
+                        self.assertEqual(page.evaluate(
+                            """() => projectRows().filter((r) => r["Room / Area"] === "Wine Cellar").length"""), 1)
+
+                        # and the workspace is what puts it on screen from now on
+                        page.reload()
+                        page.locator('[data-view="spec"]').click()
+                        expect(page.locator('.spec-card[data-spec-name="Wine Cellar"]')).to_have_count(1)
+                        expect(page.locator('.spec-card[data-spec-name="Wine Cellar"] .cell[data-field="Item"]')
+                               ).to_have_value("Cellar Door Hardware")
+                        # a card that was only held does not come back
+                        expect(page.locator('.spec-card[data-spec-name="Storage"]')).to_have_count(0)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_a_project_is_renumbered_from_its_editor_and_the_next_one_follows(self):
         """Homes are numbered in one sequence: editing a Project ID renumbers the project and
         takes its line items with it, and adding a project opens on the next free number
