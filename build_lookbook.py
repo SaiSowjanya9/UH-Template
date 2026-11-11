@@ -99,9 +99,14 @@ ROOM_STYLE = style("room", 8, 10.5, C["muted"])
 DESC_STYLE = style("description", 10, 13, C["body"])
 GROUP_STYLE = style("group", 10, 13, C["dark"], font=FONT_BB, spaceBefore=8, spaceAfter=3, leftIndent=PAD_X)
 NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PAD_X)
-SPEC_HEAD_STYLE = style("spec_head", 6.5, 9, C["muted"], font=FONT_BB)
-SPEC_CELL_STYLE = style("spec_cell", 8, 10.5, C["body"])
-SPEC_NOTE_STYLE = style("spec_note", 6.5, 9, C["muted"])
+# The sheet is read and marked up, so its line items are set at the same 10/13 as the client
+# schedule's own description text rather than the 8/10.5 they were. The column labels stay
+# smaller than the data they head - 7pt against 10 - because the longest of them
+# (MANUFACTURER) is what sets a column's minimum width, and at 8pt it took the room an item
+# name needs. build_word reads all three off these styles, so one change moves both documents.
+SPEC_HEAD_STYLE = style("spec_head", 7, 9.5, C["muted"], font=FONT_BB)
+SPEC_CELL_STYLE = style("spec_cell", 10, 13, C["body"])
+SPEC_NOTE_STYLE = style("spec_note", 8, 10.5, C["muted"])
 
 SPEC_TITLE = "Spec Sheet"
 # The printed spec sheet mirrors the app's spec-sheet table, column for column, so the
@@ -114,8 +119,8 @@ SPEC_TITLE = "Spec Sheet"
 # portrait decides the numbers: three quarters of the landscape width, with tighter padding.
 SPEC_COLUMNS = [("Item", 120, "Item"), ("Manufacturer", 90, "Manufacturer"),
                 ("Model #", 84, "Model #"), ("Finish / Color", 92, "Finish / Color"),
-                (PRODUCT_LINK, 75, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
-                ("Unit Price", 60, "Unit Price"), ("Markup %", 60, "Markup %")]
+                (PRODUCT_LINK, 85, "Product URL"), (QTY_UNIT, 64, QTY_UNIT_KEYS),
+                ("Unit Price", 65, "Unit Price"), ("Markup %", 64, "Markup %")]
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4

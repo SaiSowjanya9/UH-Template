@@ -47,7 +47,8 @@ from build_form import HIDDEN_FIELD, REMOVE_W, form_band_values
 from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_STYLE, CODE_W,
                             CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE,
                             HEADING_OVERHANG, HIDEABLE, ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W,
-                            NOTE_STYLE, OUT, PAD_X, PAD_Y,
+                            NOTE_STYLE, OUT, PAD_X, PAD_Y, SPEC_CELL_STYLE, SPEC_HEAD_STYLE,
+                            SPEC_NOTE_STYLE,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
                             SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
                             band_values, clean, code_prefix, description, fit, group_sections,
@@ -63,9 +64,10 @@ SHEET = {key: value.lstrip("#").upper() for key, value in SHEET_COLORS.items()}
 FONTS = CFG.get("fonts", {})
 FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
 # (font size, leading) taken from the PDF's styles so one change moves both deliverables.
-CODE, ITEM, ROOM, DESC, NOTE = ((style.fontSize, style.leading) for style in
-                                (CODE_STYLE, ITEM_STYLE, ROOM_STYLE, DESC_STYLE,
-                                 NOTE_STYLE))
+CODE, ITEM, ROOM, DESC, NOTE, SPEC_HEAD, SPEC_CELL, SPEC_NOTE = (
+    (style.fontSize, style.leading) for style in
+    (CODE_STYLE, ITEM_STYLE, ROOM_STYLE, DESC_STYLE, NOTE_STYLE,
+     SPEC_HEAD_STYLE, SPEC_CELL_STYLE, SPEC_NOTE_STYLE))
 HEADER_TOP, FOOTER_BOTTOM = 32, 24   # header and footer insets from the page edges
 BAND_INSET = 10.8                    # left and right padding inside a band field
 
@@ -585,7 +587,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[0], header=True)
         for cell, (column, _) in zip(titles, columns):
-            write(cell.paragraphs[0], column.upper(), 6.5, COLORS["muted"], bold=True, leading=9)
+            write(cell.paragraphs[0], column.upper(), SPEC_HEAD[0], COLORS["muted"], bold=True,
+                  leading=SPEC_HEAD[1])
             cell_rule(cell, "bottom", 0.5, SHEET["rule"])
         for position, row in enumerate(items):
             cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
@@ -593,14 +596,16 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
             for cell, (column, _) in zip(cells, columns):
                 url = product_link(row, hidden) if column == PRODUCT_LINK else ""
                 if url:
-                    hyperlink(shape(cell.paragraphs[0], size=8, leading=10.5), url, PRODUCT_LINK,
-                              8, COLORS["accent"])
+                    hyperlink(shape(cell.paragraphs[0], size=SPEC_CELL[0], leading=SPEC_CELL[1]),
+                              url, PRODUCT_LINK, SPEC_CELL[0], COLORS["accent"])
                 elif column != PRODUCT_LINK:
-                    write(cell.paragraphs[0], spec_value(row, column), 8, COLORS["body"], leading=10.5)
+                    write(cell.paragraphs[0], spec_value(row, column), SPEC_CELL[0], COLORS["body"],
+                          leading=SPEC_CELL[1])
                 if position < len(items) - 1:
                     cell_rule(cell, "bottom", 0.4, SHEET["rule"])
             if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
-                write(cells[0].add_paragraph(), "Not in lookbook", 6.5, COLORS["muted"], leading=9)
+                write(cells[0].add_paragraph(), "Not in lookbook", SPEC_NOTE[0], COLORS["muted"],
+                      leading=SPEC_NOTE[1])
     destination = finish(document, pid, project, SPEC_TITLE, output_dir,
                          subject=f"Internal spec sheet for {pid}")
     out = destination / filename(pid, project, SPEC_TITLE, parts=(page.name.title(),))
