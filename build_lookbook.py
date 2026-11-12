@@ -38,8 +38,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, NextPageTemplate,
-                                PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
+from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, HRFlowable, KeepTogether,
+                                NextPageTemplate, PageBreak, PageTemplate, Paragraph, Spacer,
+                                Table, TableStyle)
 
 from branding import load_logo
 from common import (BASE_DIR, WORKSPACE, QTY_UNIT, QTY_UNIT_KEYS, Sheet, clean, open_workspace,
@@ -133,8 +134,8 @@ SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
 SPEC_LABELS = {"Size / Configuration": "Size / Config"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 # not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
-# client band above it: labelled values in a hairline-ruled grid, each with the band's own
-# gold underline.
+# client band above it: rows of labelled fields on open paper, each closing on the band's
+# own gold underline between the strip's two hairlines.
 DETAILS_GROUP = "PROJECT"
 DETAIL_COLS = 4                     # band-style fields across, like the client band itself
 # The spec sheet's section headings track their letters instead of spacing between them:
@@ -927,10 +928,15 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
 
 
 def spec_details(items, width, hidden, landscape=True):
-    """A project's own figures print like the client band above them: labelled values in a
-    hairline-ruled grid, each field underlined like a band field - not a ruled table of
-    line items. Long names and values wrap inside their field, so nothing shrinks or clips."""
+    """A project's own figures print like the client band above them, tiled: open rows of
+    labelled fields, each figure closing on its own gold underline between the strip's
+    two hairlines - never a filled or boxed grid. Names and values wrap inside their
+    field, and bottom alignment holds every underline on a common baseline even when a
+    label takes two lines."""
     cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
+    def underline():
+        return HRFlowable(width="100%", thickness=0.5, color=C["field_rule"],
+                          spaceBefore=5, spaceAfter=0)
     cells = []
     for row in items:
         value = escape(detail_value(row, hidden))
@@ -940,19 +946,18 @@ def spec_details(items, width, hidden, landscape=True):
                     f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>')
             value = f"{value} · {mark}" if value else mark
         cells.append([Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE),
-                      Paragraph(value or " ", SPEC_CELL_STYLE)])
-    cells += [" "] * (-len(cells) % cols)     # blank underlined fields, as an empty band field
+                      Paragraph(value or " ", SPEC_CELL_STYLE), underline()])
+    for _ in range(-len(cells) % cols):              # blank underlined fields, as an empty band field
+        cells.append([Paragraph(" ", SPEC_CELL_STYLE), underline()])
     data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
     return Table(data, colWidths=[width / cols] * cols, style=TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (0, -1), BAND_INSET),      # the band's own inset
-        ("LEFTPADDING", (1, 0), (-1, -1), FIELD_GAP),      # the gap between two fields
-        ("RIGHTPADDING", (-1, 0), (-1, -1), BAND_INSET),
-        ("TOPPADDING", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),           # the underline needs air, as in the band
-        ("BOX", (0, 0), (-1, -1), 0.5, C["hairline"]),
-        ("LINEBEFORE", (1, 0), (-1, -1), 0.5, C["hairline"]),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.5, C["field_rule"]),
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("LEFTPADDING", (0, 0), (-1, -1), BAND_INSET),
+        ("RIGHTPADDING", (0, 0), (-1, -1), BAND_INSET),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),         # the underline needs air, as in the band
+        ("LINEABOVE", (0, 0), (-1, 0), 0.5, C["hairline"]),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, C["hairline"]),
     ]))
 
 

@@ -629,8 +629,9 @@ class AppTests(unittest.TestCase):
 
     def test_the_project_group_prints_as_a_details_box_not_a_table(self):
         """Rows under a heading called PROJECT are the home's own figures, not line items:
-        the spec sheet draws them like the client band above - labelled values on cream -
-        rather than as a ruled table of columns, in the PDF and the Word copy alike."""
+        the spec sheet draws them like the client band above - labelled values, each on its
+        own underline - rather than as a ruled table of columns, in the PDF and the Word copy
+        alike."""
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
         rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]

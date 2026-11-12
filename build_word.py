@@ -586,23 +586,28 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
 
 
 def spec_details(document, items, content_w, hidden, landscape=True):
-    """A project's own figures print like the client band above them: labelled values in a
-    hairline-ruled grid, each field underlined like a band field - not a ruled table of
-    line items. Long names and values wrap inside their field, so nothing shrinks or clips."""
+    """A project's own figures print like the client band above them, tiled: open rows of
+    labelled fields, each figure closing on its own gold underline between the strip's
+    two hairlines - never a filled or boxed grid. Names and values wrap inside their
+    field, and bottom alignment holds every underline on a common baseline even when a
+    label takes two lines."""
     cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
     widths = [content_w / cols] * cols
     table = grid(document, widths, pad_x=BAND_INSET, pad_y=7)
+    last = -(-len(items) // cols) - 1                      # index of the final row of fields
     for start in range(0, len(items), cols):
-        cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
+        index = start // cols
+        cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
         keep_whole(table.rows[-1])
         for cell, row in zip(cells, items[start:start + cols] + [None] * cols):
-            cell_rule(cell, "top", 0.5, COLORS["hairline"])
-            cell_rule(cell, "left", 0.5, COLORS["hairline"])
-            cell_rule(cell, "right", 0.5, COLORS["hairline"])
-            cell_rule(cell, "bottom", 0.5, COLORS["field_rule"])
+            if index == 0:
+                cell_rule(cell, "top", 0.5, COLORS["hairline"])
+            if index == last:
+                cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
             write(cell.paragraphs[0], clean(row.get("Item")).upper() if row else "",
                   SPEC_HEAD[0], COLORS["muted"], bold=True, leading=SPEC_HEAD[1])
             line = shape(cell.add_paragraph(), size=SPEC_CELL[0], leading=SPEC_CELL[1], before=5)
+            rule(line, "bottom", 0.5, COLORS["field_rule"])
             if not row:
                 continue                    # a blank underlined field, as in the PDF twin
             run_text(line, detail_value(row, hidden), SPEC_CELL[0], COLORS["body"])
