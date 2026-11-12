@@ -846,20 +846,31 @@ def detail_flowables(project, rows, hidden=()):
     groups = [] if "details" in hidden else presentation_details(project, rows)
     if not groups:
         return []
-    story = [Spacer(0, SECTION_GAP), Heading("Additional details")]
-    for title, fields in groups:
-        story.append(Paragraph(escape(title), GROUP_STYLE))
-        story.append(Table([[Paragraph(escape(field["name"]), ITEM_STYLE),
-                             Paragraph(escape(field["value"] or "Not provided").replace("\n", "<br/>"), DESC_STYLE)]
-                            for field in fields],
-                           colWidths=[CODE_W + ITEM_W, CONTENT_W - CODE_W - ITEM_W], style=TableStyle([
-                               ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                               ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
-                               ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
-                               ("TOPPADDING", (0, 0), (-1, -1), PAD_Y),
-                               ("BOTTOMPADDING", (0, 0), (-1, -1), PAD_Y),
-                               ("LINEBELOW", (0, 0), (-1, -2), 0.4, C["hairline"]),
-                           ])))
+    frame_h = BODY_TOP - BODY_BOTTOM
+    story = [Spacer(0, SECTION_GAP)]
+    for index, (title, fields) in enumerate(groups):
+        title_p = Paragraph(escape(title), GROUP_STYLE)
+        table = Table([[Paragraph(escape(field["name"]), ITEM_STYLE),
+                        Paragraph(escape(field["value"] or "Not provided").replace("\n", "<br/>"), DESC_STYLE)]
+                       for field in fields],
+                      colWidths=[CODE_W + ITEM_W, CONTENT_W - CODE_W - ITEM_W], style=TableStyle([
+                          ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                          ("LEFTPADDING", (0, 0), (-1, -1), PAD_X),
+                          ("RIGHTPADDING", (0, 0), (-1, -1), PAD_X),
+                          ("TOPPADDING", (0, 0), (-1, -1), PAD_Y),
+                          ("BOTTOMPADDING", (0, 0), (-1, -1), PAD_Y),
+                          ("LINEBELOW", (0, 0), (-1, -2), 0.4, C["hairline"]),
+                      ]))
+        # the same rule section_block sets: a heading, or a group's own title, opens only
+        # where its first row fits beneath it - never alone at the foot of a page.
+        _, title_h = title_p.wrap(CONTENT_W, frame_h)
+        table.wrap(CONTENT_W, frame_h)
+        first = table._rowHeights[0] if table._rowHeights else 0
+        need = title_p.getSpaceBefore() + title_h + first + (HEADING_H if index == 0 else 0)
+        story.append(CondPageBreak(min(need, frame_h)))
+        if index == 0:
+            story.append(Heading("Additional details"))
+        story += [title_p, table]
     return story
 
 

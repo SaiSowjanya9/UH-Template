@@ -18,12 +18,12 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
 from xml.sax.saxutils import escape
 
 from build_lookbook import (BAND_FIELDS, BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP, C, CFG,
-                            CODE_STYLE, CONTENT_W, DESC_STYLE, FIELD_GAP, FONT_B, FONT_BB, Heading,
+                            CODE_STYLE, CONTENT_W, DESC_STYLE, FIELD_GAP, FONT_B, FONT_BB,
                             HIDEABLE, M, NOTE_STYLE, OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, SCHEDULE,
                             SECTION_GAP, SignOff, band_shares, band_values, clean, code_prefix,
                             description,
                             furniture, group_sections, item_cell, numbered, place, row_widths,
-                            schedule_title)
+                            schedule_title, section_block)
 
 REMOVE_W = 42           # the remove column only exists on the fillable copy
 FIELD_H = 15
@@ -161,9 +161,8 @@ def build(pid, project, rows, output_dir=None, title=None, prefix=None, hidden=(
     for index, (section, items) in enumerate(group_sections(rows, hidden).items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        if section:
-            story.append(Heading(section))
-        story.append(rows_table(items, hidden))
+        table = rows_table(items, hidden)
+        story += section_block(section, table) if section else [table]
     story.append(Spacer(0, SECTION_GAP))
     story.append(KeepTogether([Paragraph(escape(clean(SCHEDULE.get("note"))), NOTE_STYLE), Spacer(0, 16),
                                SignOff(SCHEDULE.get("signatures") or [])]))
