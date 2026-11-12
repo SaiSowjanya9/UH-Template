@@ -1226,9 +1226,10 @@ class ScheduleTests(unittest.TestCase):
 
     def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
         """The internal sheet is the one document on plain paper: a white page ruled in black
-        at the studio weights, with the client details box left exactly as it was - cream,
-        with its four gold field underlines. The client finish schedule keeps the cream sheet
-        and its gold rules, so the two are told apart at a glance.
+        at the studio weights, with the client details strip left as it was - four gold
+        field underlines between two hairlines, never a filled box. The client finish
+        schedule keeps the cream sheet and its gold rules, so the two are told apart at
+        a glance.
         """
         import build_lookbook
         import build_word
@@ -1242,20 +1243,23 @@ class ScheduleTests(unittest.TestCase):
             folder = Path(folder)
             fills, rules = pdf_ink(build_lookbook.build_spec("UH-1", project, rows, folder))
             self.assertIn(rgb("#FFFFFF"), fills)        # the page under everything
-            self.assertIn(band, fills)                  # the client details box, untouched
-            self.assertEqual(rules.get(gold), 4)        # and only its own four underlines
-            self.assertEqual(set(rules) - {gold}, {rgb("#000000")})
+            self.assertNotIn(band, fills)               # the client strip is ruled, not filled
+            self.assertEqual(rules.get(gold), 4)        # its own four field underlines
+            self.assertEqual(rules.get(cream), 2)       # between the strip's two hairlines
+            self.assertEqual(set(rules) - {gold, cream}, {rgb("#000000")})
 
             # the client schedule is left on cream paper with its gold and hairline rules
             fills, rules = pdf_ink(build_lookbook.build("UH-1", project, rows, False, folder))
             self.assertIn(rgb(colors["paper"]), fills)
             self.assertNotIn(rgb("#FFFFFF"), fills)
+            self.assertNotIn(band, fills)               # its band is a ruled strip too
             self.assertIn(cream, rules)
 
             # the Word copies of each say the same thing
             sheet = Document(str(build_word.build_spec("UH-1", project, rows, folder)))
             self.assertEqual(sheet.element.find(qn("w:background")).get(qn("w:color")), "FFFFFF")
-            self.assertEqual(cell_borders(sheet), {"000000"})
+            self.assertEqual(cell_borders(sheet),
+                             {"000000", colors["hairline"].lstrip("#").upper()})
             schedule = Document(str(build_word.build("UH-1", project, rows, False, folder)))
             self.assertEqual(schedule.element.find(qn("w:background")).get(qn("w:color")),
                              colors["paper"].lstrip("#").upper())

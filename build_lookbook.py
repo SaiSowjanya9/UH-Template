@@ -58,6 +58,7 @@ CONTACT_X = M + MARK_W + MARK_GAP    # where the contact line starts, clear of t
 CODE_W, ITEM_W = 50.4, 144
 PAD_X, PAD_Y = 6, 6.5            # table cell padding
 BAND_H, FIELD_W, FIELD_GAP = 56, 113.4, 14.4
+BAND_INSET = 10.8                    # left and right padding inside a band field
 BAND_GAP, SECTION_GAP = 14, 10   # space below the band / above a section heading
 HEADING_H, HEADING_GAP = 15.84, 10   # heading block height, gap between its text and its rule
 HEADING_OVERHANG = 6                 # section-heading rules run past the right margin
@@ -74,8 +75,9 @@ CFG = json.loads((BASE_DIR / "lookbook_config.json").read_text(encoding="utf-8")
 C = {key: HexColor(value) for key, value in CFG["colors"].items()}
 # The spec sheet is the internal working copy, so by request it prints on plain white and is
 # ruled in black at the same weights, while the client finish schedule keeps the studio's
-# cream paper and gold rules. The client details band is deliberately left out of it: cream
-# fill and gold field underlines as before. No text, link or logo colour changes either.
+# cream paper and gold rules. The client details band is deliberately left out of it:
+# its own ruled strip and gold field underlines as before. No text, link or logo colour
+# changes either.
 SHEET_COLORS = {"paper": "#FFFFFF", "rule": "#000000", **CFG.get("sheet_colors", {})}
 SHEET = {key: HexColor(value) for key, value in SHEET_COLORS.items()}
 SCHEDULE = CFG.get("schedule", {})
@@ -131,7 +133,8 @@ SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
 SPEC_LABELS = {"Size / Configuration": "Size / Config"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 # not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
-# client band above it: labelled values on cream, each with the band's own gold underline.
+# client band above it: labelled values in a hairline-ruled grid, each with the band's own
+# gold underline.
 DETAILS_GROUP = "PROJECT"
 DETAIL_COLS = 4                     # band-style fields across, like the client band itself
 # The spec sheet's section headings track their letters instead of spacing between them:
@@ -497,6 +500,20 @@ def band_values(project):
                                   clean(project.get("Address")), fmt_date(project.get("Presentation Date"))]))
 
 
+def band_shares(values, font, size):
+    """Each band field's share of the row, proportional to the text it must hold.
+
+    Four equal fields left the longest value - always the address - shrunk to unreadable
+    beside a short client name. Measuring each field's need first gives the wide ones the
+    room they print in; fit() still guards a value longer than even that share.
+    """
+    needs = [max(pdfmetrics.stringWidth(label, FONT_BB, 6.5),
+                 pdfmetrics.stringWidth(value, font, size)) + 18
+             for label, value in values]
+    total = sum(needs) or 1
+    return [need / total for need in needs]
+
+
 def schedule_title(value):
     return clean(value) or clean(SCHEDULE.get("title")) or "Selections"
 
@@ -676,7 +693,9 @@ def cover_page(canvas, doc, image, project, title, draft):
 
 
 class Band(Flowable):
-    """Client / project / address / date fields under the header."""
+    """Client / project / address / date fields under the header, drawn as a ledger strip:
+    hairlines above and below rather than a filled box, each field's share measured from
+    what it prints, and the field's own gold underline doing the talking."""
 
     def __init__(self, values, width=CONTENT_W, value_size=9, value_font=FONT_B):
         super().__init__()
@@ -690,17 +709,21 @@ class Band(Flowable):
 
     def draw(self):
         canvas = self.canv
-        canvas.setFillColor(C["band"])
-        canvas.rect(0, 0, self.width, BAND_H, stroke=0, fill=1)
-        field_w = (self.width - 2 * 10.8 - (len(self.values) - 1) * FIELD_GAP) / len(self.values)
-        for index, (label, value) in enumerate(self.values):
-            x = 10.8 + index * (field_w + FIELD_GAP)
+        canvas.setStrokeColor(C["hairline"])
+        canvas.setLineWidth(0.5)
+        canvas.line(0, BAND_H, self.width, BAND_H)
+        canvas.line(0, 0, self.width, 0)
+        pool = self.width - 2 * BAND_INSET - (len(self.values) - 1) * FIELD_GAP
+        widths = [share * pool for share in band_shares(self.values, self.value_font, self.value_size)]
+        x = BAND_INSET
+        for (label, value), field_w in zip(self.values, widths):
             place(canvas, x, 33.5, label, FONT_BB, 6.5, C["muted"])
             size, shown = fit(value, self.value_font, self.value_size, field_w)
             place(canvas, x, 17, shown, self.value_font, size, C["text"])
             canvas.setStrokeColor(C["field_rule"])
             canvas.setLineWidth(0.5)
             canvas.line(x, 11, x + field_w, 11)
+            x += field_w + FIELD_GAP
 
 
 class Heading(Flowable):
@@ -904,9 +927,9 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
 
 
 def spec_details(items, width, hidden, landscape=True):
-    """A project's own figures print like the client band above them: labelled values on
-    cream, each field underlined like a band field - not a ruled table of line items.
-    Long names and values wrap inside their field, so nothing shrinks or clips."""
+    """A project's own figures print like the client band above them: labelled values in a
+    hairline-ruled grid, each field underlined like a band field - not a ruled table of
+    line items. Long names and values wrap inside their field, so nothing shrinks or clips."""
     cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
     cells = []
     for row in items:
@@ -921,13 +944,14 @@ def spec_details(items, width, hidden, landscape=True):
     cells += [" "] * (-len(cells) % cols)     # blank underlined fields, as an empty band field
     data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
     return Table(data, colWidths=[width / cols] * cols, style=TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), C["band"]),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (0, -1), 10.8),          # the band's own inset
-        ("LEFTPADDING", (1, 0), (-1, -1), FIELD_GAP),    # the gap between two fields
-        ("RIGHTPADDING", (-1, 0), (-1, -1), 10.8),
+        ("LEFTPADDING", (0, 0), (0, -1), BAND_INSET),      # the band's own inset
+        ("LEFTPADDING", (1, 0), (-1, -1), FIELD_GAP),      # the gap between two fields
+        ("RIGHTPADDING", (-1, 0), (-1, -1), BAND_INSET),
         ("TOPPADDING", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),         # the underline needs air, as in the band
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),           # the underline needs air, as in the band
+        ("BOX", (0, 0), (-1, -1), 0.5, C["hairline"]),
+        ("LINEBEFORE", (1, 0), (-1, -1), 0.5, C["hairline"]),
         ("LINEBELOW", (0, 0), (-1, -1), 0.5, C["field_rule"]),
     ]))
 

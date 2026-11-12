@@ -29,11 +29,11 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.utils import simpleSplit
 
 from branding import load_logo
-from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTACT_X, CONTENT_W,
-                            FIELD_GAP, FIELD_W, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE, HIDEABLE,
+from build_lookbook import (BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP, CFG, CODE_W, CONTACT_X,
+                            CONTENT_W, FIELD_GAP, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE, HIDEABLE,
                             HEADING_GAP, HEADING_H, HEADING_OVERHANG, ITEM_W, LOGO_H, M, MARK_W,
                             OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, PRODUCT_LINK, SCHEDULE, SECTION_GAP,
-                            SIGN_H, SIGN_W, SIGN_X, band_values, clean, code_prefix,
+                            SIGN_H, SIGN_W, SIGN_X, band_shares, band_values, clean, code_prefix,
                             description, fit, group_sections, hidden_columns, load_data, mark_bottom,
                             numbered, presentation_details, product_link, row_widths, schedule_title,
                             spaced_caps)
@@ -98,15 +98,6 @@ def rule(slide, x1, x2, y, color, width=0.5):
     line.line.color.rgb = RGBColor.from_string(color)
     line.line.width = emu(width)
     return line
-
-
-def block(slide, x, y, width, height, color):
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, emu(x), top(y), emu(width), emu(height))
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = RGBColor.from_string(color)
-    shape.line.fill.background()
-    shape.shadow.inherit = False
-    return shape
 
 
 def picture(slide, source, x, baseline, height=None, width=None):
@@ -201,12 +192,16 @@ class Deck:
     def band(self, values):
         slide = self.room(BAND_H)
         bottom = self.y - BAND_H
-        block(slide, M, self.y, CONTENT_W, BAND_H, COLORS["band"])
-        for index, (field, value) in enumerate(values):
-            x = M + 10.8 + index * (FIELD_W + FIELD_GAP)
-            label(slide, x, bottom + 33.5, FIELD_W, field, 6.5, COLORS["muted"], bold=True)
-            label(slide, x, bottom + 17, FIELD_W, value, 9, COLORS["text"])
-            rule(slide, x, x + FIELD_W, bottom + 11, COLORS["field_rule"])
+        rule(slide, M, M + CONTENT_W, self.y, COLORS["hairline"])
+        rule(slide, M, M + CONTENT_W, bottom, COLORS["hairline"])
+        pool = CONTENT_W - 2 * BAND_INSET - (len(values) - 1) * FIELD_GAP
+        widths = [share * pool for share in band_shares(values, FONT_B, 9)]
+        x = M + BAND_INSET
+        for (field, value), field_w in zip(values, widths):
+            label(slide, x, bottom + 33.5, field_w, field, 6.5, COLORS["muted"], bold=True)
+            label(slide, x, bottom + 17, field_w, value, 9, COLORS["text"])
+            rule(slide, x, x + field_w, bottom + 11, COLORS["field_rule"])
+            x += field_w + FIELD_GAP
         self.y = bottom - BAND_GAP
 
     def heading(self, text, first=False):

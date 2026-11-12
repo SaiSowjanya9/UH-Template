@@ -44,14 +44,15 @@ from docx.text.run import Run
 from reportlab.pdfbase import pdfmetrics
 
 from build_form import HIDDEN_FIELD, REMOVE_W, form_band_values
-from build_lookbook import (BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, CFG, CODE_STYLE, CODE_W,
+from build_lookbook import (BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP, CFG, CODE_STYLE, CODE_W,
                             CONTENT_W, DESC_STYLE, FONT_B, FONT_BB, FOOT_BASE, FOOT_SIZE,
                             HEADING_OVERHANG, HIDEABLE, ITEM_STYLE, ITEM_W, LOGO_H, M, MARK_W,
                             NOTE_STYLE, OUT, PAD_X, PAD_Y, SPEC_CELL_STYLE, SPEC_HEAD_STYLE,
                             SPEC_NOTE_STYLE,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
                             SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
-                            band_values, clean, code_prefix, description, detail_value, fit,
+                            band_shares, band_values, clean, code_prefix, description,
+                            detail_value, fit,
                             group_sections, hidden_columns, is_details_group, load_data,
                             mark_bottom, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps, spec_columns, spec_widths,
@@ -70,8 +71,6 @@ CODE, ITEM, ROOM, DESC, NOTE, SPEC_HEAD, SPEC_CELL, SPEC_NOTE = (
     (CODE_STYLE, ITEM_STYLE, ROOM_STYLE, DESC_STYLE, NOTE_STYLE,
      SPEC_HEAD_STYLE, SPEC_CELL_STYLE, SPEC_NOTE_STYLE))
 HEADER_TOP, FOOTER_BOTTOM = 32, 24   # header and footer insets from the page edges
-BAND_INSET = 10.8                    # left and right padding inside a band field
-
 # WordprocessingML fixes the order of these property children, so new ones are inserted in place.
 PPR_ORDER = ("w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr",
              "w:widowControl", "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs",
@@ -168,12 +167,6 @@ def rule(paragraph, edge, width, color):
 def cell_rule(cell, edge, width, color):
     property_element(cell._tc.get_or_add_tcPr(), "w:tcBorders", TCPR_ORDER).append(border(edge, width, color))
 
-
-def shade(cell, color):
-    node = property_element(cell._tc.get_or_add_tcPr(), "w:shd", TCPR_ORDER)
-    node.set(qn("w:val"), "clear")
-    node.set(qn("w:color"), "auto")
-    node.set(qn("w:fill"), color)
 
 
 def row_height(row, points, rule_="atLeast"):
@@ -425,19 +418,21 @@ def filename(pid, project, title, rev=None, parts=(), suffix=""):
 # --------------------------------------------------------------------------
 def band(document, values, content_w, controls=False, value_size=9, value_font=FONT_B,
          value_bold=False):
-    """Client / project / address / date fields under the header.
+    """Client / project / address / date fields under the header, drawn as a ledger strip:
+    hairlines above and below rather than a shaded box, and each field's cell proportional
+    to what it prints so the address is not starved by the short fields.
 
-    The spec sheet asks for its own type in the box - a bigger, bolder value - so the
+    The spec sheet asks for its own type in the strip - a bigger, bolder value - so the
     client details read as their own element rather than more line-item text.
     """
-    widths = [content_w / 4] * 4
+    widths = [content_w * share for share in band_shares(values, value_font, value_size)]
     table = grid(document, widths, pad_x=0, pad_y=0)
     cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
     row_height(table.rows[0], BAND_H)
     keep_whole(table.rows[0])
-    field_w = widths[0] - 2 * BAND_INSET
-    for cell, (field, value) in zip(cells, values):
-        shade(cell, COLORS["band"])
+    for cell, cell_w, (field, value) in zip(cells, widths, values):
+        cell_rule(cell, "top", 0.5, COLORS["hairline"])
+        cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
         margins(cell._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
                 top=17, left=BAND_INSET, bottom=0, right=BAND_INSET)
         write(cell.paragraphs[0], field, 6.5, COLORS["muted"], bold=True, leading=8)
@@ -448,8 +443,8 @@ def band(document, values, content_w, controls=False, value_size=9, value_font=F
         if controls and tag != "project_lot":
             control(line, tag, value, alias=field.title(), size=value_size, color=COLORS["text"])
         else:
-            run_text(line, fit(value, value_font, value_size, field_w)[1], value_size,
-                     COLORS["text"], bold=value_bold)
+            run_text(line, fit(value, value_font, value_size, cell_w - 2 * BAND_INSET)[1],
+                     value_size, COLORS["text"], bold=value_bold)
     return table
 
 
@@ -591,9 +586,9 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
 
 
 def spec_details(document, items, content_w, hidden, landscape=True):
-    """A project's own figures print like the client band above them: labelled values on
-    cream, each field underlined like a band field - not a ruled table of line items.
-    Long names and values wrap inside their field, so nothing shrinks or clips."""
+    """A project's own figures print like the client band above them: labelled values in a
+    hairline-ruled grid, each field underlined like a band field - not a ruled table of
+    line items. Long names and values wrap inside their field, so nothing shrinks or clips."""
     cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
     widths = [content_w / cols] * cols
     table = grid(document, widths, pad_x=BAND_INSET, pad_y=7)
@@ -601,11 +596,13 @@ def spec_details(document, items, content_w, hidden, landscape=True):
         cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
         keep_whole(table.rows[-1])
         for cell, row in zip(cells, items[start:start + cols] + [None] * cols):
-            shade(cell, COLORS["band"])
+            cell_rule(cell, "top", 0.5, COLORS["hairline"])
+            cell_rule(cell, "left", 0.5, COLORS["hairline"])
+            cell_rule(cell, "right", 0.5, COLORS["hairline"])
+            cell_rule(cell, "bottom", 0.5, COLORS["field_rule"])
             write(cell.paragraphs[0], clean(row.get("Item")).upper() if row else "",
                   SPEC_HEAD[0], COLORS["muted"], bold=True, leading=SPEC_HEAD[1])
             line = shape(cell.add_paragraph(), size=SPEC_CELL[0], leading=SPEC_CELL[1], before=5)
-            rule(line, "bottom", 0.5, COLORS["field_rule"])
             if not row:
                 continue                    # a blank underlined field, as in the PDF twin
             run_text(line, detail_value(row, hidden), SPEC_CELL[0], COLORS["body"])

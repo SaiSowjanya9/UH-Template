@@ -17,10 +17,11 @@ from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, 
                                 Paragraph, Spacer, Table, TableStyle)
 from xml.sax.saxutils import escape
 
-from build_lookbook import (BAND_FIELDS, BAND_GAP, BAND_H, BODY_BOTTOM, BODY_TOP, C, CFG, CODE_STYLE,
-                            CONTENT_W, DESC_STYLE, FIELD_GAP, FIELD_W, FONT_B, FONT_BB, Heading,
+from build_lookbook import (BAND_FIELDS, BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP, C, CFG,
+                            CODE_STYLE, CONTENT_W, DESC_STYLE, FIELD_GAP, FONT_B, FONT_BB, Heading,
                             HIDEABLE, M, NOTE_STYLE, OUT, PAD_X, PAD_Y, PAGE_H, PAGE_W, SCHEDULE,
-                            SECTION_GAP, SignOff, band_values, clean, code_prefix, description,
+                            SECTION_GAP, SignOff, band_shares, band_values, clean, code_prefix,
+                            description,
                             furniture, group_sections, item_cell, numbered, place, row_widths,
                             schedule_title)
 
@@ -98,18 +99,23 @@ class FormBand(Flowable):
             name=HIDDEN_FIELD, value=",".join(sorted(self.hidden)), x=0, y=0, width=1, height=1,
             fontName=FORM_FONT, fontSize=1, borderWidth=0, relative=True,
             annotationFlags="hidden noview", fieldFlags="readOnly doNotSpellCheck")
-        canvas.setFillColor(C["band"])
-        canvas.rect(0, 0, CONTENT_W, BAND_H, stroke=0, fill=1)
-        for index, (label, value) in enumerate(self.values):
-            x = 10.8 + index * (FIELD_W + FIELD_GAP)
+        canvas.setStrokeColor(C["hairline"])
+        canvas.setLineWidth(0.5)
+        canvas.line(0, BAND_H, CONTENT_W, BAND_H)
+        canvas.line(0, 0, CONTENT_W, 0)
+        pool = CONTENT_W - 2 * BAND_INSET - (len(self.values) - 1) * FIELD_GAP
+        widths = [share * pool for share in band_shares(self.values, FORM_FONT, 9)]
+        x = BAND_INSET
+        for index, ((label, value), field_w) in enumerate(zip(self.values, widths)):
             place(canvas, x, 33.5, label, FONT_BB, 6.5, C["muted"])
             name = BAND_FIELDS[index].lower().replace(" / ", "_").replace(" ", "_")
             # project_lot prints two columns at once, so it is shown but not editable
             flags = "doNotSpellCheck readOnly" if name == "project_lot" else "doNotSpellCheck"
             canvas.acroForm.textfield(
-                name=name, value=form_text(value), x=x, y=11, width=FIELD_W, height=FIELD_H,
+                name=name, value=form_text(value), x=x, y=11, width=field_w, height=FIELD_H,
                 fontName=FORM_FONT, fontSize=9, textColor=C["text"], fillColor=None,
                 borderColor=BORDER, borderWidth=0.5, forceBorder=True, relative=True, fieldFlags=flags)
+            x += field_w + FIELD_GAP
 
 
 def rows_table(rows, hidden=()):
