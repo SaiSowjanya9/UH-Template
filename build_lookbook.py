@@ -75,11 +75,11 @@ OUT = BASE_DIR / "output"
 CFG = json.loads((BASE_DIR / "lookbook_config.json").read_text(encoding="utf-8"))
 C = {key: HexColor(value) for key, value in CFG["colors"].items()}
 # The spec sheet is the internal working copy, so by request it prints on plain white and is
-# ruled in black at the same weights, while the client finish schedule keeps the studio's
+# ruled in a light grey at the same weights, while the client finish schedule keeps the studio's
 # cream paper and gold rules. The client details band is deliberately left out of it:
 # its own ruled strip and gold field underlines as before. No text, link or logo colour
 # changes either.
-SHEET_COLORS = {"paper": "#FFFFFF", "rule": "#000000", **CFG.get("sheet_colors", {})}
+SHEET_COLORS = {"paper": "#FFFFFF", "rule": "#BFBFBF", **CFG.get("sheet_colors", {})}
 SHEET = {key: HexColor(value) for key, value in SHEET_COLORS.items()}
 SCHEDULE = CFG.get("schedule", {})
 FONT_H, FONT_B, FONT_BB = "Helvetica", "Helvetica", "Helvetica-Bold"
@@ -594,7 +594,7 @@ def paper(canvas, page_w, page_h, color=None):
 def furniture(canvas, doc, title, draft, landscape=False, sheet=False):
     """Header and footer, repeated on every page. Positions hang off the page edges so the
     same furniture fits the landscape spec sheet, and `sheet` prints it on the spec sheet's
-    white page with black rules."""
+    white page with light grey rules."""
     page_w, page_h = (LAND_W, LAND_H) if landscape else (PAGE_W, PAGE_H)
     content_w = page_w - 2 * M
     canvas.saveState()
@@ -909,7 +909,7 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
 
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
     short values, many of them empty, read as one drifting line of text without them. They
-    are black at the studio weights, because this sheet prints on white.
+    are the sheet's light grey at the studio weights.
 
     The gaps are secondary structure and read that way: half the weight of a row rule, and
     drawn only between the horizontal ones, from the heading rule down to the rule that

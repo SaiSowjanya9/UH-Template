@@ -62,7 +62,7 @@ from build_lookbook import (BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP,
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
-# The spec sheet's own paper and rules: white and black, as in the PDF twin.
+# The spec sheet's own paper and rules: white and a light grey, as in the PDF twin.
 SHEET = {key: value.lstrip("#").upper() for key, value in SHEET_COLORS.items()}
 FONTS = CFG.get("fonts", {})
 FAMILY = FONTS.get("family") or Path(FONTS.get("body") or "Arial").stem.split("-")[0] or "Arial"
@@ -327,8 +327,8 @@ def plain(paragraph):
 
 
 def furniture(section, title, draft, content_w, sheet=False):
-    """Header and footer, which Word then repeats on every page; `sheet` rules them in black
-    for the spec sheet's white page."""
+    """Header and footer, which Word then repeats on every page; `sheet` rules them in the
+    sheet's light grey for the spec sheet's white page."""
     head = section.header
     head.is_linked_to_previous = False
     eyebrow = clean(CFG.get("tagline", "Finish Schedule")).upper()
@@ -457,16 +457,18 @@ def band(document, values, content_w, controls=False, value_size=9, value_font=F
     return table
 
 
-def heading(document, text, content_w, first=False, track=0):
+def heading(document, text, content_w, first=False, track=0, rule=None):
     """Letter-spaced section heading whose rule runs from the text past the right margin.
     `track` writes plain uppercase letters with expanded spacing instead - the tighter
-    spacing the spec sheet's own headings use."""
+    spacing the spec sheet's own headings use. `rule` colours the leader, which Word
+    draws in the run that carries the tab, so it is a run of its own."""
     paragraph = shape(document.add_paragraph(), size=ITEM[0], leading=ITEM[1],
                       before=0 if first else SECTION_GAP, indent=PAD_X, keep=True)
     paragraph.paragraph_format.tab_stops.add_tab_stop(
         Pt(content_w + HEADING_OVERHANG), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.LINES)
     spaced = clean(text).upper() if track else spaced_caps(text)
-    run_text(paragraph, f"{spaced} \t", ITEM[0], COLORS["dark"], bold=True, track=track)
+    run_text(paragraph, f"{spaced} ", ITEM[0], COLORS["dark"], bold=True, track=track)
+    run_text(paragraph, "\t", ITEM[0], rule or COLORS["dark"], bold=True)
     return paragraph
 
 
@@ -641,7 +643,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     widths = spec_widths(columns, width)
     for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
         if section:
-            heading(document, section, width, first=index == 0, track=SPEC_HEADING_TRACK)
+            heading(document, section, width, first=index == 0, track=SPEC_HEADING_TRACK,
+                    rule=SHEET["rule"])
         if is_details_group(section):
             spec_details(document, items, width, hidden, page.landscape)
             continue

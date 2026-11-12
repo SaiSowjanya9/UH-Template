@@ -1233,12 +1233,12 @@ class ScheduleTests(unittest.TestCase):
                 self.assertIn(foot, across, f"page {number}: a column gap stops in mid-air at its foot")
                 self.assertIn(head, across, f"page {number}: a column gap stops in mid-air at its head")
 
-    def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
-        """The internal sheet is the one document on plain paper: a white page ruled in black
-        at the studio weights, with the client details strip filled in the band's cream -
-        four gold field underlines between two hairlines across it. The client finish
-        schedule keeps the cream sheet and its gold rules, so the two are told apart at
-        a glance.
+    def test_the_spec_sheet_prints_on_white_and_is_ruled_in_light_grey(self):
+        """The internal sheet is the one document on plain paper: a white page ruled in the
+        sheet's own light grey at the studio weights, with the client details strip filled
+        in the band's cream - four gold field underlines between two hairlines across it.
+        The client finish schedule keeps the cream sheet and its gold rules, so the two
+        are told apart at a glance.
         """
         import build_lookbook
         import build_word
@@ -1246,6 +1246,8 @@ class ScheduleTests(unittest.TestCase):
         from docx.oxml.ns import qn
         colors = build_lookbook.CFG["colors"]
         band, gold, cream = (rgb(colors[key]) for key in ("band", "field_rule", "hairline"))
+        rule_grey = rgb(build_lookbook.SHEET_COLORS["rule"])
+        self.assertNotEqual(rule_grey, rgb("#000000"), "the sheet's rules are the light grey, not black")
         project = {"Project Name": "T", "Client Name": "C"}
         rows = self.rows(3, **{"Room / Area": "Whole House"})
         with tempfile.TemporaryDirectory() as folder:
@@ -1255,7 +1257,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertIn(band, fills)                  # the client strip keeps its cream band
             self.assertEqual(rules.get(gold), 4)        # its own four field underlines
             self.assertEqual(rules.get(cream), 2)       # between the strip's two hairlines
-            self.assertEqual(set(rules) - {gold, cream}, {rgb("#000000")})
+            self.assertEqual(set(rules) - {gold, cream}, {rule_grey})
 
             # the client schedule is left on cream paper with its gold and hairline rules
             fills, rules = pdf_ink(build_lookbook.build("UH-1", project, rows, False, folder))
@@ -1268,7 +1270,7 @@ class ScheduleTests(unittest.TestCase):
             sheet = Document(str(build_word.build_spec("UH-1", project, rows, folder)))
             self.assertEqual(sheet.element.find(qn("w:background")).get(qn("w:color")), "FFFFFF")
             self.assertEqual(cell_borders(sheet),
-                             {"000000", colors["hairline"].lstrip("#").upper()})
+                             {build_word.SHEET["rule"], colors["hairline"].lstrip("#").upper()})
             self.assertIn(colors["band"].lstrip("#").upper(), cell_shading(sheet))
             schedule = Document(str(build_word.build("UH-1", project, rows, False, folder)))
             self.assertEqual(schedule.element.find(qn("w:background")).get(qn("w:color")),
