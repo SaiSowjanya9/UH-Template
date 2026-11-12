@@ -38,9 +38,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, HRFlowable, KeepTogether,
-                                NextPageTemplate, PageBreak, PageTemplate, Paragraph, Spacer,
-                                Table, TableStyle)
+from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Flowable, Frame, HRFlowable,
+                                KeepTogether, NextPageTemplate, PageBreak, PageTemplate,
+                                Paragraph, Spacer, Table, TableStyle)
 
 from branding import load_logo
 from common import (BASE_DIR, WORKSPACE, QTY_UNIT, QTY_UNIT_KEYS, Sheet, clean, open_workspace,
@@ -773,11 +773,23 @@ def section_block(text, table, width=CONTENT_W, frame_h=BODY_TOP - BODY_BOTTOM, 
 
     reportlab's own keepWithNext pairs the heading with the *whole* table, so a section longer
     than a page moved itself - and left the page it was on empty below the client band. A
-    maxHeight of the frame tells KeepTogether to split the rows in place instead, and only
-    break the page when the heading itself no longer fits.
+    maxHeight of the frame tells KeepTogether to split the rows in place instead - but it
+    hands the frame the heading and the table separately, so when what is left of a page fits
+    the heading yet not the table's first row, the table still moves over whole and strands
+    the heading. A CondPageBreak therefore goes first, asking for the heading plus the least
+    the table can open with - its repeated header and a data row, one row for an unheaded
+    strip - so a section only ever starts where that much fits. The ask is capped at the
+    frame height: a first row taller than a page is left to fail the way it always has,
+    rather than break every page.
+
+    Returns a list, not one flowable - the break has to reach the frame ahead of the block,
+    so callers extend the story rather than append.
     """
-    return KeepTogether([Heading(text, width, keep=False, rule=rule, track=track), table],
-                        maxHeight=frame_h)
+    table.wrap(width, frame_h)                       # fixes the row heights the break asks for
+    first = sum(table._rowHeights[:table.repeatRows + 1]) if table._rowHeights else 0
+    return [CondPageBreak(min(HEADING_H + first, frame_h)),
+            KeepTogether([Heading(text, width, keep=False, rule=rule, track=track), table],
+                         maxHeight=frame_h)]
 
 
 class SignOff(Flowable):
@@ -860,7 +872,7 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
         if index:
             story.append(Spacer(0, SECTION_GAP))
         table = rows_table(items, draft, hidden)
-        story.append(section_block(section, table) if section else table)
+        story += section_block(section, table) if section else [table]
     story += detail_flowables(project, rows, hidden)
     story.append(Spacer(0, SECTION_GAP))
     story.append(KeepTogether([Paragraph(escape(clean(SCHEDULE.get("note"))), NOTE_STYLE), Spacer(0, 16),
@@ -988,9 +1000,9 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         block = (spec_details(items, page.content_w, hidden, page.landscape)
                  if is_details_group(section)
                  else spec_table(items, columns, widths, hidden, page.pad_x))
-        story.append(section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
-                                   rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
-                     if section else block)
+        story += (section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
+                                rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
+                  if section else [block])
 
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)

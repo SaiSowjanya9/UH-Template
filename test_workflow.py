@@ -1278,6 +1278,35 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(cell_borders(schedule), {colors["hairline"].lstrip("#").upper()})
             self.assertIn(colors["band"].lstrip("#").upper(), cell_shading(schedule))
 
+    def test_a_section_heading_never_prints_without_rows_after_it(self):
+        """A heading that lands at a page foot used to strand there alone: KeepTogether hands
+        the frame the heading and the table separately, and when what was left fit the heading
+        but not the table's header plus one row, the table moved over whole - the page ended
+        on the heading with empty space beneath. The section now asks for the room it needs
+        before it starts, so a heading always opens with rows under it.
+
+        Sizes bracket the spot where the second heading stranded; every one must come out
+        clean, not just the count that used to fail.
+        """
+        import build_lookbook
+        from pypdf import PdfReader
+        furniture = ("FINISH SCHEDULE", "Spec Sheet", "Page", "uhhomes", "sales@", "469-")
+        rooms = ("AAAAA", "BBBBB")
+        def rows(n, room):
+            return [{"Item": f"{room}-{i}", "Manufacturer": "Wolf", "Room / Area": room.title()}
+                    for i in range(n)]
+        for first in range(15, 35):
+            data = rows(first, "Aaaaa") + rows(6, "Bbbbb")
+            with tempfile.TemporaryDirectory() as folder:
+                pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, data,
+                                                Path(folder), orientation="portrait")
+                pages = [page.extract_text() for page in PdfReader(str(pdf)).pages]
+            for number, text in enumerate(pages, 1):
+                lines = [line.strip() for line in text.splitlines()
+                         if line.strip() and not any(f in line for f in furniture)]
+                self.assertNotIn(lines[-1], rooms,
+                                 f"{first} rows: a section heading ends page {number}")
+
     def test_descriptions_are_assembled_from_workspace_columns(self):
         from build_lookbook import description
         cases = [
