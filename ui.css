@@ -237,6 +237,8 @@ code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; o
 .chip.active { background:var(--gold); color:#fff; }
 .spec-summary { font-size:11px; color:var(--muted); white-space:nowrap; margin-right:6px; }
 .spec-toolbar .toolbar-divider { width:1px; height:20px; background:var(--gold-line); margin:0 6px; flex:none; }
+.spec-fold { font-size:18px; color:var(--gold-ink); padding:4px 7px; }
+.spec-fold:hover { color:var(--green); }
 /* The save pill floats at the top right like a notification: "Saving…" and the unsaved
    count hold while they are true, and "All changes saved" stays only long enough to be
    seen before fading away. */
