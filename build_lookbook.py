@@ -102,17 +102,17 @@ ROOM_STYLE = style("room", 8, 10.5, C["muted"])
 DESC_STYLE = style("description", 10, 13, C["body"])
 GROUP_STYLE = style("group", 10, 13, C["dark"], font=FONT_BB, spaceBefore=8, spaceAfter=3, leftIndent=PAD_X)
 NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PAD_X)
-# The sheet is read and marked up, so its line items are set at the same 10/13 as the client
-# schedule's own description text rather than the 8/10.5 they were. The column labels stay
-# smaller than the data they head - 7pt against 10 - because the longest of them
-# (MANUFACTURER) is what sets a column's minimum width, and at 8pt it took the room an item
-# name needs. build_word reads all three off these styles, so one change moves both documents.
-# Column heads go darker than the data they head: at the muted gold they read as just
-# another small value, and a header nobody can pick out is no header at all.
+# The sheet is read and marked up, so its line items are set at 9/13 - a point under the
+# client schedule's 10/13 descriptions, by request, so a dense sheet fits its page. The
+# column labels stay smaller than the data they head - 7pt against 9 - because the longest
+# of them (MANUFACTURER) is what sets a column's minimum width, and at 8pt it took the room
+# an item name needs. build_word reads all three off these styles, so one change moves both
+# documents. Column heads go darker than the data they head: at the muted gold they read as
+# just another small value, and a header nobody can pick out is no header at all.
 SPEC_HEAD_STYLE = style("spec_head", 7, 9.5, C["dark"], font=FONT_BB)
 # The details box's field labels keep the client band's own muted gold instead.
 DETAIL_HEAD_STYLE = style("detail_head", 7, 9.5, C["muted"], font=FONT_BB)
-SPEC_CELL_STYLE = style("spec_cell", 10, 13, C["body"])
+SPEC_CELL_STYLE = style("spec_cell", 9, 13, C["body"])
 SPEC_NOTE_STYLE = style("spec_note", 8, 10.5, C["muted"])
 
 SPEC_TITLE = "Spec Sheet"
