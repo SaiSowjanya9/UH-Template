@@ -229,7 +229,7 @@ function render() {
     ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
   $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
   // the spec sheet edits the same rows the exports print, so name the home it belongs to
-  if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]} — these line items are what the exports print.`;
+  if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]}`;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
   $("add-selection").disabled = !project || state.busy;
