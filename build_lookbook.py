@@ -720,6 +720,8 @@ class Band(Flowable):
 
     def draw(self):
         canvas = self.canv
+        canvas.setFillColor(C["band"])
+        canvas.rect(0, 0, self.width, BAND_H, stroke=0, fill=1)
         canvas.setStrokeColor(C["hairline"])
         canvas.setLineWidth(0.5)
         canvas.line(0, BAND_H, self.width, BAND_H)

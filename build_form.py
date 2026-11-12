@@ -99,6 +99,8 @@ class FormBand(Flowable):
             name=HIDDEN_FIELD, value=",".join(sorted(self.hidden)), x=0, y=0, width=1, height=1,
             fontName=FORM_FONT, fontSize=1, borderWidth=0, relative=True,
             annotationFlags="hidden noview", fieldFlags="readOnly doNotSpellCheck")
+        canvas.setFillColor(C["band"])
+        canvas.rect(0, 0, CONTENT_W, BAND_H, stroke=0, fill=1)
         canvas.setStrokeColor(C["hairline"])
         canvas.setLineWidth(0.5)
         canvas.line(0, BAND_H, CONTENT_W, BAND_H)

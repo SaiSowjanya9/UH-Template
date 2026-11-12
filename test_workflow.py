@@ -484,7 +484,7 @@ class AppTests(unittest.TestCase):
         _, lines = self.exported_spec_csv(project)
         target = next(index for index, line in enumerate(lines)
                       if (line["Location"], line["Room / Area"], line["Item"]) == (row["Location"], row["Room / Area"], row["Item"]))
-        self.assertEqual(lines[target]["Product Link"], '=HYPERLINK("https://example.com/p","Product Link")')
+        self.assertEqual(lines[target]["Product Link"], '=HYPERLINK("https://example.com/p","Link")')
         self.assertTrue(all(line["Product Link"] == "" for index, line in enumerate(lines) if index != target))
 
         def current():
@@ -1127,6 +1127,13 @@ def cell_borders(document):
             for cell in row.cells for borders in cell._tc.iter(qn("w:tcBorders")) for edge in borders}
 
 
+def cell_shading(document):
+    """Every fill colour the table cells in a Word document are shaded in."""
+    from docx.oxml.ns import qn
+    return {node.get(qn("w:fill")) for table in document.tables for row in table.rows
+            for cell in row.cells for node in cell._tc.iter(qn("w:shd"))}
+
+
 class ScheduleTests(unittest.TestCase):
     """The client deliverable follows the approved finish schedule template."""
 
@@ -1228,8 +1235,8 @@ class ScheduleTests(unittest.TestCase):
 
     def test_the_spec_sheet_prints_on_white_and_is_ruled_in_black(self):
         """The internal sheet is the one document on plain paper: a white page ruled in black
-        at the studio weights, with the client details strip left as it was - four gold
-        field underlines between two hairlines, never a filled box. The client finish
+        at the studio weights, with the client details strip filled in the band's cream -
+        four gold field underlines between two hairlines across it. The client finish
         schedule keeps the cream sheet and its gold rules, so the two are told apart at
         a glance.
         """
@@ -1245,7 +1252,7 @@ class ScheduleTests(unittest.TestCase):
             folder = Path(folder)
             fills, rules = pdf_ink(build_lookbook.build_spec("UH-1", project, rows, folder))
             self.assertIn(rgb("#FFFFFF"), fills)        # the page under everything
-            self.assertNotIn(band, fills)               # the client strip is ruled, not filled
+            self.assertIn(band, fills)                  # the client strip keeps its cream band
             self.assertEqual(rules.get(gold), 4)        # its own four field underlines
             self.assertEqual(rules.get(cream), 2)       # between the strip's two hairlines
             self.assertEqual(set(rules) - {gold, cream}, {rgb("#000000")})
@@ -1254,7 +1261,7 @@ class ScheduleTests(unittest.TestCase):
             fills, rules = pdf_ink(build_lookbook.build("UH-1", project, rows, False, folder))
             self.assertIn(rgb(colors["paper"]), fills)
             self.assertNotIn(rgb("#FFFFFF"), fills)
-            self.assertNotIn(band, fills)               # its band is a ruled strip too
+            self.assertIn(band, fills)                  # its band is filled too
             self.assertIn(cream, rules)
 
             # the Word copies of each say the same thing
@@ -1262,10 +1269,12 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(sheet.element.find(qn("w:background")).get(qn("w:color")), "FFFFFF")
             self.assertEqual(cell_borders(sheet),
                              {"000000", colors["hairline"].lstrip("#").upper()})
+            self.assertIn(colors["band"].lstrip("#").upper(), cell_shading(sheet))
             schedule = Document(str(build_word.build("UH-1", project, rows, False, folder)))
             self.assertEqual(schedule.element.find(qn("w:background")).get(qn("w:color")),
                              colors["paper"].lstrip("#").upper())
             self.assertEqual(cell_borders(schedule), {colors["hairline"].lstrip("#").upper()})
+            self.assertIn(colors["band"].lstrip("#").upper(), cell_shading(schedule))
 
     def test_descriptions_are_assembled_from_workspace_columns(self):
         from build_lookbook import description

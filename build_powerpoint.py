@@ -100,6 +100,15 @@ def rule(slide, x1, x2, y, color, width=0.5):
     return line
 
 
+def block(slide, x, y, width, height, color):
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, emu(x), top(y), emu(width), emu(height))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = RGBColor.from_string(color)
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    return shape
+
+
 def picture(slide, source, x, baseline, height=None, width=None):
     """Logo placed from its bottom edge at the supplied aspect ratio; returns its width, or 0."""
     image = load_logo(source)
@@ -192,6 +201,7 @@ class Deck:
     def band(self, values):
         slide = self.room(BAND_H)
         bottom = self.y - BAND_H
+        block(slide, M, self.y, CONTENT_W, BAND_H, COLORS["band"])
         rule(slide, M, M + CONTENT_W, self.y, COLORS["hairline"])
         rule(slide, M, M + CONTENT_W, bottom, COLORS["hairline"])
         pool = CONTENT_W - 2 * BAND_INSET - (len(values) - 1) * FIELD_GAP

@@ -169,6 +169,13 @@ def cell_rule(cell, edge, width, color):
     property_element(cell._tc.get_or_add_tcPr(), "w:tcBorders", TCPR_ORDER).append(border(edge, width, color))
 
 
+def shade(cell, color):
+    node = property_element(cell._tc.get_or_add_tcPr(), "w:shd", TCPR_ORDER)
+    node.set(qn("w:val"), "clear")
+    node.set(qn("w:color"), "auto")
+    node.set(qn("w:fill"), color)
+
+
 
 def row_height(row, points, rule_="atLeast"):
     node = property_element(row._tr.get_or_add_trPr(), "w:trHeight", TRPR_ORDER)
@@ -419,9 +426,9 @@ def filename(pid, project, title, rev=None, parts=(), suffix=""):
 # --------------------------------------------------------------------------
 def band(document, values, content_w, controls=False, value_size=9, value_font=FONT_B,
          value_bold=False):
-    """Client / project / address / date fields under the header, drawn as a ledger strip:
-    hairlines above and below rather than a shaded box, and each field's cell proportional
-    to what it prints so the address is not starved by the short fields.
+    """Client / project / address / date fields under the header: a cream strip ruled with
+    hairlines above and below, and each field's cell proportional to what it prints so the
+    address is not starved by the short fields.
 
     The spec sheet asks for its own type in the strip - a bigger, bolder value - so the
     client details read as their own element rather than more line-item text.
@@ -432,6 +439,7 @@ def band(document, values, content_w, controls=False, value_size=9, value_font=F
     row_height(table.rows[0], BAND_H)
     keep_whole(table.rows[0])
     for cell, cell_w, (field, value) in zip(cells, widths, values):
+        shade(cell, COLORS["band"])
         cell_rule(cell, "top", 0.5, COLORS["hairline"])
         cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
         margins(cell._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
