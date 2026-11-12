@@ -124,14 +124,16 @@ SPEC_TITLE = "Spec Sheet"
 # Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
 # in its cells as well. A heading that wraps reads as two columns - PRODUCT over LINK - and
 # portrait decides the numbers: three quarters of the landscape width, with tighter padding.
-SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
-                ("Model #", 42, "Model #"), ("Finish / Color", 61.5, "Finish / Color"),
-                ("Size / Configuration", 56, "Size / Configuration"),
-                (PRODUCT_LINK, 63, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
+SPEC_COLUMNS = [("Item", 100, "Item"), ("Manufacturer", 67, "Manufacturer"),
+                ("Model #", 48, "Model #"), ("Finish / Color", 70, "Finish / Color"),
+                ("Size / Configuration", 62.5, "Size / Configuration"),
+                (PRODUCT_LINK, 30, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
                 ("Unit Price", 52, "Unit Price"), ("Markup %", 46, "Markup %")]
-# A printed heading shorter than its column name, for the one name long enough to need it:
-# 'Size / Configuration' at full length is wider than any portrait share can carry.
-SPEC_LABELS = {"Size / Configuration": "Size / Config"}
+# Printed headings shorter than their column names, where a column earns it: the long
+# 'Size / Configuration' needs 'SIZE / CONFIG' to fit at all, and the link column prints
+# 'LINK' over a one-word 'Link' anchor so it stays only as wide as what it carries -
+# the freed share goes to the columns whose text actually wraps.
+SPEC_LABELS = {"Size / Configuration": "Size / Config", PRODUCT_LINK: "Link"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 # not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
 # client band above it: rows of labelled fields on open paper, each closing on the band's
@@ -146,6 +148,14 @@ SPEC_HEADING_TRACK = 1.2
 def spec_heading(column):
     """The label a spec column prints over itself, uppercased."""
     return SPEC_LABELS.get(column, column).upper()
+
+
+def link_word():
+    """The word a spec-sheet link anchor prints - the column's own short label, so the
+    cell text and the heading it sits under can never drift apart."""
+    return SPEC_LABELS.get(PRODUCT_LINK, PRODUCT_LINK)
+
+
 # Landscape spec sheet: a letter page turned on its side, so the wide column set fits.
 LAND_W, LAND_H = PAGE_H, PAGE_W           # 792 x 612
 LAND_CONTENT_W = LAND_W - 2 * M           # 698.4
@@ -887,7 +897,7 @@ def spec_cell(row, column, hidden):
         if not url:
             return ""
         return Paragraph(f'<link href="{escape(url, {chr(34): "&quot;"})}" '
-                         f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>',
+                         f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>',
                          SPEC_CELL_STYLE)
     return Paragraph(escape(spec_value(row, column)), SPEC_CELL_STYLE)
 
@@ -943,7 +953,7 @@ def spec_details(items, width, hidden, landscape=True):
         url = product_link(row, hidden)
         if url:
             mark = (f'<link href="{escape(url, {chr(34): "&quot;"})}" '
-                    f'color="{CFG["colors"]["accent"]}"><u>{PRODUCT_LINK}</u></link>')
+                    f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>')
             value = f"{value} · {mark}" if value else mark
         cells.append([Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE),
                       Paragraph(value or " ", SPEC_CELL_STYLE), underline()])

@@ -581,7 +581,7 @@ class AppTests(unittest.TestCase):
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
         rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
-        shown = ["ITEM", "MANUFACTURER", "MODEL #", "FINISH / COLOR", "PRODUCT LINK",
+        shown = ["ITEM", "MANUFACTURER", "MODEL #", "FINISH / COLOR", "LINK",
                  "QTY / UNIT", "UNIT PRICE", "MARKUP %"]
         absent = ["CLIENT STATUS", "CLIENT NOTES", "INCLUDE IN LOOKBOOK", "PRODUCT NAME"]
 
@@ -1199,7 +1199,8 @@ class ScheduleTests(unittest.TestCase):
                 printed = pdfmetrics.stringWidth(build_lookbook.spec_heading(column),
                                                  build_lookbook.FONT_BB, head.fontSize)
                 if column == build_lookbook.PRODUCT_LINK:
-                    printed = max(printed, pdfmetrics.stringWidth(column, build_lookbook.FONT_B, cell.fontSize))
+                    printed = max(printed, pdfmetrics.stringWidth(build_lookbook.link_word(),
+                                                                build_lookbook.FONT_B, cell.fontSize))
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
 
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):

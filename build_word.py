@@ -53,7 +53,8 @@ from build_lookbook import (BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP,
                             SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
                             band_shares, band_values, clean, code_prefix, description,
                             detail_value, fit,
-                            group_sections, hidden_columns, is_details_group, load_data,
+                            group_sections, hidden_columns, is_details_group, link_word,
+                            load_data,
                             mark_bottom, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps, spec_columns, spec_widths,
                             spec_groups, spec_heading, spec_page, spec_value, DETAIL_COLS,
@@ -615,7 +616,7 @@ def spec_details(document, items, content_w, hidden, landscape=True):
             if url:
                 if detail_value(row, hidden):
                     run_text(line, "  ·  ", SPEC_CELL[0], COLORS["muted"])
-                hyperlink(line, url, PRODUCT_LINK, SPEC_CELL[0], COLORS["accent"])
+                hyperlink(line, url, link_word(), SPEC_CELL[0], COLORS["accent"])
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
@@ -650,7 +651,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                 url = product_link(row, hidden) if column == PRODUCT_LINK else ""
                 if url:
                     hyperlink(shape(cell.paragraphs[0], size=SPEC_CELL[0], leading=SPEC_CELL[1]),
-                              url, PRODUCT_LINK, SPEC_CELL[0], COLORS["accent"])
+                              url, link_word(), SPEC_CELL[0], COLORS["accent"])
                 elif column != PRODUCT_LINK:
                     write(cell.paragraphs[0], spec_value(row, column), SPEC_CELL[0], COLORS["body"],
                           leading=SPEC_CELL[1])
