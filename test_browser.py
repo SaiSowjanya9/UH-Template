@@ -632,7 +632,7 @@ class BrowserTests(unittest.TestCase):
                     server.server_close()
 
     def test_spec_product_link_shows_link_text(self):
-        """A pasted address renders as a "Product Link" anchor; the pencil button
+        """A pasted address renders as a "Link" anchor; the pencil button
         reopens the input so the stored URL can be viewed or changed."""
         with tempfile.TemporaryDirectory() as folder:
             workspace = Path(folder) / "link.xlsx"
@@ -660,7 +660,7 @@ class BrowserTests(unittest.TestCase):
                         cell.locator("input.cell").fill(url)
                         cell.locator("input.cell").blur()
                         link = page.locator(f'tr[data-row="{row}"] a.product-link')
-                        expect(link).to_have_text("Product Link ↗")
+                        expect(link).to_have_text("Link")
                         expect(link).to_have_attribute("href", url)
                         expect(link).to_have_attribute("title", url)
                         expect(cell.locator("input.cell")).to_have_count(0)
@@ -668,11 +668,11 @@ class BrowserTests(unittest.TestCase):
                         cell.locator(".link-edit").click()
                         expect(cell.locator("input.cell")).to_have_value(url)
                         cell.locator("input.cell").blur()
-                        expect(link).to_have_text("Product Link ↗")
+                        expect(link).to_have_text("Link")
 
                         page.reload()
                         page.locator('[data-view="spec"]').click()
-                        expect(link).to_have_text("Product Link ↗")
+                        expect(link).to_have_text("Link")
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
@@ -732,7 +732,7 @@ class BrowserTests(unittest.TestCase):
                         editor.get_by_label("Product URL", exact=True).fill("https://example.com/product")
                         editor.get_by_role("button", name="Save changes").click()
                         expect(editor).not_to_be_visible()
-                        expect(page.locator("#selection-rows")).to_contain_text("Product Link")
+                        expect(page.locator("#selection-rows")).to_contain_text("Link")
                         # the spec sheet is the deliverable now: chosen in the files dialog, sent by OK
                         page.locator("#files-button").click()
                         page.locator('#files-dialog [data-file="spec-pdf"]').click()

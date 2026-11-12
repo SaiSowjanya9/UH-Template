@@ -250,7 +250,7 @@ function renderTable() {
   const rows = projectRows().filter((r) => (!category || r.Section === category) && (!location || r.Location === location) && (!query || [r.Item, r.Manufacturer, r["Model #"], r["Room / Area"], r["Finish / Color"], r.Location, ...(r.custom_fields || []).flatMap((field) => [field.name, field.value])].join(" ").toLowerCase().includes(query)));
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
   const start = state.page * 50;
-  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${qtyUnit(r) ? `Qty: ${esc(qtyUnit(r))}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Product Link ↗</a>` : '<span class="muted">Not linked</span>'}</td><td>${r["Client Status"] ? `<span class="status">${esc(r["Client Status"])}</span>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
+  $("selection-rows").innerHTML = rows.slice(start, start + 50).map((r) => `<tr><td><div class="item-cell">${thumb(r)}<div><strong>${esc(r.Item || "Untitled selection")}</strong><small class="item-meta">${r.Location ? `<span class="meta-chip meta-location">${esc(r.Location)}</span>` : ""}${r.Section ? `<span class="meta-chip meta-section">${esc(r.Section)}</span>` : ""}${r["Room / Area"] ? `<span class="meta-room">${esc(r["Room / Area"])}</span>` : ""}${r["Include in Lookbook"].toLowerCase() === "no" ? '<span class="meta-room">· Hidden</span>' : ""}</small>${selectionDetails(r)}</div></div></td><td><strong>${esc(r.Manufacturer || "Manufacturer pending")}</strong><small>${esc(r["Model #"] || "Model pending")}</small></td><td><strong>${esc(r["Finish / Color"] || "—")}</strong><small>${qtyUnit(r) ? `Qty: ${esc(qtyUnit(r))}` : "Quantity not set"}</small></td><td>${isUrl(r["Product URL"]) ? `<a class="product-link" href="${esc(r["Product URL"])}" target="_blank" rel="noopener noreferrer" title="${esc(r["Product URL"])}">Link</a>` : '<span class="muted">Not linked</span>'}</td><td>${r["Client Status"] ? `<span class="status">${esc(r["Client Status"])}</span>` : ""}</td><td><button class="row-action" data-edit="${r._row}" aria-label="Edit ${esc(r.Item)}">Edit ↗</button></td></tr>`).join("");
   $("table-empty").hidden = rows.length > 0;
   $("table-summary").textContent = rows.length ? `Showing ${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length} selections` : "0 selections";
   $("previous-page").disabled = !state.page || state.busy;
@@ -281,8 +281,9 @@ const SPEC_COLUMNS = [
   { field: "Finish / Color", label: "FINISH / COLOR", placeholder: "Finish", width: 140 },
   // the product's dimensions or configuration, between the finish and its link as on the sheet
   { field: "Size / Configuration", label: "SIZE / CONFIG", placeholder: "Size / config", width: 130 },
-  // the product URL is stored as it always was; this column is where it is pasted and read
-  { field: "Product URL", label: "PRODUCT LINK", placeholder: "Paste product URL", link: true, width: 120 },
+  // the product URL is stored as it always was; this column is where it is pasted and read,
+  // headed LINK over a one-word Link anchor just like the printed sheet
+  { field: "Product URL", label: "LINK", placeholder: "Paste product URL", link: true, width: 120 },
   // the quantity and what it counts, in one box: 7571 means nothing until it says sq ft.
   // They stay two workspace columns, so the cell splits on its leading number when it is saved.
   { field: QTY_UNIT, label: "QTY / UNIT", placeholder: "1 EA", pair: QTY_UNIT_KEYS, width: 118 },
@@ -408,7 +409,7 @@ function specDetail(row) {
   const dirty = (field) => cellFields(field).some((key) => key in pending);
   const extras = SPEC_COLUMNS.filter((c) => c.field !== "Item" && c.field !== "Size / Configuration")
     .map((c) => {
-      if (c.link) return isUrl(merged[c.field]) ? `<a class="product-link" href="${esc(merged[c.field])}" target="_blank" rel="noopener noreferrer" title="${esc(merged[c.field])}">Product Link ↗</a>` : "";
+      if (c.link) return isUrl(merged[c.field]) ? `<a class="product-link" href="${esc(merged[c.field])}" target="_blank" rel="noopener noreferrer" title="${esc(merged[c.field])}">Link</a>` : "";
       const value = c.pair ? qtyUnit(merged) : String(merged[c.field] ?? "").trim();
       return value ? esc(value) : "";
     }).filter(Boolean).join(" · ");
@@ -455,9 +456,9 @@ function renderSpec() {
       const pending = state.specPending.get(r._row) || {};   // unsaved edits outlive every re-render
       const edited = cellFields(c.field).some((f) => f in pending);
       const value = c.pair ? qtyUnit({ ...r, ...pending }) : String(edited ? pending[c.field] : r[c.field] ?? "");
-      // a saved address shows the words "Product Link", never the raw URL; the pencil reopens the input
+      // a saved address shows the word "Link", never the raw URL; the pencil reopens the input
       if (c.link && isUrl(value) && !state.specLinkEdit.has(r._row)) {
-        return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Product Link ↗</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address">✎</button></div></td>`;
+        return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Link</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address">✎</button></div></td>`;
       }
       return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}></td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
@@ -1456,7 +1457,7 @@ $("spec-groups").addEventListener("focusout", (event) => {
   const column = SPEC_COLUMNS.find((c) => c.field === input.dataset.field);
   if (!column?.link) return;
   const wasEditing = state.specLinkEdit.delete(Number(input.dataset.row));
-  // the link editor folds back into the "Product Link" anchor once it loses focus
+  // the link editor folds back into the "Link" anchor once it loses focus
   if (!specSaving && (wasEditing || isUrl(input.value.trim()))) renderSpec();
 });
 $("spec-client-panel").addEventListener("change", (event) => {

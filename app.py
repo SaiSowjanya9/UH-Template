@@ -553,7 +553,7 @@ def csv_values(entry, headers):
         values = {**common.split_qty_unit(quantity), **values}
     link = values.pop(PRODUCT_LINK, "")
     if link:
-        # Excel writes a formula's displayed text ("Product Link") when it re-saves a CSV, so a
+        # Excel writes a formula's displayed text ("Link") when it re-saves a CSV, so a
         # cell we cannot read an address out of means "unchanged", never "drop the saved link".
         values["Product URL"] = parse_hyperlink(link)
         if not values["Product URL"]:
@@ -576,9 +576,11 @@ def export_spec_csv():
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
     writer.writeheader()
-    # Product Link is generated from the URL, never copied from the workspace's own link column.
+    # Product Link is generated from the URL, never copied from the workspace's own link column,
+    # and reads "Link" in the cell - the same word the printed sheet sets under its LINK heading.
     writer.writerows({**{field: build_lookbook.spec_value(row, field) for field in fields},
-                      PRODUCT_LINK: hyperlink_formula(row.get("Product URL"))} for row in rows)
+                      PRODUCT_LINK: hyperlink_formula(row.get("Product URL"), build_lookbook.link_word())}
+                     for row in rows)
     name = re.sub(r"[^A-Za-z0-9_-]", "_", project_id)[:50]
     return send_file(io.BytesIO(buffer.getvalue().encode("utf-8-sig")), as_attachment=True,
                      download_name=f"{name}_spec_sheet.csv", mimetype="text/csv")

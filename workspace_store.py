@@ -98,8 +98,8 @@ def http_url(value):
         return False
 
 
-def hyperlink_formula(url):
-    """A product URL as a spreadsheet formula that reads 'Product Link' and opens the page.
+def hyperlink_formula(url, text=PRODUCT_LINK):
+    """A product URL as a spreadsheet formula that reads `text` and opens the page.
 
     CSV carries no hyperlinks of its own, so the exported spec sheet hands Excel and Sheets
     a formula instead. Only a validated http(s) address is ever written, so the leading '='
@@ -108,7 +108,7 @@ def hyperlink_formula(url):
     url = clean(url)
     if not http_url(url):
         return ""
-    return f'=HYPERLINK("{url.replace(chr(34), chr(34) * 2)}","{PRODUCT_LINK}")'
+    return f'=HYPERLINK("{url.replace(chr(34), chr(34) * 2)}","{text}")'
 
 
 def parse_hyperlink(value):
