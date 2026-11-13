@@ -615,12 +615,12 @@ def spec_details(document, items, content_w, hidden, landscape=True):
                 cell_rule(cell, "top", 0.5, COLORS["hairline"])
             if index == last:
                 cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
-            write(cell.paragraphs[0], clean(row.get("Item")).upper() if row else "",
+            if not row:
+                continue                    # a short last row stays open, as in the PDF twin
+            write(cell.paragraphs[0], clean(row.get("Item")).upper(),
                   SPEC_HEAD[0], COLORS["muted"], bold=True, leading=SPEC_HEAD[1])
             line = shape(cell.add_paragraph(), size=SPEC_CELL[0], leading=SPEC_CELL[1], before=5)
             rule(line, "bottom", 0.5, COLORS["field_rule"])
-            if not row:
-                continue                    # a blank underlined field, as in the PDF twin
             run_text(line, detail_value(row, hidden), SPEC_CELL[0], COLORS["body"])
             url = product_link(row, hidden)
             if url:

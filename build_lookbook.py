@@ -982,8 +982,8 @@ def spec_details(items, width, hidden, landscape=True):
             value = f"{value} · {mark}" if value else mark
         cells.append([Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE),
                       Paragraph(value or " ", SPEC_CELL_STYLE), underline()])
-    for _ in range(-len(cells) % cols):              # blank underlined fields, as an empty band field
-        cells.append([Paragraph(" ", SPEC_CELL_STYLE), underline()])
+    for _ in range(-len(cells) % cols):              # a short last row stays open - no empty underline
+        cells.append("")
     data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
     return Table(data, colWidths=[width / cols] * cols, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),

@@ -403,6 +403,9 @@ function addSpecGroup(name) {
 // value, like the client details fields above; every other filled spec column follows as the
 // small print - the same words the PDF and Word copies put in their box. Pending edits show
 // in place like any spec cell, and the whole figure can still be dragged like a line item.
+// The label is a one-row textarea rather than an input, so a long figure name wraps inside
+// its field like the printed sheet's do instead of clipping at the column edge; the box
+// stays one line tall until fitDetailName grows it to whatever the words need.
 function specDetail(row) {
   const pending = state.specPending.get(row._row) || {};
   const merged = { ...row, ...pending };
@@ -414,10 +417,19 @@ function specDetail(row) {
       return value ? esc(value) : "";
     }).filter(Boolean).join(" · ");
   return `<div class="spec-detail" data-row="${row._row}" draggable="true">
-    <div class="detail-head"><input class="cell detail-name${dirty("Item") ? " dirty" : ""}" data-row="${row._row}" data-field="Item" value="${esc(merged.Item)}" maxlength="4000" aria-label="Item name" placeholder="Name the detail"><span class="detail-actions"><button type="button" class="text-button" data-edit="${row._row}" aria-label="Open ${esc(row.Item)}">Open</button><button type="button" class="icon-button" data-spec-remove="${row._row}" aria-label="Remove ${esc(row.Item)}">×</button></span></div>
+    <div class="detail-head"><textarea class="cell detail-name${dirty("Item") ? " dirty" : ""}" data-row="${row._row}" data-field="Item" rows="1" maxlength="4000" aria-label="Item name" placeholder="Name the detail">${esc(merged.Item)}</textarea><span class="detail-actions"><button type="button" class="text-button" data-edit="${row._row}" aria-label="Open ${esc(row.Item)}">Open</button><button type="button" class="icon-button" data-spec-remove="${row._row}" aria-label="Remove ${esc(row.Item)}">×</button></span></div>
     <input class="cell detail-value${dirty("Size / Configuration") ? " dirty" : ""}" data-row="${row._row}" data-field="Size / Configuration" value="${esc(merged["Size / Configuration"])}" maxlength="4000" aria-label="Value for ${esc(merged.Item) || "the detail"}" placeholder="Value, e.g. 3,819 sq ft">
     ${extras ? `<div class="detail-extra">${extras}</div>` : ""}
   </div>`;
+}
+
+// A detail name's box is one row tall until its words need more. field-sizing does that
+// itself where it is supported; elsewhere measure the wrapped text and write the height
+// through the CSSOM, the same way applySpecWidths writes column widths.
+function fitDetailName(name) {
+  if (CSS.supports("field-sizing", "content")) return;
+  name.style.height = "auto";
+  name.style.height = `${name.scrollHeight}px`;
 }
 
 function renderSpec() {
@@ -488,6 +500,7 @@ function renderSpec() {
     </article>`;
   }).join("") + (state.specNaming ? namingCard() : "");
   applySpecWidths();
+  document.querySelectorAll("#spec-groups .detail-name").forEach(fitDetailName);
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
   specSaveUI();
@@ -1426,9 +1439,22 @@ $("spec-groups").addEventListener("change", (event) => {
   specSaveUI();
   action(() => saveCell(event.target)).finally(() => { specSaving--; specSaveUI(); });
 });
+$("spec-groups").addEventListener("input", (event) => {
+  // A wrapped detail name grows its box line by line as a long heading is typed; renderSpec
+  // refits every box again once the edit saves.
+  if (event.target.classList.contains("detail-name")) fitDetailName(event.target);
+});
 $("spec-groups").addEventListener("keydown", (event) => {
   const naming = event.target.dataset.groupNew !== undefined;
-  if (!naming && event.target.dataset.groupRename === undefined) return;
+  if (!naming && event.target.dataset.groupRename === undefined) {
+    // A detail's name still holds one line of text even though its box wraps it: Enter
+    // commits through change like any other spec cell rather than typing a newline.
+    if (event.key === "Enter" && event.target.classList.contains("detail-name")) {
+      event.preventDefault();
+      event.target.blur();
+    }
+    return;
+  }
   if (event.key === "Escape") {
     // Taking the box off the page blurs it, and a blurred input whose value has changed fires
     // change on the way out - which would save the very edit Escape is abandoning. Put the
