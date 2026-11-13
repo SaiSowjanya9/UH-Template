@@ -2,11 +2,17 @@
 901_Paris_Drive_Spec_Sheet.xlsx (Room Specs + Bulk Items tabs).
 
 The sheet's "Whole House" scope is the portal's "Entire Home" location, which is
-registered on the Lists sheet if missing. The sheet's own Category names land on
-the portal's existing Section list (kitchen-area rooms under Kitchen, bath rooms
-under Bathrooms, the rest by trade), so the category dropdown stays one clean
-vocabulary. Every existing line item on the project is replaced: the Reference
-Schedule tab is the old data and is not re-imported.
+registered on the Lists sheet if missing. The sheet's Category names land on
+Section verbatim, so the portal and the exports read the sheet's own categories;
+any name not already on Lists is appended there. One name cannot be carried over
+directly: "Garage" is a location in the workspace, and a Section with a location's
+name is migrated onto Location on save, so those rows file under "Garage (bulk)".
+Room names pass through ROOM_MAP, which keeps the consolidations the project
+settled on (Mud Room 1/2 under Laundry / Mud Room, the kitchen zones under Butler
+Pantry / Prep Kitchen, and so on) so a re-import cannot bring duplicate room
+headings back; a merged item that would read identically to a sibling keeps its
+zone in parentheses. Every existing line item on the project is replaced: the
+Reference Schedule tab is the old data and is not re-imported.
 
 Reads .env for Supabase, like the app, and writes through WorkspaceStore, so the
 save is validated, backed up as a version, and atomic. --dry-run prints the
@@ -15,6 +21,7 @@ mapping and the row count without touching the workspace.
 import argparse
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -23,9 +30,9 @@ import common
 import spec_template
 import supabase_store
 from common import clean
-from workspace_store import (OPTIONAL_SELECTION_FIELDS, SELECTION_FIELDS, WorkspaceStore,
-                             delete_record, ensure_selection_columns, next_row, put, records,
-                             validate_values)
+from workspace_store import (LOCATIONS, OPTIONAL_SELECTION_FIELDS, SELECTION_FIELDS,
+                             WorkspaceStore, delete_record, ensure_selection_columns,
+                             next_row, put, records, validate_values)
 
 DEFAULT_PROJECT = "UH-001"  # Velora Plan, 901 Paris Drive, Prosper TX
 SOURCE = Path.home() / "Downloads" / "901_Paris_Drive_Spec_Sheet.xlsx"
@@ -36,84 +43,46 @@ def location(floor):
     return {"Whole House": "Entire Home"}.get(floor, floor)
 
 
-# A room value of "Whole House" names the same scope: the whole home.
+# A room value of "Whole House" names the same scope: the whole home, and the
+# zone names the sheet splits one room into file under the room they belong to -
+# the consolidations the project settled on, so a re-import cannot bring the
+# duplicate headings back. Items whose zone still matters keep it in their name
+# (Cabinetry (Island), Wood floor (Pantry)); closet and bath sub-rooms stay
+# separate because they name different spaces.
+ROOM_MAP = {
+    "Whole House": "Entire Home",
+    "Utility - Upstairs": "Utility Upstairs",
+    "Bed 1 Up with Closet": "Bedroom 1 Upstairs",
+    "Bed 2 Up with Closet": "Bedroom 2 Upstairs",
+    "Bed 3 Up with Closet": "Bedroom 3 Upstairs",
+    "Kitchen - Most Cabinets": "Kitchen",
+    "Powder": "Powder Bath",
+    "Dry Bar by Family": "Dry Bar",
+    "Prep Kitchen": "Butler Pantry / Prep Kitchen",
+    "Butler's Pantry": "Butler Pantry / Prep Kitchen",
+    "Pantry": "Butler Pantry / Prep Kitchen",
+    "Coffee Bar": "Butler Pantry / Prep Kitchen",
+    "Island": "Butler Pantry / Prep Kitchen",
+    "Mud Room": "Laundry / Mud Room",
+    "Mud Room 1": "Laundry / Mud Room",
+    "Mud Room 2": "Laundry / Mud Room",
+}
+
+
 def room(value):
-    return {"Whole House": "Entire Home"}.get(value, value)
+    return ROOM_MAP.get(value, value)
 
 
-def is_bath(room_name):
-    name = room_name.lower()
-    return "bath" in name or "powder" in name
+def section(category):
+    """The sheet's Category, kept as the portal's Section unless it names a location.
 
-
-def is_kitchen(room_name):
-    return any(word in room_name.lower() for word in ("kitchen", "pantry", "coffee", "dry bar"))
-
-
-# What the sheet calls a Category, filed under the portal's Section list. The two
-# room-based rules mirror the schedule the project already followed: everything
-# in a bathroom files under Bathrooms, everything in a kitchen-area room under
-# Kitchen; everywhere else the category decides the trade.
-TRADE_MAP = {
-    "Area": "Other",
-    "Appliance": "Appliances",
-    "Backsplash": "Other",
-    "Cabinet": "Interior Doors & Trim",
-    "Cabinet accessories": "Hardware",
-    "Cabinet appliance coordination": "Kitchen",
-    "Cabinet coordination": "Interior Doors & Trim",
-    "Countertop": "Other",
-    "Doors & trim": "Interior Doors & Trim",
-    "Exterior": "Exterior",
-    "Exterior paint": "Exterior",
-    "Exterior siding": "Exterior",
-    "Fireplace": "Other",
-    "Floor tile": "Flooring",
-    "Flooring": "Flooring",
-    "Lighting": "Lighting",
-    "Paint": "Paint",
-    "Plumbing": "Bathrooms",
-    "Room scope": "Other",
-    "Shower pan mosaic": "Flooring",
-    "Stair package": "Other",
-    "Wall accent tile": "Flooring",
-    "Wall tile": "Flooring",
-    "Wall tile accent": "Flooring",
-    "Window coverings": "Windows & Doors",
-}
-
-# The Bulk Items tab has no room column; its whole-house scope lands on
-# Entire Home and its Category column files under the same Section list.
-BULK_MAP = {
-    "Framing": "Other",
-    "Foundation": "Other",
-    "Insulation": "Other",
-    "HVAC system": "Other",
-    "Water heater": "Other",
-    "Thermostat": "Other",
-    "Life safety": "Other",
-    "Low voltage": "Other",
-    "Drywall": "Other",
-    "Interior trim": "Interior Doors & Trim",
-    "Exterior": "Exterior",
-    "Roofing": "Roofing",
-    "Windows": "Windows & Doors",
-    "Exterior doors": "Windows & Doors",
-    "Interior doors": "Interior Doors & Trim",
-    "Garage": "Other",
-    "Landscaping": "Exterior",
-    "Flatwork": "Other",
-    "Exterior paint": "Exterior",
-    "Exterior siding": "Exterior",
-}
-
-
-def section(category, room_name):
-    if is_bath(room_name):
-        return "Bathrooms"
-    if is_kitchen(room_name):
-        return "Kitchen"
-    return TRADE_MAP.get(category, "Other")
+    A Section called after a location would be read as a floor/zone on save and
+    migrated onto Location with the category re-inferred, so those file under a
+    " (bulk)" suffix that no location list can contain.
+    """
+    if category in LOCATIONS:
+        return f"{category} (bulk)"
+    return category or "Other"
 
 
 def quantity(value):
@@ -130,31 +99,28 @@ def quantity(value):
 
 def read_rows(path, project):
     wb = load_workbook(path, data_only=True)
-    rows, unmapped = [], set()
+    rows = []
 
-    def add(loc, rm, cat, item, mfr="", model="", finish="", size="", qty="", notes="",
-            bulk=False):
+    def add(loc, src_rm, cat, item, mfr="", model="", finish="", size="", qty="", notes=""):
         if not clean(item):
             return
-        sec = BULK_MAP.get(cat) if bulk else (section(cat, rm))
-        if sec is None or (cat and cat not in TRADE_MAP and not is_bath(rm)
-                           and not is_kitchen(rm) and not bulk):
-            unmapped.add(cat)
-        rows.append(validate_values({
-            "Project ID": project, "Section": sec or "Other", "Location": loc,
-            "Room / Area": rm, "Item": item, "Manufacturer": clean(mfr),
+        values = validate_values({
+            "Project ID": project, "Section": section(clean(cat)), "Location": loc,
+            "Room / Area": room(src_rm), "Item": item, "Manufacturer": clean(mfr),
             "Model #": clean(model), "Finish / Color": clean(finish),
             "Size / Configuration": clean(size), "Qty": quantity(qty),
             "Client Notes": clean(notes), "Client Status": "Proposed",
             "Include in Lookbook": "Yes"},
-            SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS))
+            SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
+        values["_src_room"] = src_rm
+        rows.append(values)
 
     specs = wb["Room Specs"]
     for cells in specs.iter_rows(min_row=4, values_only=True):
         floor, rm, cat, item, mfr, model, finish, size, qty, notes = (list(cells) + [None] * 10)[:10]
         if not any(clean(c) for c in (floor, rm, cat, item)):
             continue
-        add(location(clean(floor)), room(clean(rm)), clean(cat), clean(item),
+        add(location(clean(floor)), clean(rm), clean(cat), clean(item),
             mfr, model, finish, size, qty, notes)
 
     bulk = wb["Bulk Items"]
@@ -162,9 +128,16 @@ def read_rows(path, project):
         scope, cat, item, notes = (list(cells) + [None] * 4)[:4]
         if not any(clean(c) for c in (scope, cat, item, notes)):
             continue
-        add(location(clean(scope)), "Entire Home", clean(cat), clean(item), notes=notes, bulk=True)
+        add(location(clean(scope)), "Entire Home", clean(cat), clean(item), notes=notes)
 
-    return rows, unmapped
+    # a merge that lands two like-named items in one room keeps the zone in the item
+    counts = Counter((r["Room / Area"], r["Item"]) for r in rows)
+    for values in rows:
+        src_rm = values.pop("_src_room")
+        if counts[(values["Room / Area"], values["Item"])] > 1 and src_rm != values["Room / Area"]:
+            values["Item"] = f"{values['Item']} ({src_rm})"
+
+    return rows
 
 
 def main():
@@ -175,11 +148,8 @@ def main():
     args = parser.parse_args()
     project = args.project
 
-    rows, unmapped = read_rows(Path(args.file), project)
-    if unmapped:
-        print("categories with no section mapping (filed under Other):", ", ".join(sorted(unmapped)))
+    rows = read_rows(Path(args.file), project)
     print(f"rows to write: {len(rows)}")
-    from collections import Counter
     print("by location:", dict(Counter(r["Location"] or "(blank)" for r in rows)))
     print("by section:", dict(Counter(r["Section"] for r in rows)))
     keys = Counter((r["Location"], r["Room / Area"], r["Item"]) for r in rows)
@@ -200,6 +170,15 @@ def main():
         if not any(p["Project ID"] == project for p in records(wb, "Projects")):
             sys.exit(f"No project {project} in the workspace.")
         spec_template.register_locations(wb, ["Entire Home"])
+        # the sheet's category names go on the Sections list, after the entries already there
+        lists = wb["Lists"]
+        section_col = next((c.column for c in lists[1]
+                            if clean(c.value) == "Sections (lookbook order)"), 1)
+        have = {clean(lists.cell(r, section_col).value) for r in range(2, lists.max_row + 1)}
+        for name in dict.fromkeys(r["Section"] for r in rows):
+            if name and name not in have:
+                lists.cell(lists.max_row + 1, section_col, name)
+                have.add(name)
         sheet = ensure_selection_columns(wb)
         existing = sorted((r["_row"] for r in records(wb, "Selections")
                            if r["Project ID"] == project), reverse=True)

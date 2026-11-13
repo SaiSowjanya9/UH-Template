@@ -118,7 +118,8 @@ SPEC_NOTE_STYLE = style("spec_note", 8, 10.5, C["muted"])
 SPEC_TITLE = "Spec Sheet"
 # The printed spec sheet mirrors the app's spec-sheet table, column for column, so the
 # download carries exactly the line items and headings on screen. The grouping field becomes
-# the heading and the lookbook flag a note under the item. (column, width share, the hideable
+# the heading; the row's Section and the lookbook flag print as notes under the item name,
+# matching the cell-sub line the same table shows on screen. (column, width share, the hideable
 # key - or keys, where one column stands over two fields - that drop it); shares are rescaled
 # to what is shown, and build_word.build_spec lays the same registry out in Word.
 # Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
@@ -927,7 +928,7 @@ def spec_cell(row, column, hidden):
     return Paragraph(escape(spec_value(row, column)), SPEC_CELL_STYLE)
 
 
-def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
+def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True):
     """A repeated-header table of every priced line item, one row per selection.
 
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
@@ -940,13 +941,23 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X):
     the way it opened and nothing stops in mid-air; an open foot read as a row still
     waiting for its line. There is still no rule above the headings - a section's own
     heading rule, or the band above an unsectioned sheet, does that job.
+
+    The row's Section prints under its item name in the same small note face as the
+    lookbook flag, so the category a line item was filed under is readable in a
+    room-grouped sheet. It is skipped when the sheet is grouped by Section - the
+    heading already says it - and when the Category column was left out of the export.
     """
     data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row in items:
         cells = [spec_cell(row, column, hidden) for column, _ in columns]
+        notes = []
+        if show_section and clean(row.get("Section")):
+            notes.append(clean(row["Section"]))
         if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
-            cells[0] = [cells[0]] if cells[0] != "" else []
-            cells[0].append(Paragraph(escape("Not in lookbook"), SPEC_NOTE_STYLE))
+            notes.append("Not in lookbook")
+        if notes:
+            cells[0] = ([cells[0]] if cells[0] != "" else []) + \
+                       [Paragraph(escape(note), SPEC_NOTE_STYLE) for note in notes]
         data.append(cells)
     return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -1010,7 +1021,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
             story.append(Spacer(0, SECTION_GAP))
         block = (spec_details(items, page.content_w, hidden, page.landscape)
                  if is_details_group(section)
-                 else spec_table(items, columns, widths, hidden, page.pad_x))
+                 else spec_table(items, columns, widths, hidden, page.pad_x,
+                                 show_section=group != "Section" and "Section" not in hidden))
         story += (section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
                                 rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
                   if section else [block])

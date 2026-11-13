@@ -668,6 +668,10 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                           leading=SPEC_CELL[1])
                 cell_rule(cell, "bottom", 0.5 if position == len(items) - 1 else 0.4,
                           SHEET["rule"])
+            # the category a line item was filed under reads under its name, as in the PDF
+            if group != "Section" and "Section" not in hidden and clean(row.get("Section")):
+                write(cells[0].add_paragraph(), clean(row["Section"]), SPEC_NOTE[0],
+                      COLORS["muted"], leading=SPEC_NOTE[1])
             if "Include in Lookbook" not in hidden and clean(row.get("Include in Lookbook")).lower() == "no":
                 write(cells[0].add_paragraph(), "Not in lookbook", SPEC_NOTE[0], COLORS["muted"],
                       leading=SPEC_NOTE[1])

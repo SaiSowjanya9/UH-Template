@@ -301,6 +301,8 @@ body.resizing-column { cursor:col-resize; user-select:none; }
 .cell.num { text-align:right; }
 .cell::placeholder { color:#c3bdaf; }
 .cell.dirty { border-color:var(--gold); }
+/* the category under an item name, matching the spec sheet's small note line */
+.cell-sub { margin:-3px 0 0; padding:0 9px 3px; font-size:10px; line-height:1.45; color:var(--muted); }
 .link-cell { display:flex; align-items:center; gap:4px; padding:3px 5px 3px 9px; border:1px solid transparent; border-radius:4px; }
 .link-cell.dirty { border-color:var(--gold); }
 .link-cell .product-link { font-size:13px; padding:5px 1px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
