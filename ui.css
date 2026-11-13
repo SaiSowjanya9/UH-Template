@@ -344,7 +344,9 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .spec-detail { display:flex; flex-direction:column; gap:2px; min-width:0; padding:4px 0 7px; border-bottom:1px solid var(--gold); margin-bottom:12px; }
 .spec-detail .detail-head { display:flex; align-items:flex-start; gap:6px; }
 .spec-detail .detail-name { flex:1; min-width:0; box-sizing:content-box; field-sizing:content; min-height:1.45em; resize:none; overflow:hidden; margin:0; font-size:10px; font-weight:600; line-height:1.45; letter-spacing:.6px; color:#7d7050; padding:2px 0; }
-.spec-detail .detail-value { padding:2px 0; font-size:14px; font-weight:600; }
+/* the value sits on the cell's bottom edge, so a short label and a wrapped one
+   keep their figures on the same line across the row, like the band's fields */
+.spec-detail .detail-value { margin-top:auto; padding:2px 0; font-size:14px; font-weight:600; }
 .spec-detail .detail-extra { font-size:10.5px; line-height:1.45; color:var(--muted); padding:0; overflow-wrap:anywhere; }
 .detail-actions { margin-left:auto; display:flex; align-items:center; gap:2px; flex:none; opacity:0; transition:opacity .12s; }
 .spec-detail:hover .detail-actions,.spec-detail .detail-actions:focus-within { opacity:1; }
