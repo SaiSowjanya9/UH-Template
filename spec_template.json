@@ -25,6 +25,15 @@
           ]
         },
         {
+          "room": "Dry Bar",
+          "items": [
+            "Cabinetry",
+            "Counter top",
+            "Kitchen Sink",
+            "Kitchen Faucet"
+          ]
+        },
+        {
           "room": "Kitchen",
           "items": [
             "Flooring",
@@ -99,6 +108,12 @@
           ]
         },
         {
+          "room": "His/Hers WIC",
+          "items": [
+            "Flooring"
+          ]
+        },
+        {
           "room": "Guest Bedroom",
           "items": [
             "Flooring",
@@ -129,6 +144,12 @@
             "Light Fixture",
             "Interior Door",
             "Door Stopper"
+          ]
+        },
+        {
+          "room": "Guest Bed WIC",
+          "items": [
+            "Flooring"
           ]
         },
         {
@@ -209,6 +230,21 @@
           "room": "Elevator",
           "items": [
             "Flooring"
+          ]
+        },
+        {
+          "room": "Stairs Closet",
+          "items": [
+            "Flooring"
+          ]
+        },
+        {
+          "room": "Utility",
+          "items": [
+            "Cabinetry",
+            "Counter top",
+            "Flooring",
+            "Backsplash"
           ]
         },
         {
@@ -372,6 +408,33 @@
           ]
         },
         {
+          "room": "Upstairs Bath (Theater)",
+          "items": [
+            "Cabinetry",
+            "Flooring",
+            "Counter top"
+          ]
+        },
+        {
+          "room": "Utility Upstairs",
+          "items": [
+            "Cabinetry",
+            "Flooring"
+          ]
+        },
+        {
+          "room": "Optional Family",
+          "items": [
+            "Cabinetry"
+          ]
+        },
+        {
+          "room": "New Closet",
+          "items": [
+            "Cabinetry"
+          ]
+        },
+        {
           "room": "",
           "items": [
             "Walls"
@@ -444,6 +507,15 @@
     },
     {
       "rooms": [
+        {
+          "room": "Stairs",
+          "items": [
+            "Open railing",
+            "Handrail",
+            "Baluster",
+            "Starter step"
+          ]
+        },
         {
           "room": "",
           "items": [
