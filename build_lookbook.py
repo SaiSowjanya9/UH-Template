@@ -365,13 +365,21 @@ def detail_value(row, hidden):
     return " · ".join(bits)
 
 
+# Columns whose value is one identifier rather than prose must not wrap at all: a model
+# number split anywhere - even at its own space - reads as a typo, and a quantity split
+# from its unit reads as two fields. Their floor is the whole printed value; every other
+# column's is its longest word.
+SPEC_ATOMIC = {"Model #", QTY_UNIT, "Unit Price", "Markup %"}
+
+
 def spec_floor(column, items, hidden):
     """The least a spec column can take: its own heading on one line, plus the longest
-    unbreakable word any of its cells prints.
+    unbreakable text any of its cells prints - the whole value for an atomic column, the
+    longest word for one that may wrap at its spaces.
 
-    A cell's text may wrap at its spaces, but a word torn in half - a model number losing
+    A cell's prose may wrap at its spaces, but a word torn in half - a model number losing
     its last letters to the next line - reads as a typo, so the column must be at least
-    as wide as that word."""
+    as wide as that text."""
     floor = pdfmetrics.stringWidth(spec_heading(column), SPEC_HEAD_STYLE.fontName,
                                    SPEC_HEAD_STYLE.fontSize)
     for row in items:
@@ -379,7 +387,8 @@ def spec_floor(column, items, hidden):
             text = link_word() if product_link(row, hidden) else ""
         else:
             text = spec_value(row, column)
-        for word in text.split():
+        words = [text] if column in SPEC_ATOMIC else text.split()
+        for word in words:
             floor = max(floor, pdfmetrics.stringWidth(word, SPEC_CELL_STYLE.fontName,
                                                       SPEC_CELL_STYLE.fontSize))
     return floor

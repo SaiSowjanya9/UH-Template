@@ -1210,18 +1210,21 @@ class ScheduleTests(unittest.TestCase):
                                                                 build_lookbook.FONT_B, cell.fontSize))
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
 
-    def test_a_spec_column_widens_until_its_longest_word_fits_whole(self):
+    def test_a_spec_column_widens_until_its_longest_text_fits_whole(self):
         """A cell may wrap at its spaces, but a word torn in half - 'HHLGTTNT' over a
-        stray 'C' - reads as a typo. A column carrying such a word is widened past its
-        share until the word fits on one line, and the shares divide what is left.
+        stray 'C' - reads as a typo, and a model number is read as one identifier, so it
+        must not wrap at all: 'Groveland-E / 4 Panel' is wrong too. Model # is widened
+        past its share until its longest value fits on one line, and the shares divide
+        what is left.
 
         Portrait is the tight case again: the same columns in three quarters of the
         landscape width.
         """
         import build_lookbook
         from reportlab.pdfbase import pdfmetrics
-        model = "HBS2318-Alto"
-        rows = self.rows(3, **{"Model #": model, "Room / Area": "Kitchen"})
+        model = "Groveland-E 4 Panel"
+        rows = self.rows(3, **{"Model #": "K-35723-2MB", "Room / Area": "Kitchen"})
+        rows[1]["Model #"] = model
         need = pdfmetrics.stringWidth(model, build_lookbook.SPEC_CELL_STYLE.fontName,
                                       build_lookbook.SPEC_CELL_STYLE.fontSize)
         for name in build_lookbook.SPEC_ORIENTATIONS:
@@ -1235,8 +1238,9 @@ class ScheduleTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder:
                 pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
                                                 Path(folder), orientation=name)
-                self.assertIn(model, " ".join(self.text(pdf).split()),
-                              f"the model number is torn on the {name} sheet")
+                text = " ".join(self.text(pdf).split())
+                for whole in (model, "K-35723-2MB"):
+                    self.assertIn(whole, text, f"{whole} is torn on the {name} sheet")
 
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
         """The gaps between columns are secondary structure, so they are the lightest rule on
