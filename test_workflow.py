@@ -452,7 +452,7 @@ class AppTests(unittest.TestCase):
         for location, room, item in expected[:: max(1, len(expected) // 20)]:
             self.assertTrue(any(r["Location"] == location and r["Room / Area"] == room and r["Item"] == item for r in rows),
                             f"{location} / {room} / {item} missing")
-        seeded = next(r for r in rows if r["Room / Area"] == "Master Bathroom")
+        seeded = next(r for r in rows if r["Room / Area"] == "Suite Bathroom")
         self.assertEqual((seeded["Include in Lookbook"], seeded["Client Status"]), ("Yes", "Proposed"))
         # editing the project later must not seed it again
         edit = self.post("/api/projects", {"values": {"Project ID": "TEST-T", "Client Name": "Someone"}})
@@ -1227,6 +1227,7 @@ class ScheduleTests(unittest.TestCase):
         rows = self.rows(3, **{"Model #": "K-35723-2MB", "Room / Area": "Kitchen"})
         rows[0]["Item"] = "Water Purification System"
         rows[1]["Model #"] = model
+        rows[2]["Model #"] = "12 x 12 Renderra Lyon Lattice Mosaic"
         need = pdfmetrics.stringWidth(model, build_lookbook.SPEC_CELL_STYLE.fontName,
                                       build_lookbook.SPEC_CELL_STYLE.fontSize)
         for name in build_lookbook.SPEC_ORIENTATIONS:
@@ -1237,12 +1238,16 @@ class ScheduleTests(unittest.TestCase):
             index = [column for column, _ in columns].index("Model #")
             room = widths[index] - 2 * page.pad_x
             self.assertGreaterEqual(room, need, f"Model # still wraps on the {name} sheet")
+            self.assertLessEqual(widths[index], page.content_w * build_lookbook.SPEC_ATOMIC_MAX + 1,
+                                 f"a description-length Model # seizes the {name} sheet")
             with tempfile.TemporaryDirectory() as folder:
                 pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
                                                 Path(folder), orientation=name)
                 text = " ".join(self.text(pdf).split())
                 for whole in (model, "K-35723-2MB"):
                     self.assertIn(whole, text, f"{whole} is torn on the {name} sheet")
+                for token in "12 x 12 Renderra Lyon Lattice Mosaic".split():
+                    self.assertIn(token, text, f"{token} is lost on the {name} sheet")
                 if name == "landscape":            # room enough for every value whole
                     self.assertIn("Water Purification System", self.text(pdf),
                                   "a prose value wraps while other columns hold spare room")

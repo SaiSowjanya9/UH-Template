@@ -365,20 +365,22 @@ def detail_value(row, hidden):
     return " · ".join(bits)
 
 
-# Columns whose value is one identifier rather than prose must not wrap at all: a model
+# Columns whose value is one identifier rather than prose never tear mid-word: a model
 # number split anywhere - even at its own space - reads as a typo, and a quantity split
-# from its unit reads as two fields. For them the whole printed value is the hard floor;
-# every other column may still wrap at its spaces when the page cannot hold it whole.
+# from its unit reads as two fields. Each value holds whole while it fits inside
+# SPEC_ATOMIC_MAX of the page; a value claiming more than that is prose wearing an
+# identifier's clothes and wraps at its spaces like prose, still never mid-word.
 SPEC_ATOMIC = {"Model #", QTY_UNIT, "Unit Price", "Markup %"}
+SPEC_ATOMIC_MAX = 0.2
 
 
-def spec_measure(column, items, hidden):
+def spec_measure(column, items, hidden, text_cap=None):
     """(unbreakable, whole-line) text widths a spec column's contents ask for.
 
-    The first is what the column cannot go below without losing data - its heading on
-    one line, the longest word its cells print, or for an atomic column the whole value.
-    The second is what prints its longest cell whole; equal to the first when the column
-    is atomic or every value is a single word anyway."""
+    The first is what the column cannot go below without losing data: its heading on
+    one line, and per cell the whole value while it fits inside text_cap - or its
+    longest word once it does not, because a value that long wraps at its spaces
+    instead of claiming the page. The second is what prints the longest cell whole."""
     head = pdfmetrics.stringWidth(spec_heading(column), SPEC_HEAD_STYLE.fontName,
                                   SPEC_HEAD_STYLE.fontSize)
     word = whole = head
@@ -387,27 +389,39 @@ def spec_measure(column, items, hidden):
             text = link_word() if product_link(row, hidden) else ""
         else:
             text = spec_value(row, column)
-        whole = max(whole, pdfmetrics.stringWidth(text, SPEC_CELL_STYLE.fontName,
-                                                  SPEC_CELL_STYLE.fontSize))
-        for token in text.split():
-            word = max(word, pdfmetrics.stringWidth(token, SPEC_CELL_STYLE.fontName,
-                                                    SPEC_CELL_STYLE.fontSize))
-    return (whole, whole) if column in SPEC_ATOMIC else (word, whole)
+        text_w = pdfmetrics.stringWidth(text, SPEC_CELL_STYLE.fontName,
+                                        SPEC_CELL_STYLE.fontSize)
+        token_w = max((pdfmetrics.stringWidth(token, SPEC_CELL_STYLE.fontName,
+                                              SPEC_CELL_STYLE.fontSize)
+                       for token in text.split()), default=0.0)
+        whole = max(whole, text_w)
+        word = max(word, token_w if text_cap is None or text_w > text_cap else text_w)
+    return word, whole
 
 
 def spec_widths(columns, content_w, items=(), pad_x=PAD_X, hidden=()):
     """What each spec-sheet column gets of the page.
 
     First every column is guaranteed its hard floor - the width below which printed
-    data is torn, so no value loses characters anywhere on the sheet. The shares then
-    divide the space as they always did, and finally any room a column holds past what
-    its longest whole value needs moves to columns still short of theirs, so a value
-    wraps only when the page genuinely cannot keep every value on one line. Both
-    builders measure through here so they cannot drift.
+    data is torn, so no value loses characters anywhere on the sheet; an atomic value
+    counts whole while it fits inside SPEC_ATOMIC_MAX of the page, by its longest word
+    once it does not. The shares then divide the space as they always did, and finally
+    any room a column holds past what its longest whole value needs moves to columns
+    still short of theirs, so a value wraps only when the page genuinely cannot keep
+    every value on one line. Both builders measure through here so they cannot drift.
     """
-    measured = [spec_measure(column, items, hidden) for column, _ in columns]
-    hards = [w + 2 * pad_x + 0.5 for w, _ in measured]
-    wants = [w + 2 * pad_x + 0.5 for _, w in measured]
+    pad = 2 * pad_x + 0.5
+    cap = content_w * SPEC_ATOMIC_MAX
+    hards, wants = [], []
+    for column, _ in columns:
+        if column in SPEC_ATOMIC:
+            word_w, whole_w = spec_measure(column, items, hidden, cap - pad)
+            hards.append(word_w + pad)
+            wants.append(min(whole_w + pad, cap))
+        else:
+            word_w, whole_w = spec_measure(column, items, hidden)
+            hards.append(word_w + pad)
+            wants.append(whole_w + pad)
     if sum(hards) >= content_w:                       # nothing to divide: scale the floors
         return [w * content_w / sum(hards) for w in hards]
     shares = [share for _, share in columns]
@@ -426,7 +440,7 @@ def spec_widths(columns, content_w, items=(), pad_x=PAD_X, hidden=()):
     else:                                             # every column pinned: fill by shares
         extra = (content_w - sum(widths)) / sum(shares)
         widths = [w + extra * share for w, share in zip(widths, shares)]
-    spare = [max(0.0, w - want) for w, want in zip(widths, wants)]
+    spare = [max(0.0, w - max(hard, want)) for w, hard, want in zip(widths, hards, wants)]
     short = [max(0.0, want - w) for w, want in zip(widths, wants)]
     give, need = sum(spare), sum(short)
     move = min(give, need)
