@@ -1211,11 +1211,12 @@ class ScheduleTests(unittest.TestCase):
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
 
     def test_a_spec_column_widens_until_its_longest_text_fits_whole(self):
-        """A cell may wrap at its spaces, but a word torn in half - 'HHLGTTNT' over a
-        stray 'C' - reads as a typo, and a model number is read as one identifier, so it
-        must not wrap at all: 'Groveland-E / 4 Panel' is wrong too. Model # is widened
-        past its share until its longest value fits on one line, and the shares divide
-        what is left.
+        """A word torn in half - 'HHLGTTNT' over a stray 'C' - reads as a typo, and a
+        model number is read as one identifier, so it must not wrap at all:
+        'Groveland-E / 4 Panel' is wrong too. Every column is measured against the
+        whole values its cells print: atomic columns can never wrap, and prose columns
+        hold their longest value whole while spare room goes begging, wrapping at
+        spaces only when the page genuinely cannot keep every value on one line.
 
         Portrait is the tight case again: the same columns in three quarters of the
         landscape width.
@@ -1224,6 +1225,7 @@ class ScheduleTests(unittest.TestCase):
         from reportlab.pdfbase import pdfmetrics
         model = "Groveland-E 4 Panel"
         rows = self.rows(3, **{"Model #": "K-35723-2MB", "Room / Area": "Kitchen"})
+        rows[0]["Item"] = "Water Purification System"
         rows[1]["Model #"] = model
         need = pdfmetrics.stringWidth(model, build_lookbook.SPEC_CELL_STYLE.fontName,
                                       build_lookbook.SPEC_CELL_STYLE.fontSize)
@@ -1241,6 +1243,9 @@ class ScheduleTests(unittest.TestCase):
                 text = " ".join(self.text(pdf).split())
                 for whole in (model, "K-35723-2MB"):
                     self.assertIn(whole, text, f"{whole} is torn on the {name} sheet")
+                if name == "landscape":            # room enough for every value whole
+                    self.assertIn("Water Purification System", self.text(pdf),
+                                  "a prose value wraps while other columns hold spare room")
 
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
         """The gaps between columns are secondary structure, so they are the lightest rule on

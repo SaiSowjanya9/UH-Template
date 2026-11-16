@@ -367,59 +367,73 @@ def detail_value(row, hidden):
 
 # Columns whose value is one identifier rather than prose must not wrap at all: a model
 # number split anywhere - even at its own space - reads as a typo, and a quantity split
-# from its unit reads as two fields. Their floor is the whole printed value; every other
-# column's is its longest word.
+# from its unit reads as two fields. For them the whole printed value is the hard floor;
+# every other column may still wrap at its spaces when the page cannot hold it whole.
 SPEC_ATOMIC = {"Model #", QTY_UNIT, "Unit Price", "Markup %"}
 
 
-def spec_floor(column, items, hidden):
-    """The least a spec column can take: its own heading on one line, plus the longest
-    unbreakable text any of its cells prints - the whole value for an atomic column, the
-    longest word for one that may wrap at its spaces.
+def spec_measure(column, items, hidden):
+    """(unbreakable, whole-line) text widths a spec column's contents ask for.
 
-    A cell's prose may wrap at its spaces, but a word torn in half - a model number losing
-    its last letters to the next line - reads as a typo, so the column must be at least
-    as wide as that text."""
-    floor = pdfmetrics.stringWidth(spec_heading(column), SPEC_HEAD_STYLE.fontName,
-                                   SPEC_HEAD_STYLE.fontSize)
+    The first is what the column cannot go below without losing data - its heading on
+    one line, the longest word its cells print, or for an atomic column the whole value.
+    The second is what prints its longest cell whole; equal to the first when the column
+    is atomic or every value is a single word anyway."""
+    head = pdfmetrics.stringWidth(spec_heading(column), SPEC_HEAD_STYLE.fontName,
+                                  SPEC_HEAD_STYLE.fontSize)
+    word = whole = head
     for row in items:
         if column == PRODUCT_LINK:
             text = link_word() if product_link(row, hidden) else ""
         else:
             text = spec_value(row, column)
-        words = [text] if column in SPEC_ATOMIC else text.split()
-        for word in words:
-            floor = max(floor, pdfmetrics.stringWidth(word, SPEC_CELL_STYLE.fontName,
-                                                      SPEC_CELL_STYLE.fontSize))
-    return floor
+        whole = max(whole, pdfmetrics.stringWidth(text, SPEC_CELL_STYLE.fontName,
+                                                  SPEC_CELL_STYLE.fontSize))
+        for token in text.split():
+            word = max(word, pdfmetrics.stringWidth(token, SPEC_CELL_STYLE.fontName,
+                                                    SPEC_CELL_STYLE.fontSize))
+    return (whole, whole) if column in SPEC_ATOMIC else (word, whole)
 
 
 def spec_widths(columns, content_w, items=(), pad_x=PAD_X, hidden=()):
-    """What each spec-sheet column gets of the page: its share of the width on offer, or
-    more when its own contents need it.
+    """What each spec-sheet column gets of the page.
 
-    The shares still divide the space, and they are what keep a heading - and Product
-    Link's own word - off a second line; see `SPEC_COLUMNS`. But a column whose cells
-    carry a word longer than its share can hold - a model number, say - is first pinned
-    at the width that word needs, and the shares divide only what is left. Both builders
-    measure through here so they cannot drift.
+    First every column is guaranteed its hard floor - the width below which printed
+    data is torn, so no value loses characters anywhere on the sheet. The shares then
+    divide the space as they always did, and finally any room a column holds past what
+    its longest whole value needs moves to columns still short of theirs, so a value
+    wraps only when the page genuinely cannot keep every value on one line. Both
+    builders measure through here so they cannot drift.
     """
-    floors = [spec_floor(column, items, hidden) + 2 * pad_x + 0.5 for column, _ in columns]
-    if sum(floors) >= content_w:
-        return [floor * content_w / sum(floors) for floor in floors]
+    measured = [spec_measure(column, items, hidden) for column, _ in columns]
+    hards = [w + 2 * pad_x + 0.5 for w, _ in measured]
+    wants = [w + 2 * pad_x + 0.5 for _, w in measured]
+    if sum(hards) >= content_w:                       # nothing to divide: scale the floors
+        return [w * content_w / sum(hards) for w in hards]
     shares = [share for _, share in columns]
-    pool, free = content_w, list(range(len(columns)))
+    widths, pool, free = list(hards), content_w, list(range(len(columns)))
     while free:
         rest = sum(shares[i] for i in free)
         grown = {i: pool * shares[i] / rest for i in free}
-        tight = [i for i in free if grown[i] < floors[i]]
+        tight = [i for i in free if grown[i] < hards[i]]
         if not tight:
-            return [grown.get(i, floors[i]) for i in range(len(columns))]
+            for i in free:
+                widths[i] = grown[i]
+            break
         for i in tight:
             free.remove(i)
-            pool -= floors[i]
-    extra = (content_w - sum(floors)) / sum(shares)
-    return [floor + extra * share for floor, share in zip(floors, shares)]
+            pool -= hards[i]
+    else:                                             # every column pinned: fill by shares
+        extra = (content_w - sum(widths)) / sum(shares)
+        widths = [w + extra * share for w, share in zip(widths, shares)]
+    spare = [max(0.0, w - want) for w, want in zip(widths, wants)]
+    short = [max(0.0, want - w) for w, want in zip(widths, wants)]
+    give, need = sum(spare), sum(short)
+    move = min(give, need)
+    if move:
+        widths = [w - s * move / give + f * move / need
+                  for w, s, f in zip(widths, spare, short)]
+    return widths
 
 
 def row_widths(hidden, reserved=0):
