@@ -114,6 +114,22 @@ class ConflictError(ValueError):
     pass
 
 
+_HAJOCA_PATTERN = re.compile(r'https?://misc\.hajoca\.com/reports/[^/]+/s(\d+\.pdf)')
+
+
+def fix_product_url(url):
+    """Rewrite known-broken URL patterns to their permanent form.
+
+    Hajoca's misc.hajoca.com/reports/{token}/sNNNN.pdf URLs expire with the session.
+    The permanent form www.hajoca.com/Misc/DisplayPDF.aspx?s=NNNN.pdf works forever.
+    """
+    if url:
+        m = _HAJOCA_PATTERN.search(url)
+        if m:
+            return f"https://www.hajoca.com/Misc/DisplayPDF.aspx?s={m.group(1)}"
+    return url
+
+
 def http_url(value):
     try:
         parsed = urlsplit(value)
@@ -129,7 +145,7 @@ def hyperlink_formula(url, text=PRODUCT_LINK):
     a formula instead. Only a validated http(s) address is ever written, so the leading '='
     is always ours and never text somebody typed into a cell.
     """
-    url = clean(url)
+    url = fix_product_url(clean(url))
     if not http_url(url):
         return ""
     return f'=HYPERLINK("{url.replace(chr(34), chr(34) * 2)}","{text}")'
@@ -415,7 +431,7 @@ def ensure_product_links(wb):
     target, source = sheet.cols[PRODUCT_LINK], sheet.cols["Product URL"]
     for row in range(2, ws.max_row + 1):
         origin = ws.cell(row, source)
-        url = clean(origin.value)
+        url = fix_product_url(clean(origin.value))
         cell = ws.cell(row, target)
         cell._style = copy(origin._style)
         if not http_url(url):
@@ -620,9 +636,6 @@ ROOM_RENAMES = {
     "Breakfast": "Breakfast Room",
     "BREAKFAST": "Breakfast Room",
 }
-
-
-_HAJOCA_PATTERN = re.compile(r'https?://misc\.hajoca\.com/reports/[^/]+/s(\d+\.pdf)')
 
 
 def migrate_hajoca_links(wb):

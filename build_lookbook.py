@@ -45,7 +45,7 @@ from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Flowable, Frame,
 from branding import load_logo
 from common import (BASE_DIR, WORKSPACE, QTY_UNIT, QTY_UNIT_KEYS, Sheet, clean, open_workspace,
                     location_order, qty_unit)
-from workspace_store import COVER_PREFIX, PRODUCT_LINK, http_url, presentation_details
+from workspace_store import COVER_PREFIX, PRODUCT_LINK, http_url, fix_product_url, presentation_details
 
 PAGE_W, PAGE_H = letter          # 612 x 792 pt, portrait
 M = 46.8                         # side margins
@@ -506,7 +506,7 @@ def description(row, include_quantity=True, hidden=()):
 
 def product_link(row, hidden=()):
     """The product page a schedule row links to, or '' when there is nothing to open."""
-    url = "" if "Product URL" in hidden else clean(row.get("Product URL"))
+    url = "" if "Product URL" in hidden else fix_product_url(clean(row.get("Product URL")))
     return url if http_url(url) else ""
 
 
