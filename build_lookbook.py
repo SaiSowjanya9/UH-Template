@@ -125,10 +125,10 @@ SPEC_TITLE = "Spec Sheet"
 # Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
 # in its cells as well. A heading that wraps reads as two columns - PRODUCT over LINK - and
 # portrait decides the numbers: three quarters of the landscape width, with tighter padding.
-SPEC_COLUMNS = [("Item", 100, "Item"), ("Manufacturer", 67, "Manufacturer"),
+SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
                 ("Model #", 48, "Model #"), ("Finish / Color", 70, "Finish / Color"),
                 ("Size / Configuration", 62.5, "Size / Configuration"),
-                (PRODUCT_LINK, 38, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
+                (PRODUCT_LINK, 50, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
                 ("Unit Price", 52, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Printed headings shorter than their column names, where a column earns it: the long
 # 'Size / Configuration' needs 'SIZE / CONFIG' to fit at all, and the link column prints
