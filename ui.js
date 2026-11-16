@@ -360,10 +360,12 @@ function specGroups(rows) {
     groups.set(held.name, []);
   }
   const ordered = keys.map((name) => [name, groups.get(name)]);
-  // Categories print in the order the Lists sheet names them; rooms keep the order of the line items.
-  if (key !== "Section") return ordered;
-  const order = state.data.sections || [];
-  return ordered.sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+  // Categories print in the order the Lists sheet names them; rooms print in the floor-plan
+  // order the Lists sheet's Rooms column names them. Unknown rooms sort after the listed ones,
+  // keeping their line-item order among themselves.
+  const order = key === "Section" ? (state.data.sections || []) : (state.data.rooms || []);
+  if (!order.length) return ordered;
+  return ordered.sort((a, b) => (order.indexOf(a[0]) + 1 || 9999) - (order.indexOf(b[0]) + 1 || 9999));
 }
 
 // A room being named: the card is already on the sheet, with a box where its heading will be, so

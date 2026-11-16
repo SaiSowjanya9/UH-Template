@@ -45,6 +45,30 @@ MAX_LOCATIONS = 30          # the Location dropdown covers Lists!E2:E31
 UNITS = ["EA", "sq ft", "SQ", "LF", "gal", "lot"]
 UNITS_HEADER = "Units"
 MAX_UNITS = 30              # the Unit dropdown covers 30 rows of whichever column holds the list
+# The Velora floor-plan room order. Kept on Lists under "Rooms" so the spec sheet and its
+# exports can group rooms in walk-through order instead of line-item order. The list belongs
+# to the user after seeding, just like Locations and Units.
+ROOMS = [
+    # 1st Floor
+    "Foyer", "Living", "Dry Bar", "Kitchen", "Breakfast Room", "Dining",
+    "Suite Bedroom", "Suite Bathroom", "His/Hers WIC",
+    "Guest Bedroom", "Guest Bathroom", "Guest Bed WIC",
+    "Study", "Prayer Room", "Powder Room", "Prep Kitchen",
+    "Laundry", "Corridor (walkway)", "Elevator", "Stairs Closet", "Utility",
+    # 2nd Floor
+    "Game Room", "Bedroom 3", "Bathroom 3", "Bedroom 4", "Bathroom 4",
+    "Bedroom 5", "Bathroom 5", "Media Room", "Corridor", "Powder Room (2F)",
+    "Upstairs Bath (Theater)", "Utility Upstairs", "Optional Family", "New Closet",
+    # Outdoor
+    "1st Floor - Porch (Front)", "1st Floor - Patio (Study)",
+    "1st Floor - Patio (Living)", "1st Floor - Patio (Dining)",
+    "1st Floor - Patio (Prep Kitchen)",
+    "2nd Floor - Terrace (Bedroom 4)", "2nd Floor - Terrace (Media Room)",
+    # Garage / Bulk
+    "3-car", "Stairs",
+]
+ROOMS_HEADER = "Rooms"
+MAX_ROOMS = 80              # the Rooms list covers up to 80 entries
 # Generated Selections column: the clickable face of Product URL, rebuilt on every save.
 # The header and the words inside the cell are deliberately the same, so a reader
 # clicks "Product Link" under "Product Link" instead of reading a raw address.
@@ -506,6 +530,21 @@ def unit_order(wb):
     return unit_list(wb["Lists"])[1]
 
 
+def room_list(ws):
+    """The Lists column headed 'Rooms', as (column, names in order)."""
+    return named_list(ws, ROOMS_HEADER)
+
+
+def ensure_room_list(wb):
+    """Seed the 'Rooms' column on Lists so the room-order list has values."""
+    return ensure_named_list(wb, ROOMS_HEADER, ROOMS)
+
+
+def room_order(wb):
+    """The Rooms list on Lists, in order - the spec sheet's room grouping order."""
+    return room_list(wb["Lists"])[1]
+
+
 def ensure_locations(wb):
     """Move floor/zone Sections onto the Location column and re-categorise those rows.
 
@@ -765,6 +804,7 @@ class WorkspaceStore:
             # before the next save migrates the file on disk.
             ensure_locations(wb)
             ensure_unit_list(wb)
+            ensure_room_list(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -779,6 +819,7 @@ class WorkspaceStore:
             ensure_selection_columns(wb)
             ensure_locations(wb)
             ensure_unit_list(wb)
+            ensure_room_list(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)

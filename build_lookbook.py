@@ -306,8 +306,13 @@ def group_sections(rows, hidden=()):
 SPEC_GROUPS = ("Room / Area", "Section")
 
 
-def spec_groups(rows, group="Room / Area", hidden=()):
-    """Rows under the heading the spec sheet is grouped by on screen."""
+def spec_groups(rows, group="Room / Area", hidden=(), room_order=()):
+    """Rows under the heading the spec sheet is grouped by on screen.
+
+    When *room_order* is given and the grouping is by room, the headings print in that
+    order.  Unknown rooms sort after the listed ones, keeping their line-item order
+    among themselves.  The line items inside each room stay in workspace order.
+    """
     if group not in SPEC_GROUPS:
         raise ValueError(f"Group the spec sheet by one of: {', '.join(SPEC_GROUPS)}.")
     if group in hidden:
@@ -316,6 +321,10 @@ def spec_groups(rows, group="Room / Area", hidden=()):
     groups = OrderedDict()
     for row in rows:
         groups.setdefault(clean(row.get(group)) or placeholder, []).append(row)
+    if room_order and group == "Room / Area":
+        order = list(room_order)
+        groups = OrderedDict(sorted(groups.items(),
+                                    key=lambda pair: order.index(pair[0]) if pair[0] in order else len(order)))
     return groups
 
 
@@ -1084,12 +1093,12 @@ def spec_details(items, width, hidden, landscape=True):
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
-               orientation="landscape"):
+               orientation="landscape", room_order=()):
     """The internal spec sheet: the app's line items and columns, under the same headings,
     on the page orientation the download asked for."""
     page = spec_page(orientation)
     columns = spec_columns(hidden)
-    groups = spec_groups(rows, group, hidden)
+    groups = spec_groups(rows, group, hidden, room_order=room_order)
     tabled = [row for section, items in groups.items() if not is_details_group(section)
               for row in items]
     widths = spec_widths(columns, page.content_w, tabled, page.pad_x, hidden)

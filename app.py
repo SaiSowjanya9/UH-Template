@@ -228,6 +228,7 @@ def state():
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        locations=common.location_order(wb),
+                       rooms=common.room_order(wb),
                        units=unit_order(wb),
                        client_statuses=CLIENT_STATUSES,
                        export_columns=EXPORT_COLUMNS,
@@ -616,9 +617,10 @@ def spec_export_rows():
         if not project:
             raise ValidationError("Choose a valid project.")
         rows = [r for r in records(wb, "Selections") if r["Project ID"] == project_id]
+        rooms = common.room_order(wb)
     if not rows:
         raise ValidationError("This project has no line items to export.")
-    return project_id, project, rows
+    return project_id, project, rows, rooms
 
 
 @app.get("/api/selections/docx")
@@ -628,10 +630,11 @@ def export_spec_docx():
     hidden = hidden_option(request.args.get("hide", ""))
     group = group_option(request.args.get("group"))
     orientation = orientation_option(request.args.get("orientation"))
-    project_id, project, rows = spec_export_rows()
+    project_id, project, rows, rooms = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_word.build_spec(project_id, project, rows, output_dir=Path(folder),
-                                       hidden=hidden, group=group, orientation=orientation)
+                                       hidden=hidden, group=group, orientation=orientation,
+                                       room_order=rooms)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=DOCX_MIME)
 
@@ -642,10 +645,11 @@ def export_spec_pdf():
     hidden = hidden_option(request.args.get("hide", ""))
     group = group_option(request.args.get("group"))
     orientation = orientation_option(request.args.get("orientation"))
-    project_id, project, rows = spec_export_rows()
+    project_id, project, rows, rooms = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder),
-                                           hidden=hidden, group=group, orientation=orientation)
+                                           hidden=hidden, group=group, orientation=orientation,
+                                           room_order=rooms)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=PDF_MIME)
 

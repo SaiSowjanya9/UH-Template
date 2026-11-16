@@ -630,7 +630,7 @@ def spec_details(document, items, content_w, hidden, landscape=True):
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
-               orientation="landscape"):
+               orientation="landscape", room_order=()):
     """The internal spec sheet: the app's line items and columns, under the same headings,
     on the page orientation the download asked for."""
     page = spec_page(orientation)
@@ -640,7 +640,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
          value_bold=True)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
     columns = spec_columns(hidden)
-    groups = spec_groups(rows, group, hidden)
+    groups = spec_groups(rows, group, hidden, room_order=room_order)
     tabled = [row for section, items in groups.items() if not is_details_group(section)
               for row in items]
     widths = spec_widths(columns, width, tabled, page.pad_x, hidden)

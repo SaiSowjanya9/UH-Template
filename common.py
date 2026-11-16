@@ -117,6 +117,16 @@ def location_order(wb):
             if clean(row[0])]
 
 
+def room_order(wb):
+    """The Rooms list on Lists, in order - the spec sheet's room grouping order."""
+    ws = wb["Lists"]
+    column = next((c.column for c in ws[1] if clean(c.value) == "Rooms"), None)
+    if column is None:
+        return []
+    return [clean(row[0]) for row in ws.iter_rows(min_row=2, min_col=column, max_col=column, values_only=True)
+            if clean(row[0])]
+
+
 def schedule_sort(rows, wb):
     """In-place finish-schedule order: the Locations list order, then entry order within a location.
 
