@@ -81,7 +81,7 @@
           ]
         },
         {
-          "room": "Suite Bathroom",
+          "room": "Suite Bath",
           "items": [
             "Flooring - Bath",
             "Flooring - Shower Floor",
@@ -123,7 +123,7 @@
           ]
         },
         {
-          "room": "Guest Bathroom",
+          "room": "Guest Bath",
           "items": [
             "Flooring - Bath",
             "Flooring - Shower Floor",

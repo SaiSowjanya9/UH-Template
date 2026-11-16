@@ -452,7 +452,7 @@ class AppTests(unittest.TestCase):
         for location, room, item in expected[:: max(1, len(expected) // 20)]:
             self.assertTrue(any(r["Location"] == location and r["Room / Area"] == room and r["Item"] == item for r in rows),
                             f"{location} / {room} / {item} missing")
-        seeded = next(r for r in rows if r["Room / Area"] == "Suite Bathroom")
+        seeded = next(r for r in rows if r["Room / Area"] == "Suite Bath")
         self.assertEqual((seeded["Include in Lookbook"], seeded["Client Status"]), ("Yes", "Proposed"))
         # editing the project later must not seed it again
         edit = self.post("/api/projects", {"values": {"Project ID": "TEST-T", "Client Name": "Someone"}})

@@ -128,7 +128,7 @@ SPEC_TITLE = "Spec Sheet"
 SPEC_COLUMNS = [("Item", 100, "Item"), ("Manufacturer", 67, "Manufacturer"),
                 ("Model #", 48, "Model #"), ("Finish / Color", 70, "Finish / Color"),
                 ("Size / Configuration", 62.5, "Size / Configuration"),
-                (PRODUCT_LINK, 30, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
+                (PRODUCT_LINK, 38, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
                 ("Unit Price", 52, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Printed headings shorter than their column names, where a column earns it: the long
 # 'Size / Configuration' needs 'SIZE / CONFIG' to fit at all, and the link column prints
