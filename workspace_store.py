@@ -545,6 +545,98 @@ def room_order(wb):
     return room_list(wb["Lists"])[1]
 
 
+# One-time migration: old room names -> Velora floor-plan names. Once every row has been
+# renamed, the map does nothing. Runs on every save so workspaces edited in Excel migrate too.
+ROOM_RENAMES = {
+    "Family Room": "Living",
+    "Living Room": "Living",
+    "LIVING ROOM": "Living",
+    "2nd Living / Formal Dining": "Dining",
+    "Master Bedroom": "Suite Bedroom",
+    "PRIMARY BEDROOM": "Suite Bedroom",
+    "Primary Bedroom": "Suite Bedroom",
+    "Master Bathroom": "Suite Bathroom",
+    "Study/ Office Room": "Study",
+    "Office": "Study",
+    "OFFICE": "Study",
+    "Prayer/Flex Room": "Prayer Room",
+    "2nd Kitchen": "Prep Kitchen",
+    "Butler Pantry / Prep Kitchen": "Prep Kitchen",
+    "BUTLER PANTRY / PREP KITCHEN": "Prep Kitchen",
+    "Butler Pantry": "Prep Kitchen",
+    "BUTLER PANTRY": "Prep Kitchen",
+    "Laundry Room": "Laundry",
+    "Laundry / Mud Room": "Laundry",
+    "LAUNDRY / MUD ROOM": "Laundry",
+    "Bedroom 1 Upstairs": "Bedroom 3",
+    "BEDROOM 1 UPSTAIRS": "Bedroom 3",
+    "Bath 1": "Suite Bathroom",
+    "BATH 1": "Suite Bathroom",
+    "Bedroom 2 Upstairs": "Bedroom 4",
+    "BEDROOM 2 UPSTAIRS": "Bedroom 4",
+    "Bath 2": "Guest Bathroom",
+    "BATH 2": "Guest Bathroom",
+    "Bedroom 3 Upstairs": "Bedroom 5",
+    "BEDROOM 3 UPSTAIRS": "Bedroom 5",
+    "Bath 3": "Bathroom 3",
+    "BATH 3": "Bathroom 3",
+    "Gameroom Up": "Game Room",
+    "GAMEROOM UP": "Game Room",
+    "Game Room Up": "Game Room",
+    "Theater Room": "Media Room",
+    "THEATER ROOM": "Media Room",
+    "Corridor Up": "Corridor (walkway)",
+    "CORRIDOR UP": "Corridor (walkway)",
+    "Upstairs Half Bath": "Powder Room",
+    "UPSTAIRS HALF BATH": "Powder Room",
+    "Powder Bath": "Powder Room",
+    "POWDER BATH": "Powder Room",
+    "Suite Bath": "Suite Bathroom",
+    "SUITE BATH": "Suite Bathroom",
+    "Suite Bath Shower": "Suite Bathroom",
+    "SUITE BATH SHOWER": "Suite Bathroom",
+    "Suite Bath Tub": "Suite Bathroom",
+    "SUITE BATH TUB": "Suite Bathroom",
+    "Bath 1 Shower": "Suite Bathroom",
+    "BATH 1 SHOWER": "Suite Bathroom",
+    "Bath 2 Shower": "Guest Bathroom",
+    "BATH 2 SHOWER": "Guest Bathroom",
+    "Bath 3 Shower": "Bathroom 3",
+    "BATH 3 SHOWER": "Bathroom 3",
+    "Bath 4": "Bathroom 4",
+    "BATH 4": "Bathroom 4",
+    "Breakfast": "Breakfast Room",
+    "BREAKFAST": "Breakfast Room",
+    "Utility Room": "Utility",
+    "UTILITY ROOM": "Utility",
+    "HIS/HERS WIC": "His/Hers WIC",
+    "His/Hers Wic": "His/Hers WIC",
+    "Guest Bed Wic": "Guest Bed WIC",
+    "GUEST BED WIC": "Guest Bed WIC",
+    "Upstairs Bath (Theater)": "Upstairs Bath (Theater)",
+    "UPSTAIRS BATH (THEATER)": "Upstairs Bath (Theater)",
+    "Utility Upstairs": "Utility Upstairs",
+    "UTILITY UPSTAIRS": "Utility Upstairs",
+    "Stairs Closet": "Stairs Closet",
+    "STAIRS CLOSET": "Stairs Closet",
+}
+
+
+def migrate_room_names(wb):
+    """Rename old room names to Velora floor-plan names on the Selections sheet.
+
+    Runs on every save. Once every row carries the current name the map is a no-op.
+    """
+    sheet = Sheet(wb["Selections"])
+    if "Room / Area" not in sheet.cols:
+        return
+    col = sheet.cols["Room / Area"]
+    for row in range(2, sheet.ws.max_row + 1):
+        old = clean(sheet.ws.cell(row, col).value)
+        if old in ROOM_RENAMES:
+            sheet.ws.cell(row, col, ROOM_RENAMES[old])
+
+
 def ensure_locations(wb):
     """Move floor/zone Sections onto the Location column and re-categorise those rows.
 
@@ -805,6 +897,7 @@ class WorkspaceStore:
             ensure_locations(wb)
             ensure_unit_list(wb)
             ensure_room_list(wb)
+            migrate_room_names(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -820,6 +913,7 @@ class WorkspaceStore:
             ensure_locations(wb)
             ensure_unit_list(wb)
             ensure_room_list(wb)
+            migrate_room_names(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)
