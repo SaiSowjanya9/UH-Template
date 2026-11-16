@@ -199,7 +199,7 @@ class AppTests(unittest.TestCase):
         word_sheet = self.client.get(f"/api/selections/docx?project={project}&hide={','.join(hidden)}")
         self.assertEqual(word_sheet.status_code, 200)
         text = docx_text(word_sheet.data)
-        self.assertNotIn("MANUFACTURER", text)
+        self.assertNotIn("BRAND", text)
         self.assertNotIn("UNIT PRICE", text)
         self.assertNotIn("1234.5", text)
         self.assertIn("ITEM", text)
@@ -208,7 +208,7 @@ class AppTests(unittest.TestCase):
         pdf_sheet = self.client.get(f"/api/selections/pdf?project={project}&hide={','.join(hidden)}")
         self.assertEqual(pdf_sheet.status_code, 200)
         text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf_sheet.data)).pages).split())
-        self.assertNotIn("MANUFACTURER", text)
+        self.assertNotIn("BRAND", text)
         self.assertNotIn("UNIT PRICE", text)
         self.assertNotIn("1234.5", text)
         self.assertIn("ITEM", text)
@@ -562,7 +562,7 @@ class AppTests(unittest.TestCase):
         sheet = self.client.get(f"/api/selections/docx?project={pid}")
         self.assertEqual(sheet.status_code, 200)
         self.assertIn("Spec_Sheet", sheet.headers["Content-Disposition"])
-        self.assertIn("MANUFACTURER", docx_text(sheet.data))
+        self.assertIn("BRAND", docx_text(sheet.data))
         self.assertEqual(self.client.get("/api/selections/docx?project=nope").status_code, 400)
 
         sheet_pdf = self.client.get(f"/api/selections/pdf?project={pid}")
@@ -572,7 +572,7 @@ class AppTests(unittest.TestCase):
         # narrow column headings wrap, so check the words against whitespace-normalised text
         text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(sheet_pdf.data)).pages)
         text = " ".join(text.split())
-        self.assertIn("MANUFACTURER", text)
+        self.assertIn("BRAND", text)
         self.assertIn("UNIT PRICE", text)
         self.assertEqual(self.client.get("/api/selections/pdf?project=nope").status_code, 400)
 
@@ -581,9 +581,9 @@ class AppTests(unittest.TestCase):
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
         rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
-        shown = ["ITEM", "MANUFACTURER", "MODEL #", "FINISH / COLOR", "LINK",
-                 "QTY / UNIT", "UNIT PRICE", "MARKUP %"]
-        absent = ["CLIENT STATUS", "CLIENT NOTES", "INCLUDE IN LOOKBOOK", "PRODUCT NAME"]
+        shown = ["ITEM", "BRAND", "MODEL #", "FINISH / COLOR", "LINK",
+                 "QTY", "UNIT PRICE", "MU %", "NOTES"]
+        absent = ["CLIENT STATUS", "INCLUDE IN LOOKBOOK", "PRODUCT NAME"]
 
         pdf = self.client.get(f"/api/selections/pdf?project={pid}")
         self.assertEqual(pdf.status_code, 200)
@@ -646,7 +646,7 @@ class AppTests(unittest.TestCase):
         text = " ".join(" ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.data)).pages).split())
         spaced = lambda value: value.upper()
         self.assertIn(spaced("PROJECT"), text)              # the heading still prints
-        self.assertNotIn("MANUFACTURER", text)              # but no line-item table follows
+        self.assertNotIn("BRAND", text)                      # but no line-item table follows
         for row in rows[:3]:
             self.assertIn(row["Item"].upper(), text, row["Item"])
         # a figure's other filled fields follow its value, like the band's own fields
@@ -656,7 +656,7 @@ class AppTests(unittest.TestCase):
 
         word = " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split())
         self.assertIn("PROJECT", word)
-        self.assertNotIn("MANUFACTURER", word)
+        self.assertNotIn("BRAND", word)
         for row in rows[:3]:
             self.assertIn(row["Item"].upper(), word, row["Item"])
 
@@ -784,7 +784,7 @@ class AppTests(unittest.TestCase):
         for name, text in (("PDF", " ".join(" ".join(p.extract_text() for p in PdfReader(
                                 io.BytesIO(self.client.get(f"/api/selections/pdf?project={pid}").data)).pages).split())),
                            ("Word", " ".join(docx_text(self.client.get(f"/api/selections/docx?project={pid}").data).split()))):
-            self.assertIn("QTY / UNIT", text, name)
+            self.assertIn("QTY", text, name)
             self.assertIn("7571 sq ft", text, name)
 
         # the CSV carries one column too, and splits it back into the two on the way in
