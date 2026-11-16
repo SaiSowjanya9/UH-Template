@@ -645,6 +645,31 @@ def migrate_hajoca_links(wb):
                               f"https://www.hajoca.com/Misc/DisplayPDF.aspx?s={m.group(1)}")
 
 
+# Items that should not be in Entire Home — they belong to individual rooms instead.
+_ENTIRE_HOME_REMOVE = {"Interior doors", "Front door / glass / study doors / hardware"}
+
+
+def migrate_entire_home_items(wb):
+    """Remove misplaced items from Entire Home that are not in the bulk spec sheet.
+
+    Runs on every save. Once the rows are gone the loop is a no-op.
+    """
+    sheet = Sheet(wb["Selections"])
+    if "Room / Area" not in sheet.cols or "Item" not in sheet.cols:
+        return
+    room_col = sheet.cols["Room / Area"]
+    item_col = sheet.cols["Item"]
+    rows_to_delete = []
+    for row in range(2, sheet.ws.max_row + 1):
+        room = clean(sheet.ws.cell(row, room_col).value)
+        item = clean(sheet.ws.cell(row, item_col).value)
+        if room in ("Entire Home", "Whole House") and item in _ENTIRE_HOME_REMOVE:
+            rows_to_delete.append(row)
+    # Delete from bottom up so row numbers stay valid.
+    for row in reversed(rows_to_delete):
+        sheet.ws.delete_rows(row)
+
+
 def migrate_room_names(wb):
     """Rename old room names to Velora floor-plan names on the Selections sheet.
 
@@ -922,6 +947,7 @@ class WorkspaceStore:
             ensure_room_list(wb)
             migrate_room_names(wb)
             migrate_hajoca_links(wb)
+            migrate_entire_home_items(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -939,6 +965,7 @@ class WorkspaceStore:
             ensure_room_list(wb)
             migrate_room_names(wb)
             migrate_hajoca_links(wb)
+            migrate_entire_home_items(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)
