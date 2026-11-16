@@ -164,7 +164,8 @@ LAND_BODY_TOP = LAND_H - (PAGE_H - BODY_TOP)   # the same 96pt from the top edge
 # The spec sheet prints either way round, chosen per download: landscape as it always has,
 # because this many columns want the width, or portrait to file beside the client schedule.
 # Only the page changes - the same furniture, the same 96pt from the top edge to the first
-# row, and column widths that are shares of whatever content width is left.
+# row, and column widths that are shares of whatever content width is left, each grown to
+# hold the longest unbreakable word its cells print.
 SPEC_ORIENTATIONS = ("landscape", "portrait")
 # Portrait fits the same columns into three quarters of the width, so its cells are padded
 # tighter: with nine columns to a narrower page, the narrow numeric ones have barely room
@@ -364,14 +365,52 @@ def detail_value(row, hidden):
     return " · ".join(bits)
 
 
-def spec_widths(columns, content_w):
-    """What each spec-sheet column gets of the page: its share of the width on offer.
+def spec_floor(column, items, hidden):
+    """The least a spec column can take: its own heading on one line, plus the longest
+    unbreakable word any of its cells prints.
 
-    The shares themselves are what keep a heading - and Product Link's own two words - off a
-    second line; see `SPEC_COLUMNS`. Both builders measure through here so they cannot drift.
+    A cell's text may wrap at its spaces, but a word torn in half - a model number losing
+    its last letters to the next line - reads as a typo, so the column must be at least
+    as wide as that word."""
+    floor = pdfmetrics.stringWidth(spec_heading(column), SPEC_HEAD_STYLE.fontName,
+                                   SPEC_HEAD_STYLE.fontSize)
+    for row in items:
+        if column == PRODUCT_LINK:
+            text = link_word() if product_link(row, hidden) else ""
+        else:
+            text = spec_value(row, column)
+        for word in text.split():
+            floor = max(floor, pdfmetrics.stringWidth(word, SPEC_CELL_STYLE.fontName,
+                                                      SPEC_CELL_STYLE.fontSize))
+    return floor
+
+
+def spec_widths(columns, content_w, items=(), pad_x=PAD_X, hidden=()):
+    """What each spec-sheet column gets of the page: its share of the width on offer, or
+    more when its own contents need it.
+
+    The shares still divide the space, and they are what keep a heading - and Product
+    Link's own word - off a second line; see `SPEC_COLUMNS`. But a column whose cells
+    carry a word longer than its share can hold - a model number, say - is first pinned
+    at the width that word needs, and the shares divide only what is left. Both builders
+    measure through here so they cannot drift.
     """
-    total = sum(share for _, share in columns)
-    return [content_w * share / total for _, share in columns]
+    floors = [spec_floor(column, items, hidden) + 2 * pad_x + 0.5 for column, _ in columns]
+    if sum(floors) >= content_w:
+        return [floor * content_w / sum(floors) for floor in floors]
+    shares = [share for _, share in columns]
+    pool, free = content_w, list(range(len(columns)))
+    while free:
+        rest = sum(shares[i] for i in free)
+        grown = {i: pool * shares[i] / rest for i in free}
+        tight = [i for i in free if grown[i] < floors[i]]
+        if not tight:
+            return [grown.get(i, floors[i]) for i in range(len(columns))]
+        for i in tight:
+            free.remove(i)
+            pool -= floors[i]
+    extra = (content_w - sum(floors)) / sum(shares)
+    return [floor + extra * share for floor, share in zip(floors, shares)]
 
 
 def row_widths(hidden, reserved=0):
@@ -1013,10 +1052,13 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     on the page orientation the download asked for."""
     page = spec_page(orientation)
     columns = spec_columns(hidden)
-    widths = spec_widths(columns, page.content_w)
+    groups = spec_groups(rows, group, hidden)
+    tabled = [row for section, items in groups.items() if not is_details_group(section)
+              for row in items]
+    widths = spec_widths(columns, page.content_w, tabled, page.pad_x, hidden)
     story = [Band(band_values(project), page.content_w, value_size=11, value_font=FONT_BB),
              Spacer(0, BAND_GAP)]
-    for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
+    for index, (section, items) in enumerate(groups.items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
         block = (spec_details(items, page.content_w, hidden, page.landscape)

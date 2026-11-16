@@ -1210,6 +1210,34 @@ class ScheduleTests(unittest.TestCase):
                                                                 build_lookbook.FONT_B, cell.fontSize))
                 self.assertLess(printed, room, f"{column} wraps on the {name} sheet")
 
+    def test_a_spec_column_widens_until_its_longest_word_fits_whole(self):
+        """A cell may wrap at its spaces, but a word torn in half - 'HHLGTTNT' over a
+        stray 'C' - reads as a typo. A column carrying such a word is widened past its
+        share until the word fits on one line, and the shares divide what is left.
+
+        Portrait is the tight case again: the same columns in three quarters of the
+        landscape width.
+        """
+        import build_lookbook
+        from reportlab.pdfbase import pdfmetrics
+        model = "HBS2318-Alto"
+        rows = self.rows(3, **{"Model #": model, "Room / Area": "Kitchen"})
+        need = pdfmetrics.stringWidth(model, build_lookbook.SPEC_CELL_STYLE.fontName,
+                                      build_lookbook.SPEC_CELL_STYLE.fontSize)
+        for name in build_lookbook.SPEC_ORIENTATIONS:
+            page = build_lookbook.spec_page(name)
+            columns = build_lookbook.spec_columns()
+            widths = build_lookbook.spec_widths(columns, page.content_w, rows, page.pad_x)
+            self.assertAlmostEqual(sum(widths), page.content_w, places=4)
+            index = [column for column, _ in columns].index("Model #")
+            room = widths[index] - 2 * page.pad_x
+            self.assertGreaterEqual(room, need, f"Model # still wraps on the {name} sheet")
+            with tempfile.TemporaryDirectory() as folder:
+                pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
+                                                Path(folder), orientation=name)
+                self.assertIn(model, " ".join(self.text(pdf).split()),
+                              f"the model number is torn on the {name} sheet")
+
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
         """The gaps between columns are secondary structure, so they are the lightest rule on
         the sheet - half a row rule - and both ends close on a horizontal rule instead of

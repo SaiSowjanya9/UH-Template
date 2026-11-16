@@ -640,8 +640,11 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
          value_bold=True)
     shape(document.add_paragraph(), size=BAND_GAP, leading=BAND_GAP)
     columns = spec_columns(hidden)
-    widths = spec_widths(columns, width)
-    for index, (section, items) in enumerate(spec_groups(rows, group, hidden).items()):
+    groups = spec_groups(rows, group, hidden)
+    tabled = [row for section, items in groups.items() if not is_details_group(section)
+              for row in items]
+    widths = spec_widths(columns, width, tabled, page.pad_x, hidden)
+    for index, (section, items) in enumerate(groups.items()):
         if section:
             heading(document, section, width, first=index == 0, track=SPEC_HEADING_TRACK,
                     rule=SHEET["rule"])
