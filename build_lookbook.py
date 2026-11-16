@@ -323,8 +323,15 @@ def spec_groups(rows, group="Room / Area", hidden=(), room_order=()):
         groups.setdefault(clean(row.get(group)) or placeholder, []).append(row)
     if room_order and group == "Room / Area":
         order = list(room_order)
-        groups = OrderedDict(sorted(groups.items(),
-                                    key=lambda pair: order.index(pair[0]) if pair[0] in order else len(order)))
+        # PROJECT (details band) always prints first; unknown rooms sort after listed ones.
+        def sort_key(pair):
+            name = pair[0]
+            if is_details_group(name):
+                return (-1, 0)
+            if name in order:
+                return (0, order.index(name))
+            return (1, 0)
+        groups = OrderedDict(sorted(groups.items(), key=sort_key))
     return groups
 
 

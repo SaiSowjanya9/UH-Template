@@ -365,7 +365,9 @@ function specGroups(rows) {
   // keeping their line-item order among themselves.
   const order = key === "Section" ? (state.data.sections || []) : (state.data.rooms || []);
   if (!order.length) return ordered;
-  return ordered.sort((a, b) => (order.indexOf(a[0]) + 1 || 9999) - (order.indexOf(b[0]) + 1 || 9999));
+  // PROJECT (details band) always first; listed rooms in floor-plan order; unknown rooms last.
+  const rank = (name) => isDetailsGroup(name) ? -1 : order.indexOf(name) >= 0 ? order.indexOf(name) : 9999;
+  return ordered.sort((a, b) => rank(a[0]) - rank(b[0]));
 }
 
 // A room being named: the card is already on the sheet, with a box where its heading will be, so
