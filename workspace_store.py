@@ -622,6 +622,29 @@ ROOM_RENAMES = {
 }
 
 
+_HAJOCA_PATTERN = re.compile(r'https?://misc\.hajoca\.com/reports/[^/]+/s(\d+\.pdf)')
+
+
+def migrate_hajoca_links(wb):
+    """Rewrite expired misc.hajoca.com session URLs to the permanent DisplayPDF.aspx form.
+
+    Hajoca's misc.hajoca.com/reports/{token}/sNNNN.pdf URLs expire when the session
+    token does. The working form is www.hajoca.com/Misc/DisplayPDF.aspx?s=NNNN.pdf,
+    which generates a fresh token on every request. Runs on every save.
+    """
+    sheet = Sheet(wb["Selections"])
+    if "Product URL" not in sheet.cols:
+        return
+    col = sheet.cols["Product URL"]
+    for row in range(2, sheet.ws.max_row + 1):
+        val = clean(sheet.ws.cell(row, col).value)
+        if val:
+            m = _HAJOCA_PATTERN.search(val)
+            if m:
+                sheet.ws.cell(row, col,
+                              f"https://www.hajoca.com/Misc/DisplayPDF.aspx?s={m.group(1)}")
+
+
 def migrate_room_names(wb):
     """Rename old room names to Velora floor-plan names on the Selections sheet.
 
@@ -898,6 +921,7 @@ class WorkspaceStore:
             ensure_unit_list(wb)
             ensure_room_list(wb)
             migrate_room_names(wb)
+            migrate_hajoca_links(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -914,6 +938,7 @@ class WorkspaceStore:
             ensure_unit_list(wb)
             ensure_room_list(wb)
             migrate_room_names(wb)
+            migrate_hajoca_links(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)
