@@ -661,6 +661,49 @@ def migrate_hajoca_links(wb):
 # Items that should not be in Entire Home — they belong to individual rooms instead.
 _ENTIRE_HOME_REMOVE = {"Interior doors", "Front door / glass / study doors / hardware"}
 
+# Specification details for Entire Home / bulk items, seeded into Finish / Color
+# when the field is empty. Keyed by Item name (case-sensitive as stored).
+_BULK_SPEC_DETAILS = {
+    "2x6 exterior walls": "2x6 exterior walls; lumber, sheathing, trusses",
+    "Slab foundation": "Floor plan states total under roof 7,571 sq ft.",
+    "Thermal insulation": "Walls R-21; attic R-38",
+    "System / tonnage / SEER": "3 HVAC system 10 tonnage-or SEER value 16.1 conditioned area 5,870 sq ft.",
+    "Drywall finish": "Level 3, Smooth",
+    "Exterior materials": "Stucco Smooth Finish and stone",
+    "Roof configuration": "Roof pitches shown include 5/12, 8/12, 10/12, and 12/12. Class 4 shingles, Driftwood.",
+    "Window package": "All windows vinyl frame. Plan window schedule gives sizes, quantities and egress/fixed designation. Refer to plan sheet for full schedule.",
+    "Exterior door package": "Plan door schedule identifies principal, glass, exterior and sliding doors",
+    "Garage doors": "Garage 1: 18 ft x 8 ft door; Garage 2: 10 ft x 8 ft door Lift Master Openers",
+    "Garage count and areas": "Garage 1 is two-car, 719 sq ft; Garage 2 is one-car, 313 sq ft.",
+    "Site fencing": "8 ft high wood fencing and a 3 ft wood gate/door.",
+    "Siding and paint": "smooth stucco and Sherwin-Williams Oyster White SW 7637. Elevations show stone, stucco, and composite shingles",
+    "Garage floor finish": "Sealed concrete",
+    "Roof accessories": "Soffit, fascia, gutters listed as scope",
+}
+
+
+def migrate_bulk_spec_details(wb):
+    """Seed Plan / Specification Details into Finish / Color for Entire Home items.
+
+    Only fills in blank cells so hand-edited values are never overwritten.
+    Runs on every save; once every cell is populated the loop is a no-op.
+    """
+    sheet = Sheet(wb["Selections"])
+    needed = {"Room / Area", "Item", "Finish / Color"}
+    if not needed.issubset(sheet.cols):
+        return
+    room_col = sheet.cols["Room / Area"]
+    item_col = sheet.cols["Item"]
+    finish_col = sheet.cols["Finish / Color"]
+    for row in range(2, sheet.ws.max_row + 1):
+        room = clean(sheet.ws.cell(row, room_col).value)
+        if room not in ("Entire Home", "Whole House"):
+            continue
+        item = clean(sheet.ws.cell(row, item_col).value)
+        existing = clean(sheet.ws.cell(row, finish_col).value)
+        if not existing and item in _BULK_SPEC_DETAILS:
+            sheet.ws.cell(row, finish_col, _BULK_SPEC_DETAILS[item])
+
 
 def migrate_entire_home_items(wb):
     """Remove misplaced items from Entire Home that are not in the bulk spec sheet.
@@ -961,6 +1004,7 @@ class WorkspaceStore:
             migrate_room_names(wb)
             migrate_hajoca_links(wb)
             migrate_entire_home_items(wb)
+            migrate_bulk_spec_details(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -979,6 +1023,7 @@ class WorkspaceStore:
             migrate_room_names(wb)
             migrate_hajoca_links(wb)
             migrate_entire_home_items(wb)
+            migrate_bulk_spec_details(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)

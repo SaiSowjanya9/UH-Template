@@ -16,6 +16,7 @@ const groupLabel = () => (state.specGroup === "Section" ? "category" : "room");
 // not line items, so it is drawn like the client details box above the cards instead of as
 // a table, matching the spec-sheet exports (DETAILS_GROUP in build_lookbook.py).
 const isDetailsGroup = (name) => String(name || "").trim().toUpperCase() === "PROJECT";
+const isBulkGroup = (name) => { const n = String(name || "").trim(); return n === "Entire Home" || n === "Whole House"; };
 // A room is not a record of its own: it is on the sheet because line items name it. So a room
 // added from the toolbar is held here - the project and field it belongs to, with the heading
 // itself - and drawn as an empty card until its first line item puts it in the workspace.
@@ -478,9 +479,12 @@ function renderSpec() {
         return `<td class="link-col"><div class="link-cell${edited ? " dirty" : ""}"><a class="product-link" href="${esc(value)}" target="_blank" rel="noopener noreferrer" title="${esc(value)}">Link</a><button type="button" class="icon-button link-edit" data-link-edit="${r._row}" aria-label="View or change the product link for ${esc(r.Item)}" title="View or change the address">✎</button></div></td>`;
       }
       // the category a line item was filed under reads under its name, like the spec sheet;
-      // when the view is already grouped by it, the card's heading says it instead
+      // when the view is already grouped by it, the card's heading says it instead.
+      // For bulk/Entire Home groups, the category shows beside the item (side-by-side)
+      // instead of below, matching the Excel Bulk Items layout.
       const section = c.field === "Item" && state.specGroup !== "Section" && String(r.Section || "").trim();
-      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}><input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}>${section ? `<div class="cell-sub">${esc(String(r.Section).trim())}</div>` : ""}</td>`;
+      const bulk = section && isBulkGroup(name);
+      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}>${bulk ? `<span class="bulk-cat">${esc(section)}</span>` : ""}<input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}>${section && !bulk ? `<div class="cell-sub">${esc(section)}</div>` : ""}</td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     // The heading is the grouped field's own value, so editing it renames the room or category
     // on every line item under it. While it is being edited the toggle gives way to the box:
