@@ -125,19 +125,16 @@ SPEC_TITLE = "Spec Sheet"
 # Every share is wide enough for its own heading on one line, and PRODUCT LINK for the words
 # in its cells as well. A heading that wraps reads as two columns - PRODUCT over LINK - and
 # portrait decides the numbers: three quarters of the landscape width, with tighter padding.
-SPEC_COLUMNS = [("Item", 80, "Item"), ("Manufacturer", 58, "Manufacturer"),
-                ("Model #", 48, "Model #"), ("Finish / Color", 66, "Finish / Color"),
-                ("Size / Configuration", 60, "Size / Configuration"),
-                (PRODUCT_LINK, 42, "Product URL"), (QTY_UNIT, 40, QTY_UNIT_KEYS),
-                ("Unit Price", 48, "Unit Price"), ("Markup %", 40, "Markup %"),
-                ("Client Notes", 48, "Client Notes")]
+SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
+                ("Model #", 48, "Model #"), ("Finish / Color", 70, "Finish / Color"),
+                ("Size / Configuration", 62.5, "Size / Configuration"),
+                (PRODUCT_LINK, 50, "Product URL"), (QTY_UNIT, 44, QTY_UNIT_KEYS),
+                ("Unit Price", 52, "Unit Price"), ("Markup %", 46, "Markup %")]
 # Printed headings shorter than their column names, where a column earns it: the long
 # 'Size / Configuration' needs 'SIZE / CONFIG' to fit at all, and the link column prints
 # 'LINK' over a one-word 'Link' anchor so it stays only as wide as what it carries -
 # the freed share goes to the columns whose text actually wraps.
-SPEC_LABELS = {"Size / Configuration": "Size / Config", PRODUCT_LINK: "Link",
-               "Manufacturer": "Brand", QTY_UNIT: "Qty", "Markup %": "MU %",
-               "Client Notes": "Notes"}
+SPEC_LABELS = {"Size / Configuration": "Size / Config", PRODUCT_LINK: "Link"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 # not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
 # client band above it: rows of labelled fields on open paper, each closing on the band's

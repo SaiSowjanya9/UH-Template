@@ -289,7 +289,6 @@ const SPEC_COLUMNS = [
   { field: QTY_UNIT, label: "QTY / UNIT", placeholder: "1 EA", pair: QTY_UNIT_KEYS, width: 118 },
   { field: "Unit Price", label: "UNIT PRICE", placeholder: "—", number: true, width: 100 },
   { field: "Markup %", label: "MARKUP %", placeholder: "0", number: true, width: 100 },
-  { field: "Client Notes", label: "NOTES", placeholder: "Notes", width: 160 },
 ];
 
 // A brand, model or finish is often longer than the column it lands in, so every header carries
