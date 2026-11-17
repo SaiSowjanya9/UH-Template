@@ -438,8 +438,26 @@ function fitDetailName(name) {
   name.style.height = `${name.scrollHeight}px`;
 }
 
+// If the focused element is a spec cell being typed into, capture its current value into
+// specPending so a re-render does not lose keystrokes.  Returns a selector that restoreFocus
+// can use to put the cursor back where it was.
+function captureActiveSpecEdit() {
+  const active = document.activeElement;
+  if (!active?.classList?.contains("cell") || !active.closest("#spec-groups")) return null;
+  const row = active.dataset.row, field = active.dataset.field;
+  if (!row || !field) return null;
+  holdSpecEdit(active);
+  return `#spec-groups .cell[data-row="${row}"][data-field="${CSS.escape(field)}"]`;
+}
+
 function renderSpec() {
   if (specDrag || specResize) { specRenderPending = true; return; }   // never tear down rows mid-drag
+  // Capture any in-progress edit before tearing down the inputs — a save that just finished
+  // calls refresh → render → renderSpec, and the cell the person moved to is still mid-keystroke.
+  // The active cell takes priority over the selector a completed save left behind: the person
+  // already moved on, and putting focus back on the finished cell would steal it.
+  const activeSel = captureActiveSpecEdit();
+  if (activeSel) state.focusSelector = activeSel;
   document.querySelectorAll("#spec-view .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.group === state.specGroup));
   const query = $("spec-filter").value.trim().toLowerCase();
   const all = projectRows();
@@ -516,6 +534,9 @@ function renderSpec() {
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
   specSaveUI();
+  // Put the cursor back on the cell the person was typing in, so a save that just finished
+  // does not steal focus from the next cell.
+  if (activeSel) restoreFocus();
 }
 
 let specDrag = null, specPress = null, specRenderPending = false, specResize = null;
@@ -1455,6 +1476,9 @@ $("spec-groups").addEventListener("input", (event) => {
   // A wrapped detail name grows its box line by line as a long heading is typed; renderSpec
   // refits every box again once the edit saves.
   if (event.target.classList.contains("detail-name")) fitDetailName(event.target);
+  // Track every keystroke so a re-render that lands between keystrokes and the change event
+  // (a completed save on another cell calls refresh → renderSpec) does not lose the value.
+  if (event.target.classList.contains("cell") && event.target.dataset.row) holdSpecEdit(event.target);
 });
 $("spec-groups").addEventListener("keydown", (event) => {
   const naming = event.target.dataset.groupNew !== undefined;
