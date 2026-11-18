@@ -1476,9 +1476,6 @@ $("spec-groups").addEventListener("input", (event) => {
   // A wrapped detail name grows its box line by line as a long heading is typed; renderSpec
   // refits every box again once the edit saves.
   if (event.target.classList.contains("detail-name")) fitDetailName(event.target);
-  // Track every keystroke so a re-render that lands between keystrokes and the change event
-  // (a completed save on another cell calls refresh → renderSpec) does not lose the value.
-  if (event.target.classList.contains("cell") && event.target.dataset.row) holdSpecEdit(event.target);
 });
 $("spec-groups").addEventListener("keydown", (event) => {
   const naming = event.target.dataset.groupNew !== undefined;
