@@ -1584,7 +1584,7 @@ $("cover-file").addEventListener("change", (event) => {
   action(() => uploadCover(file));
 });
 $("add-manufacturer").addEventListener("click", () => openEditor("manufacturer"));
-$("setup-button").addEventListener("click", () => $("setup-dialog").showModal());
+
 $("refresh").addEventListener("click", () => action(async () => { await refresh(); toast("Workspace refreshed."); }));
 // Only rendered on the hosted workspace, where there is a session to end.
 $("sign-out")?.addEventListener("click", () => action(async () => {

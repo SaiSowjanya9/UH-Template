@@ -147,8 +147,7 @@ dialog::backdrop { background:#2e271470; backdrop-filter:blur(3px); }
 .form-note { font-size:11px; margin:18px 0; }
 .form-error { color:var(--red); background:#fbede6; padding:12px; font-size:13px; border-radius:5px; }
 .dialog-actions { display:flex; justify-content:flex-end; gap:9px; padding-top:19px; border-top:1px solid var(--line); }
-.setup-content p { font-size:13px; }
-.setup-content h3 { font-family:Georgia,serif; font-size:22px; font-weight:400; margin-top:24px; }
+
 code { background:#f2eee0; border-radius:3px; padding:2px 4px; font-size:11px; overflow-wrap:anywhere; }
 .toast { position:fixed; bottom:25px; right:25px; z-index:30; max-width:min(440px,calc(100vw - 50px)); background:#6b5426; color:white; padding:15px 20px; border-radius:6px; box-shadow:0 8px 30px #3a2f1429; font-size:13px; line-height:1.6; }
 .toast.error { background:#874c3b; }

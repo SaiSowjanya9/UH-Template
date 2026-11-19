@@ -725,9 +725,6 @@ class BrowserTests(unittest.TestCase):
                         page.locator("#search").fill("Test Kitchen Faucet")
                         expect(page.locator("#selection-rows tr")).to_have_count(1)
                         expect(page.locator("#selection-rows")).to_contain_text("00123-VS")
-                        page.locator("#setup-button").click()   # the review view is gone; setup opens from the sidebar
-                        expect(page.locator("#setup-dialog")).to_be_visible()
-                        page.locator("#setup-dialog").get_by_role("button", name="Close dialog").click()
                         page.get_by_role("button", name="Edit Test Kitchen Faucet").click()
                         editor.get_by_label("Product URL", exact=True).fill("https://example.com/product")
                         editor.get_by_role("button", name="Save changes").click()
@@ -1279,7 +1276,6 @@ class BrowserTests(unittest.TestCase):
                             page.mouse.click(box["x"] / 2, box["y"] + box["height"] / 2)
 
                         for opener, selector in [("#files-button", "#files-dialog"),
-                                                 ("#setup-button", "#setup-dialog"),
                                                  ("#add-selection", "#editor")]:
                             dialog = page.locator(selector)
                             page.locator(opener).click()
