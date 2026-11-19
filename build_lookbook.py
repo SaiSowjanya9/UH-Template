@@ -32,7 +32,7 @@ from xml.sax.saxutils import escape
 
 import requests
 from PIL import Image
-from reportlab.lib.colors import HexColor
+from reportlab.lib.colors import Color, HexColor
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
@@ -144,6 +144,57 @@ DETAIL_COLS = 4                     # band-style fields across, like the client 
 # The spec sheet's section headings track their letters instead of spacing between them:
 # the same look the schedule's letter-spaced headings have, at about half the air.
 SPEC_HEADING_TRACK = 1.2
+
+# Editable spec-sheet form fields: PDF form fields accept only the standard 14 fonts,
+# so typed text uses Helvetica while every label and heading keeps the brand font.
+SPEC_FORM_FONT = "Helvetica"
+SPEC_FORM_BORDER = Color(0.78, 0.74, 0.65)
+SPEC_FIELD_H = 15
+# Typographic punctuation → WinAnsi-safe equivalents for form field values.
+SPEC_SAFE_CHARS = {0x2013: "-", 0x2014: "-", 0x2018: "'", 0x2019: "'", 0x201C: '"',
+                   0x201D: '"', 0x2026: "...", 0x00A0: " "}
+
+
+def spec_form_text(value):
+    """A value a spec-sheet PDF form field can hold."""
+    return clean(value).translate(SPEC_SAFE_CHARS).encode("latin-1", "replace").decode("latin-1")
+
+
+class SpecFieldCell(Flowable):
+    """An editable single-line text field inside a spec-sheet table cell.
+
+    The cell draws its value as visible text (for print and PDF extractors) and
+    overlays a transparent editable form field so a PDF reader lets the user edit it.
+    """
+
+    def __init__(self, name, value, width, height=SPEC_FIELD_H, size=9):
+        super().__init__()
+        self.name = name
+        self.value = spec_form_text(value)
+        self.width, self.height = width, height
+        self.size = size
+
+    def wrap(self, *_):
+        return self.width, self.height
+
+    def draw(self):
+        # Draw visible text so print and pypdf text extraction always show the value.
+        if self.value:
+            self.canv.saveState()
+            self.canv.setFont(SPEC_FORM_FONT, self.size)
+            self.canv.setFillColor(C["body"])
+            self.canv.drawString(1, (self.height - self.size) / 2, self.value)
+            self.canv.restoreState()
+        # Overlay the editable form field (transparent fill so the drawn text shows
+        # through until the user clicks in and types).
+        self.canv.acroForm.textfield(
+            name=self.name, value=self.value, x=0, y=0,
+            width=self.width, height=self.height,
+            fontName=SPEC_FORM_FONT, fontSize=self.size,
+            textColor=C["body"], fillColor=None,
+            borderColor=SPEC_FORM_BORDER, borderWidth=0.5,
+            forceBorder=True, relative=True,
+            fieldFlags="doNotSpellCheck")
 
 
 def spec_heading(column):
@@ -1008,8 +1059,19 @@ def build(pid, project, rows, draft=False, output_dir=None, title=None, prefix=N
     return out
 
 
-def spec_cell(row, column, hidden):
-    """One spec-sheet cell: the product page as a clickable link, everything else as text."""
+def _spec_field_name(row_index, column):
+    """Unique form-field name for one spec-sheet cell, e.g. 'r3_item' or 'r3_model'."""
+    slug = re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_")
+    return f"r{row_index}_{slug}"
+
+
+def spec_cell(row, column, hidden, row_index=0, field_w=0):
+    """One spec-sheet cell as an editable form field.
+
+    Product Link stays a clickable link rather than a field, because it is a URL
+    and the user is not expected to type one in by hand.  Everything else becomes
+    an editable text field pre-filled with the current value.
+    """
     if column == PRODUCT_LINK:
         url = product_link(row, hidden)
         if not url:
@@ -1017,11 +1079,17 @@ def spec_cell(row, column, hidden):
         return Paragraph(f'<link href="{escape(url, {chr(34): "&quot;"})}" '
                          f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>',
                          SPEC_CELL_STYLE)
-    return Paragraph(escape(spec_value(row, column)), SPEC_CELL_STYLE)
+    return SpecFieldCell(_spec_field_name(row_index, column),
+                         spec_value(row, column), field_w)
 
 
-def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True):
+def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
+               section_tag=""):
     """A repeated-header table of every priced line item, one row per selection.
+
+    Every data cell is an editable PDF form field so customers can type directly into the
+    downloaded PDF.  A single Notes row at the end of the section provides space for
+    additional entries.
 
     Hairlines run down the column gaps as well as under the rows: eight narrow columns of
     short values, many of them empty, read as one drifting line of text without them. They
@@ -1039,9 +1107,13 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True):
     room-grouped sheet. It is skipped when the sheet is grouped by Section - the
     heading already says it - and when the Category column was left out of the export.
     """
+    # The field widths are the column widths minus padding on both sides.
+    field_widths = [max(w - 2 * pad_x, 10) for w in widths]
     data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
-    for row in items:
-        cells = [spec_cell(row, column, hidden) for column, _ in columns]
+    for row_idx, row in enumerate(items):
+        cells = [spec_cell(row, column, hidden, row_index=row.get("_row", row_idx),
+                           field_w=field_widths[col_idx])
+                 for col_idx, (column, _) in enumerate(columns)]
         notes = []
         if show_section and clean(row.get("Section")):
             notes.append(clean(row["Section"]))
@@ -1051,6 +1123,16 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True):
             cells[0] = ([cells[0]] if cells[0] != "" else []) + \
                        [Paragraph(escape(note), SPEC_NOTE_STYLE) for note in notes]
         data.append(cells)
+    # A single Notes row at the end of the section for the customer to add data.
+    safe_tag = re.sub(r"[^a-z0-9]+", "_", (section_tag or "all").lower()).strip("_")
+    notes_row = [SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', col.lower()).strip('_')}",
+                               "", fw)
+                 for (col, _), fw in zip(columns, field_widths)]
+    # Label the first cell of the notes row so the customer knows it is for notes.
+    first_col = columns[0][0] if columns else "Item"
+    notes_row[0] = SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', first_col.lower()).strip('_')}",
+                                 "Notes", field_widths[0])
+    data.append(notes_row)
     return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
@@ -1117,7 +1199,8 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         block = (spec_details(items, page.content_w, hidden, page.landscape)
                  if is_details_group(section)
                  else spec_table(items, columns, widths, hidden, page.pad_x,
-                                 show_section=group != "Section" and "Section" not in hidden))
+                                 show_section=group != "Section" and "Section" not in hidden,
+                                 section_tag=section))
         story += (section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
                                 rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
                   if section else [block])
