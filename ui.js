@@ -1303,10 +1303,32 @@ const specQuery = () => {
     + (hidden.length ? `&hide=${encodeURIComponent(hidden.join(","))}` : "");
 };
 const docQuery = () => `${specQuery()}&orientation=${encodeURIComponent(state.specOrientation)}`;
+// A download is fetched, never navigated to: an attachment reply leaves the page alone either
+// way, but an error reply - a 502 while the hosted instance restarts - committed the navigation,
+// and the tab sat on the API address where every refresh, restore and retry downloaded the file
+// again. One click once arrived as dozens of copies that way. Going through `api` also picks up
+// the read-side gateway waits, so a restart mid-download is waited out rather than reported.
+const download = async (path) => {
+  setBusy(true, "Preparing the download…");
+  try {
+    const response = await api(path, undefined, true);
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const name = decodeURIComponent(
+      (disposition.match(/filename\*=UTF-8''([^;]+)/) || disposition.match(/filename="?([^";]+)/) || [])[1]
+      || "download");
+    const anchor = Object.assign(document.createElement("a"),
+      { href: URL.createObjectURL(blob), download: name, hidden: true });
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(anchor.href);
+  } finally { setBusy(false); }
+};
 const FILE_ACTIONS = {
-  csv: () => { window.location.href = `/api/selections/csv${specQuery()}`; },
-  "spec-docx": () => { window.location.href = `/api/selections/docx${docQuery()}`; },
-  "spec-pdf": () => { window.location.href = `/api/selections/pdf${docQuery()}`; },
+  csv: () => download(`/api/selections/csv${specQuery()}`),
+  "spec-docx": () => download(`/api/selections/docx${docQuery()}`),
+  "spec-pdf": () => download(`/api/selections/pdf${docQuery()}`),
   "import-csv": () => $("spec-import-file").click(),
 };
 const NEEDS_PROJECT = new Set(["csv", "spec-docx", "spec-pdf", "import-csv"]);
@@ -1352,7 +1374,7 @@ $("files-ok").addEventListener("click", () => {
   if (!fileChoice || state.busy) return;
   if (NEEDS_PROJECT.has(fileChoice) && !selectedProject()) { toast("Choose a project first.", true); return; }
   $("files-dialog").close();
-  FILE_ACTIONS[fileChoice]();
+  action(() => FILE_ACTIONS[fileChoice]());
 });
 $("spec-import-file").addEventListener("change", (event) => {
   const file = event.target.files[0];
