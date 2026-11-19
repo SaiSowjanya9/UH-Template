@@ -661,7 +661,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
         for position, row in enumerate(items):
             cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
             keep_whole(table.rows[position + 1])
-            for cell, (column, _) in zip(cells, columns):
+            for column_index, (cell, (column, _)) in enumerate(zip(cells, columns)):
                 url = product_link(row, hidden) if column == PRODUCT_LINK else ""
                 if url:
                     hyperlink(shape(cell.paragraphs[0], size=SPEC_CELL[0], leading=SPEC_CELL[1]),
@@ -671,6 +671,10 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                           leading=SPEC_CELL[1])
                 cell_rule(cell, "bottom", 0.5 if position == len(items) - 1 else 0.4,
                           SHEET["rule"])
+                # the PDF's LINEAFTER hairlines, on the data rows only - the narrow columns
+                # read as one drifting line of text without rules down the column gaps
+                if column_index < len(columns) - 1:
+                    cell_rule(cell, "right", 0.2, SHEET["rule"])
             # the category a line item was filed under reads under its name, as in the PDF
             if group != "Section" and "Section" not in hidden and clean(row.get("Section")):
                 write(cells[0].add_paragraph(), clean(row["Section"]), SPEC_NOTE[0],
