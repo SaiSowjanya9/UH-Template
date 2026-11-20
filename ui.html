@@ -239,7 +239,9 @@
     </section>
     <section class="clipper-section">
       <h3>Browser extension</h3>
-      <p class="form-note">Load the <code>clipper-extension</code> folder (beside the app) via your browser's Extensions page → “Load unpacked”. Then paste this app's address and a clipper token into the extension's setup.</p>
+      <p class="form-note">Reads the page from inside your browser, so it works even on sites that block the app itself — images and product details both come through.</p>
+      <p><a class="button secondary" href="/clipper-extension.zip" download>⬇ Download the clipper</a></p>
+      <p class="form-note">1. Unzip the download. 2. Open <code>chrome://extensions</code> (or <code>edge://extensions</code>), turn on <b>Developer mode</b>, choose <b>Load unpacked</b> and pick the unzipped folder. 3. Click the extension's icon and paste this app's address and a clipper token.</p>
       <div class="clip-url-row"><input id="clipper-token" type="text" readonly placeholder="Generate a token to connect the extension" aria-label="Clipper token"><button type="button" id="clipper-generate" class="button secondary">Generate token</button><button type="button" id="clipper-copy" class="button secondary" hidden>Copy</button></div>
       <p class="form-note" id="clipper-note">The token identifies you to this workspace and expires after 90 days. Treat it like a password.</p>
     </section>

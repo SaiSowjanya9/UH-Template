@@ -255,6 +255,15 @@ class CatalogAppTests(AppTestCase):
             self.assertEqual(self.client.get(f"/api/catalog/images/{name}").status_code, 400)
         self.assertEqual(self.client.get(f"/api/catalog/images/{kept_item['image']}").status_code, 200)
 
+    def test_the_clipper_extension_downloads_as_a_zip_for_hosted_users(self):
+        import zipfile
+        response = self.client.get("/clipper-extension.zip")
+        self.assertEqual(response.status_code, 200)
+        names = zipfile.ZipFile(io.BytesIO(response.data)).namelist()
+        self.assertIn("clipper-extension/manifest.json", names)
+        self.assertIn("clipper-extension/popup.js", names)
+        self.assertTrue(all(name.startswith("clipper-extension/") for name in names))
+
     def test_the_clipper_token_authenticates_without_a_session_and_a_forged_one_does_not(self):
         cid = self.make_collection()
         token = self.post("/api/catalog/clipper-token", {}).json["token"]

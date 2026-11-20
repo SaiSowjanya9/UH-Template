@@ -7,6 +7,7 @@ import re
 import secrets
 import tempfile
 import threading
+import zipfile
 from pathlib import Path
 
 from flask import Flask, Request, g, jsonify, redirect, render_template, request, send_file, session, url_for
@@ -1003,6 +1004,21 @@ def clipper_token():
     only the issuing user's email; Supabase keys never reach the extension."""
     token = clipper_serializer().dumps({"email": catalog_user()})
     return jsonify(ok=True, token=token, days=CLIPPER_TOKEN_DAYS)
+
+
+@app.get("/clipper-extension.zip")
+def clipper_extension_zip():
+    """The browser clipper as a download — a signed-in hosted user has no "folder beside
+    the app" to load unpacked, so the app serves its own copy. Only static extension
+    files go in; the token still comes from the dialog, never from the zip."""
+    folder = BASE / "clipper-extension"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+            archive.write(path, f"clipper-extension/{path.relative_to(folder).as_posix()}")
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name="uh-clipper-extension.zip",
+                     mimetype="application/zip")
 
 
 def check_exposure():
