@@ -244,6 +244,8 @@ function render() {
   $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", manufacturers: "Keep your trusted brands and official websites together.", catalog: "Everything you have clipped, beautifully organized." }[state.view];
   // the spec sheet edits the same rows the exports print, so name the home it belongs to
   if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]}`;
+  // the catalog section carries its own heading, so the page banner would say it twice
+  document.querySelector(".page-heading").hidden = state.view === "catalog";
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `${state.view}-view`; });
   $("add-selection").disabled = !project || state.busy;
@@ -1722,9 +1724,7 @@ function renderCatalog() {
       <div class="insp-body"><strong>${esc(i.Title || "Untitled inspiration")}</strong><small>${[i.Category, i["Source Site"]].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</small></div>
     </article>`).join("");
   $("catalog-empty").hidden = rows.length > 0;
-  const selected = catCollection(catCollectionId);
   $("catalog-gallery").classList.toggle("empty", !rows.length);
-  $("page-subtitle").textContent = selected ? (selected.Description || `Collection · ${selected.Name}`) : "Everything you have clipped, beautifully organized.";
 }
 
 // --- Collection editor ------------------------------------------------------
