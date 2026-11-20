@@ -121,12 +121,9 @@
   <dialog id="collection-dialog"><form id="collection-form">
     <div class="dialog-heading"><div><div class="eyebrow">DESIGN INSPIRATIONS</div><h2 id="collection-title">New collection</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
     <div class="form-grid">
-      <label class="field">Name<input id="collection-name" type="text" maxlength="120" required placeholder="Kitchen Inspirations"></label>
-      <label class="field">Privacy<select id="collection-privacy"></select></label>
+      <label class="field form-span">Name<input id="collection-name" type="text" maxlength="120" required placeholder="Kitchen Inspirations"></label>
       <label class="field form-span">Description<textarea id="collection-description" maxlength="2000" placeholder="What belongs in this collection?"></textarea></label>
-      <label class="field form-span" id="collection-shared-field">Share with (email, or email:edit — comma separated)<input id="collection-shared" type="text" maxlength="2000" placeholder="designer@studio.com:edit, builder@site.com"></label>
     </div>
-    <p class="form-note" id="collection-note">Private collections are yours alone. Shared collections are visible to the whole team; email entries grant a named person view or edit access.</p>
     <p id="collection-error" class="form-error" role="alert" hidden></p>
     <div class="dialog-actions"><button type="button" id="collection-delete" class="text-button" hidden>Delete collection</button><button type="button" class="button secondary close-dialog">Cancel</button><button type="submit" class="button primary">Save collection</button></div>
   </form></dialog>

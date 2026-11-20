@@ -88,8 +88,8 @@ CATALOG_COLLECTION_SHEET = "Catalog Collections"
 CATALOG_ITEM_SHEET = "Catalog Items"
 CATALOG_COMMENT_SHEET = "Catalog Comments"
 CATALOG_SHEETS = {
-    CATALOG_COLLECTION_SHEET: ["Collection ID", "Name", "Description", "Cover Image", "Privacy",
-                               "Owner", "Shared With", "Created", "Updated"],
+    CATALOG_COLLECTION_SHEET: ["Collection ID", "Name", "Description", "Cover Image",
+                               "Owner", "Created", "Updated"],
     CATALOG_ITEM_SHEET: ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags",
                          "Category", "Source URL", "Source Site", "Image File", "Thumb File",
                          "Image Hash", "Colors", "Materials", "Favorite", "Approval",
@@ -97,6 +97,10 @@ CATALOG_SHEETS = {
                          "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"],
     CATALOG_COMMENT_SHEET: ["Comment ID", "Item ID", "Author", "Comment", "Created"],
 }
+# The retired per-collection visibility feature: its columns are removed when seen, so a
+# workspace saved before the removal reads back like one saved after. Catalog sheets carry
+# no validations or hyperlinks, so deleting a column shifts nothing that needs rebuilding.
+RETIRED_CATALOG_FIELDS = {CATALOG_COLLECTION_SHEET: ["Privacy", "Shared With"]}
 CATALOG_IMAGE_NAME = re.compile(r"^cat-[0-9a-f]{16}(-thumb)?\.(png|jpg)$")
 LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
 # Numeric input columns: (maximum, message)
@@ -871,6 +875,9 @@ def ensure_catalog_sheets(wb):
     """
     for name, fields in CATALOG_SHEETS.items():
         ws = wb[name] if name in wb else wb.create_sheet(name)
+        retired = [c.column for c in ws[1] if clean(c.value) in RETIRED_CATALOG_FIELDS.get(name, [])]
+        for column in sorted(retired, reverse=True):
+            ws.delete_cols(column)
         headers = {clean(c.value) for c in ws[1] if clean(c.value)}
         column = max((c.column for c in ws[1] if clean(c.value)), default=0)
         for field in fields:

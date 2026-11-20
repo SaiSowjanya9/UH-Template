@@ -1675,7 +1675,7 @@ document.addEventListener("click", (event) => {
 // Collections and items arrive with /api/state, so the 2.5s poll keeps them fresh;
 // image bytes are stored by the app and served from /api/catalog/images, never hotlinked.
 // ---------------------------------------------------------------------------
-const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], privacies: [], approvals: [], ai: false, user: "", shared_accounts: false };
+const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], approvals: [], ai: false, user: "", shared_accounts: false };
 let catCollectionId = "";          // "" = all inspirations
 let catFavsOnly = false;
 let clipTab = "page", clipCandidate = null, clipFile = null, clipInspected = null;
@@ -1685,7 +1685,6 @@ const catItem = (id) => cat().items.find((i) => i["Item ID"] === id);
 const catCollection = (id) => cat().collections.find((c) => c["Collection ID"] === id);
 const catCollections = () => [...cat().collections].sort((a, b) => String(b.Updated || "").localeCompare(String(a.Updated || "")));
 const catItems = () => [...cat().items].sort((a, b) => String(b["Saved On"] || "").localeCompare(String(a["Saved On"] || "")));
-const editableCollections = () => catCollections().filter((c) => c._editable);
 const itemThumb = (i) => catImage(i["Thumb File"] || i["Image File"]);
 const collectionItems = (id) => catItems().filter((i) => i["Collection ID"] === id);
 const coverFor = (c) => {
@@ -1707,11 +1706,9 @@ function renderCatalog() {
   for (const c of catCollections()) {
     const count = collectionItems(c["Collection ID"]).length;
     const cover = coverFor(c);
-    const shared = (c.Privacy === "Shared" || c["Shared With"]) ? '<span class="pill">Shared</span>' : "";
-    const viewOnly = c._editable ? "" : '<span class="pill">View only</span>';
     strip.push(`<button class="collection-card ${catCollectionId === c["Collection ID"] ? "selected" : ""}" data-collection="${esc(c["Collection ID"])}" title="${esc(c.Description || c.Name)}">
       <span class="collection-cover">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : "❖"}</span>
-      <span class="collection-body"><strong>${esc(c.Name)}</strong><small>${count} inspiration${count === 1 ? "" : "s"}${c.Updated ? ` · ${esc(String(c.Updated).slice(0, 10))}` : ""}</small><span class="collection-pills">${shared}${viewOnly}</span></span></button>`);
+      <span class="collection-body"><strong>${esc(c.Name)}</strong><small>${count} inspiration${count === 1 ? "" : "s"}${c.Updated ? ` · ${esc(String(c.Updated).slice(0, 10))}` : ""}</small></span></button>`);
   }
   $("collection-strip").innerHTML = strip.join("");
   const query = $("catalog-search").value.trim().toLowerCase(), category = $("catalog-category").value;
@@ -1738,9 +1735,6 @@ function openCollectionEditor(collection) {
   $("collection-title").textContent = collection ? collection.Name : "New collection";
   $("collection-name").value = collection?.Name || "";
   $("collection-description").value = collection?.Description || "";
-  $("collection-privacy").innerHTML = cat().privacies.map((p) => `<option value="${esc(p)}" ${collection?.Privacy === p ? "selected" : ""}>${esc(p)}</option>`).join("");
-  $("collection-shared").value = collection?.["Shared With"] || "";
-  $("collection-shared-field").hidden = !cat().shared_accounts;
   $("collection-delete").hidden = !collection;
   $("collection-error").hidden = true;
   $("collection-dialog").showModal();
@@ -1752,8 +1746,6 @@ async function saveCollection(event) {
     const values = { "Collection ID": editingCollection?.["Collection ID"] || "",
                      Name: $("collection-name").value.trim(),
                      Description: $("collection-description").value.trim(),
-                     Privacy: $("collection-privacy").value,
-                     "Shared With": cat().shared_accounts ? $("collection-shared").value.trim() : "",
                      "Cover Image": editingCollection?.["Cover Image"] || "" };
     try {
       const result = await persist("/api/catalog/collections", { values });
@@ -1841,9 +1833,9 @@ function openClip(pageUrl) {
   $("clip-page-note").hidden = true;
   $("clip-error").hidden = true;
   $("clip-category").innerHTML = '<option value="">Choose automatically</option>' + cat().categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  const options = editableCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === catCollectionId ? "selected" : ""}>${esc(c.Name)}</option>`).join("");
+  const options = catCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === catCollectionId ? "selected" : ""}>${esc(c.Name)}</option>`).join("");
   $("clip-collection").innerHTML = options + '<option value="__new">— New collection —</option>';
-  if (!editableCollections().length) $("clip-collection").value = "__new";
+  if (!catCollections().length) $("clip-collection").value = "__new";
   $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new";
   setClipTab("page");
   setClipStep(1);
@@ -1929,7 +1921,7 @@ let inspOpen = null;
 
 function inspirationHTML(item) {
   const collection = catCollection(item["Collection ID"]);
-  const editable = !!collection?._editable;
+  const editable = !!collection;        // one shared catalog: whoever can see it can edit it
   const off = editable ? "" : "disabled";
   const colors = String(item.Colors || "").split(",").map((c) => c.trim()).filter(Boolean);
   const comments = cat().comments.filter((c) => c["Item ID"] === item["Item ID"]);
@@ -1960,7 +1952,7 @@ function inspirationHTML(item) {
           <label class="field">Qty / Unit<input id="insp-qty" type="text" maxlength="60" value="${esc(item["Qty / Unit"] || "")}" ${off}></label>
           <label class="field">Unit Price (as clipped)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
           <label class="field">Category<select id="insp-category" ${off}>${["", ...cat().categories].map((c) => `<option value="${esc(c)}" ${item.Category === c ? "selected" : ""}>${esc(c || "—")}</option>`).join("")}</select></label>
-          <label class="field">Collection<select id="insp-collection" ${off}>${editableCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === item["Collection ID"] ? "selected" : ""}>${esc(c.Name)}</option>`).join("")}</select></label>
+          <label class="field">Collection<select id="insp-collection" ${off}>${catCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === item["Collection ID"] ? "selected" : ""}>${esc(c.Name)}</option>`).join("")}</select></label>
           <label class="field">Feedback<select id="insp-approval" ${off}>${approvals.map((a) => `<option value="${esc(a)}" ${item.Approval === a ? "selected" : ""}>${esc(a || "—")}</option>`).join("")}</select></label>
           <label class="field">Tags<input id="insp-tags" type="text" maxlength="500" value="${esc(item.Tags || "")}" ${off}></label>
           <label class="field form-span">Description<textarea id="insp-description" maxlength="2000" ${off}>${esc(item.Description || "")}</textarea></label>
@@ -1976,7 +1968,7 @@ function inspirationHTML(item) {
           <div id="insp-comments">${comments.map((c) => `<div class="insp-comment"><div><strong>${esc(c.Author || "You")}</strong><small> · ${esc(String(c.Created).slice(0, 16).replace("T", " "))}</small><p>${esc(c.Comment)}</p></div>${(!cat().shared_accounts || (c.Author || "").toLowerCase() === user || owner === user) ? `<button type="button" class="text-button" data-comment-delete="${esc(c["Comment ID"])}">Remove</button>` : ""}</div>`).join("") || '<p class="muted">No comments yet.</p>'}</div>
           <div class="clip-url-row"><input id="insp-comment-text" type="text" maxlength="2000" placeholder="Add a comment for the team…" aria-label="Comment"><button type="button" class="button secondary" data-comment-add>Post</button></div>
         </section>
-        <div class="dialog-actions">${editable ? '<button type="button" class="text-button" data-insp-delete>Delete inspiration</button>' : '<span class="muted">View only — shared with you</span>'}<button type="button" class="button secondary close-dialog">Close</button>${editable ? '<button type="button" class="button primary" data-insp-save>Save changes</button>' : ""}</div>
+        <div class="dialog-actions">${editable ? '<button type="button" class="text-button" data-insp-delete>Delete inspiration</button>' : ""}<button type="button" class="button secondary close-dialog">Close</button>${editable ? '<button type="button" class="button primary" data-insp-save>Save changes</button>' : ""}</div>
       </div>
     </div>`;
 }
@@ -2081,8 +2073,7 @@ async function setCollectionCover() {
   if (!collection) return;
   await action(async () => {
     await persist("/api/catalog/collections", { values: { "Collection ID": collection["Collection ID"], Name: collection.Name,
-      Description: collection.Description || "", Privacy: collection.Privacy || "Private",
-      "Shared With": collection["Shared With"] || "", "Cover Image": item["Thumb File"] || item["Image File"] } });
+      Description: collection.Description || "", "Cover Image": item["Thumb File"] || item["Image File"] } });
     await refresh();
     toast(`“${item.Title || "This image"}” is now the cover of ${collection.Name}.`);
   });
@@ -2218,7 +2209,7 @@ $("collection-strip").addEventListener("click", (event) => {
   if (!card || state.busy) return;
   if (catCollectionId === card.dataset.collection && card.dataset.collection) {
     const collection = catCollection(card.dataset.collection);
-    if (collection?._editable) { openCollectionEditor(collection); return; }
+    if (collection) { openCollectionEditor(collection); return; }
   }
   catCollectionId = card.dataset.collection;
   renderCatalog();
@@ -2226,7 +2217,7 @@ $("collection-strip").addEventListener("click", (event) => {
 $("collection-strip").addEventListener("dblclick", (event) => {
   const card = event.target.closest("[data-collection]");
   const collection = card && catCollection(card.dataset.collection);
-  if (collection?._editable) openCollectionEditor(collection);
+  if (collection) openCollectionEditor(collection);
 });
 $("catalog-gallery").addEventListener("click", (event) => {
   const fav = event.target.closest("[data-fav]");

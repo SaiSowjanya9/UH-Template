@@ -51,8 +51,8 @@ COLLECTION_SHEET = CATALOG_COLLECTION_SHEET
 ITEM_SHEET = CATALOG_ITEM_SHEET
 COMMENT_SHEET = CATALOG_COMMENT_SHEET
 
-COLLECTION_FIELDS = ["Collection ID", "Name", "Description", "Cover Image", "Privacy",
-                     "Owner", "Shared With", "Created", "Updated"]
+COLLECTION_FIELDS = ["Collection ID", "Name", "Description", "Cover Image",
+                     "Owner", "Created", "Updated"]
 ITEM_FIELDS = ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags", "Category",
                "Source URL", "Source Site", "Image File", "Thumb File", "Image Hash", "Colors",
                "Materials", "Favorite", "Approval", "Saved By", "Saved On", "Updated",
@@ -66,9 +66,7 @@ ITEM_EDIT_FIELDS = ["Title", "Description", "Notes", "Tags", "Category", "Source
 CATEGORIES = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Flooring & Tiles",
               "Lighting & Fixtures", "Ceiling Designs", "Wall Treatments", "Exterior",
               "Landscaping", "Furniture & Decor", "Other"]
-PRIVACIES = ["Private", "Shared"]          # Shared = visible to every signed-in team member
 APPROVALS = ["", "Pending feedback", "Approved", "Needs changes"]
-ROLES = ["view", "edit"]
 
 CATEGORY_KEYWORDS = {
     "Kitchen": ["kitchen", "backsplash", "range hood", "cooktop", "island", "pantry", "cabinet"],
@@ -123,61 +121,15 @@ def find(rows, key, value):
 
 
 # ---------------------------------------------------------------------------
-# Permissions. The app has one shared team workspace: locally there are no accounts, so
-# everything is reachable; hosted, a collection belongs to whoever created it, "Shared"
-# privacy opens it read-only to the whole signed-in team, and Shared With grants a named
-# person view or edit. The owner always keeps full control.
+# One shared team catalog. Locally there are no accounts; hosted, every signed-in member
+# sees and edits every collection. Owner only records who created it (comments keep an
+# author-or-owner delete rule) — per-collection privacy and sharing were deliberately
+# removed, and their old workbook columns are dropped by ensure_catalog_sheets.
 # ---------------------------------------------------------------------------
 
-EMAIL = re.compile(r"[^@\s:,]+@[^@\s:,]+\.[^@\s:,]+")
-
-
-def shared_entries(value):
-    """'a@b.com:edit, c@d.com' -> [{'email':..., 'role':...}], invalid entries dropped."""
-    out = []
-    for part in clean(value).split(","):
-        part = part.strip()
-        if not part:
-            continue
-        email, _, role = part.partition(":")
-        email, role = email.strip().lower(), (role.strip().lower() or "view")
-        if EMAIL.fullmatch(email) and role in ROLES:
-            out.append({"email": email, "role": role})
-    return out
-
-
-def normalize_shared(value):
-    entries = shared_entries(value)
-    if clean(value) and len([p for p in clean(value).split(",") if p.strip()]) != len(entries):
-        raise ValidationError("Share with email addresses, one per entry, as name@example.com or name@example.com:edit.")
-    return ", ".join(f"{e['email']}:{e['role']}" for e in entries)
-
-
-def can_view(collection, user, require_login):
-    if not require_login:
-        return True
-    owner, user = clean(collection.get("Owner")).lower(), (user or "").lower()
-    if not owner or owner == user:
-        return True
-    if clean(collection.get("Privacy")) == "Shared":
-        return True
-    return any(entry["email"] == user for entry in shared_entries(collection.get("Shared With")))
-
-
-def can_edit(collection, user, require_login):
-    if not require_login:
-        return True
-    owner, user = clean(collection.get("Owner")).lower(), (user or "").lower()
-    if not owner or owner == user:
-        return True
-    return any(entry["email"] == user and entry["role"] == "edit"
-               for entry in shared_entries(collection.get("Shared With")))
-
-
 def visible_catalog(wb, user, require_login):
-    """The collections this person may see, their items and those items' comments."""
-    collections = [{**c, "_editable": can_edit(c, user, require_login)}
-                   for c in collection_records(wb) if can_view(c, user, require_login)]
+    """Every collection, its items and those items' comments — the whole team's catalog."""
+    collections = list(collection_records(wb))
     ids = {c["Collection ID"] for c in collections}
     items = [i for i in item_records(wb) if i["Collection ID"] in ids]
     item_ids = {i["Item ID"] for i in items}
@@ -187,10 +139,8 @@ def visible_catalog(wb, user, require_login):
 
 def editable_collection(wb, collection_id, user, require_login):
     collection = find(collection_records(wb), "Collection ID", clean(collection_id))
-    if not collection or not can_view(collection, user, require_login):
+    if not collection:
         raise ValidationError("Choose one of your collections.")
-    if not can_edit(collection, user, require_login):
-        raise ValidationError("You can view this collection, but only its owner lets you change it.")
     return collection
 
 
@@ -204,8 +154,6 @@ def save_collection(wb, data, user, require_login):
     sheet = Sheet(wb[COLLECTION_SHEET])
     rows = collection_records(wb)
     existing = find(rows, "Collection ID", values.get("Collection ID")) if values.get("Collection ID") else None
-    if existing and not can_edit(existing, user, require_login):
-        raise ValidationError("Only this collection's owner can change it.")
     if data.get("delete"):
         if not existing:
             raise ValidationError("This collection no longer exists. Refresh the page.")
@@ -228,13 +176,8 @@ def save_collection(wb, data, user, require_login):
         raise ValidationError("Give the collection a name of up to 120 characters.")
     if len(clean(values.get("Description"))) > 2000:
         raise ValidationError("A collection description can be up to 2,000 characters.")
-    privacy = clean(values.get("Privacy")) or "Private"
-    if privacy not in PRIVACIES:
-        raise ValidationError("Privacy must be Private or Shared.")
-    shared = normalize_shared(values.get("Shared With"))
     if existing:
         put(sheet, existing["_row"], {"Name": name, "Description": clean(values.get("Description")),
-                                      "Privacy": privacy, "Shared With": shared,
                                       "Cover Image": clean(values.get("Cover Image")) or existing.get("Cover Image", ""),
                                       "Updated": stamp()})
         return (f"catalog: collection {name}", [])
@@ -243,8 +186,8 @@ def save_collection(wb, data, user, require_login):
     collection_id = new_id("col", (c["Collection ID"] for c in rows))
     row = next_row(sheet)
     put(sheet, row, {"Collection ID": collection_id, "Name": name,
-                     "Description": clean(values.get("Description")), "Privacy": privacy,
-                     "Owner": (user or ""), "Shared With": shared, "Cover Image": "",
+                     "Description": clean(values.get("Description")),
+                     "Owner": (user or ""), "Cover Image": "",
                      "Created": stamp(), "Updated": stamp()})
     return (f"catalog: new collection {name}", collection_id)
 
@@ -343,8 +286,7 @@ def viewable_item(wb, item_id, user, require_login):
     item = find(item_records(wb), "Item ID", clean(item_id))
     if not item:
         raise ValidationError("This inspiration no longer exists. Refresh the page.")
-    collection = find(collection_records(wb), "Collection ID", item["Collection ID"])
-    if not collection or not can_view(collection, user, require_login):
+    if not find(collection_records(wb), "Collection ID", item["Collection ID"]):
         raise ValidationError("This inspiration no longer exists. Refresh the page.")
     return item
 
@@ -393,8 +335,7 @@ def add_comment(wb, data, user, require_login):
     item = find(item_records(wb), "Item ID", clean(data.get("item")))
     if not item:
         raise ValidationError("This inspiration no longer exists. Refresh the page.")
-    collection = find(collection_records(wb), "Collection ID", item["Collection ID"])
-    if not collection or not can_view(collection, user, require_login):
+    if not find(collection_records(wb), "Collection ID", item["Collection ID"]):
         raise ValidationError("Choose one of your collections.")
     text = clean(data.get("text"))
     if not text or len(text) > 2000:

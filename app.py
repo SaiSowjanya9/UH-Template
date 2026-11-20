@@ -271,7 +271,7 @@ def state():
                        client_statuses=CLIENT_STATUSES,
                        export_columns=EXPORT_COLUMNS,
                        catalog={"collections": collections, "items": items, "comments": comments,
-                                "categories": catalog.CATEGORIES, "privacies": catalog.PRIVACIES,
+                                "categories": catalog.CATEGORIES,
                                 "approvals": catalog.APPROVALS, "ai": bool(catalog.ai_settings()),
                                 "user": user, "shared_accounts": REQUIRE_LOGIN},
                        revision=revision,
@@ -806,8 +806,8 @@ def finish_clip(raw, meta, data):
         collection_id = common.clean(data.get("collection"))
         created = None
         if not collection_id and common.clean(data.get("new_collection")):
-            _, created = catalog.save_collection(wb, {"values": {"Name": common.clean(data.get("new_collection")),
-                                                                 "Privacy": "Private"}}, user, REQUIRE_LOGIN)
+            _, created = catalog.save_collection(wb, {"values": {"Name": common.clean(data.get("new_collection"))}},
+                                                 user, REQUIRE_LOGIN)
             collection_id = created
         item_id, image_name, thumb_name, new_file = catalog.add_item(
             wb, collection_id, processed, meta, user, REQUIRE_LOGIN)
@@ -932,7 +932,7 @@ def clipper_collections():
         counts[item["Collection ID"]] = counts.get(item["Collection ID"], 0) + 1
     return jsonify(ok=True, collections=[{"id": c["Collection ID"], "name": c["Name"],
                                           "count": counts.get(c["Collection ID"], 0)}
-                                         for c in collections if c["_editable"]])
+                                         for c in collections])
 
 
 @app.get("/api/catalog/images/<name>")

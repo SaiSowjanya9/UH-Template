@@ -92,18 +92,16 @@ class CatalogAppTests(AppTestCase):
         cid = self.make_collection("Bathroom Designs", Description="Tile and stone ideas")
         found = next(c for c in self.state()["catalog"]["collections"] if c["Collection ID"] == cid)
         self.assertEqual(found["Description"], "Tile and stone ideas")
-        self.assertEqual(found["Privacy"], "Private")
-        self.assertTrue(found["_editable"])
         # a duplicate name is refused
         response = self.post("/api/catalog/collections", {"values": {"Name": "bathroom designs"}})
         self.assertEqual(response.status_code, 400)
         # an update keeps the id and bumps Updated
         response = self.post("/api/catalog/collections",
-                             {"values": {"Collection ID": cid, "Name": "Bathroom Designs", "Privacy": "Shared",
-                                         "Description": "Now shared"}})
+                             {"values": {"Collection ID": cid, "Name": "Bathroom Designs",
+                                         "Description": "Now renamed"}})
         self.assertEqual(response.status_code, 200, response.json)
         found = next(c for c in self.state()["catalog"]["collections"] if c["Collection ID"] == cid)
-        self.assertEqual(found["Privacy"], "Shared")
+        self.assertEqual(found["Description"], "Now renamed")
         response = self.post("/api/catalog/collections",
                              {"values": {"Collection ID": cid, "Name": "Bathroom Designs"}, "delete": True})
         self.assertEqual(response.status_code, 200, response.json)
@@ -314,8 +312,8 @@ class CatalogAppTests(AppTestCase):
                             for r in self.state()["selections"]))
 
 
-class SharingTests(unittest.TestCase):
-    """Hosted-mode visibility: owners, team-shared collections, and named permissions."""
+class HostedCatalogTests(unittest.TestCase):
+    """Hosted mode: one shared team catalog, and the clipper token's identity."""
 
     def setUp(self):
         import app
@@ -348,55 +346,32 @@ class SharingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         return response.json
 
-    def test_private_collections_are_invisible_and_uneditable_to_others(self):
+    def test_every_signed_in_member_sees_and_edits_every_collection(self):
+        """Privacy and sharing were removed: the catalog is one shared team workspace."""
         owner = self.sign_in("owner@uh.test")
         response = self.client.post("/api/catalog/collections", headers=owner,
                                     json={"revision": self.state()["revision"],
-                                          "values": {"Name": "Owner's Private Ideas"}})
+                                          "values": {"Name": "Studio Board"}})
         self.assertEqual(response.status_code, 200, response.json)
         cid = response.json["collection"]
 
         other = self.sign_in("other@uh.test")
-        self.assertEqual(self.state()["catalog"]["collections"], [])
+        collections = self.state()["catalog"]["collections"]
+        self.assertEqual(len(collections), 1)                  # visible to everyone signed in
+        self.assertNotIn("Privacy", collections[0])            # the retired columns are gone
+        self.assertNotIn("Shared With", collections[0])
         response = self.client.post("/api/catalog/collections", headers=other,
                                     json={"revision": self.state()["revision"],
-                                          "values": {"Collection ID": cid, "Name": "Hijacked"}})
-        self.assertEqual(response.status_code, 400)
-
-        owner = self.sign_in("owner@uh.test")
-        shared = self.client.post("/api/catalog/collections", headers=owner,
-                                  json={"revision": self.state()["revision"],
-                                        "values": {"Collection ID": cid, "Name": "Owner's Private Ideas",
-                                                   "Privacy": "Shared"}})
-        self.assertEqual(shared.status_code, 200, shared.json)
-
-        self.sign_in("other@uh.test")
-        collections = self.state()["catalog"]["collections"]
-        self.assertEqual(len(collections), 1)
-        self.assertFalse(collections[0]["_editable"])          # team-shared means read-only
-
-    def test_a_named_editor_may_change_the_collection(self):
-        owner = self.sign_in("owner@uh.test")
-        response = self.client.post("/api/catalog/collections", headers=owner,
-                                    json={"revision": self.state()["revision"],
-                                          "values": {"Name": "Studio Board",
-                                                     "Shared With": "designer@uh.test:edit, viewer@uh.test"}})
-        cid = response.json["collection"]
-
-        designer = self.sign_in("designer@uh.test")
-        collections = self.state()["catalog"]["collections"]
-        self.assertTrue(collections[0]["_editable"])
-        response = self.client.post("/api/catalog/collections", headers=designer,
+                                          "values": {"Collection ID": cid, "Name": "Studio Board",
+                                                     "Description": "Edited by a teammate"}})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(self.state()["catalog"]["collections"][0]["Description"], "Edited by a teammate")
+        # the removed fields are refused rather than silently stored
+        response = self.client.post("/api/catalog/collections", headers=other,
                                     json={"revision": self.state()["revision"],
                                           "values": {"Collection ID": cid, "Name": "Studio Board",
-                                                     "Description": "Edited by the designer",
-                                                     "Shared With": "designer@uh.test:edit, viewer@uh.test"}})
-        self.assertEqual(response.status_code, 200, response.json)
-
-        self.sign_in("viewer@uh.test")
-        collections = self.state()["catalog"]["collections"]
-        self.assertEqual(collections[0]["Description"], "Edited by the designer")
-        self.assertFalse(collections[0]["_editable"])
+                                                     "Privacy": "Private"}})
+        self.assertEqual(response.status_code, 400)
 
     def test_the_clipper_token_carries_its_owner_into_hosted_saves(self):
         owner = self.sign_in("owner@uh.test")
@@ -593,12 +568,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(catalog.keyword_category("nothing relevant"), "")
         self.assertEqual(catalog.keyword_materials("Honed marble over white oak"), ["marble", "oak"])
 
-    def test_shared_entries_parse_and_invalid_lines_are_refused(self):
-        entries = catalog.shared_entries("a@b.com:edit, C@D.com , bad, x@y.com:admin")
-        self.assertEqual(entries, [{"email": "a@b.com", "role": "edit"}, {"email": "c@d.com", "role": "view"}])
-        with self.assertRaises(ValidationError):
-            catalog.normalize_shared("not-an-email")
-        self.assertEqual(catalog.normalize_shared(" a@b.com:edit "), "a@b.com:edit")
+
 
     def test_palette_reads_dominant_colors(self):
         image = Image.new("RGB", (120, 120), (250, 10, 10))
