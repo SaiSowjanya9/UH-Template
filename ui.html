@@ -131,42 +131,59 @@
     <div class="dialog-actions"><button type="button" id="collection-delete" class="text-button" hidden>Delete collection</button><button type="button" class="button secondary close-dialog">Cancel</button><button type="submit" class="button primary">Save collection</button></div>
   </form></dialog>
 
+  <!-- Clipping walks three steps: file it (collection), capture it (URL, images, details),
+       then review the filled fields and save. -->
   <dialog id="clip-dialog">
     <div class="dialog-heading"><div><div class="eyebrow">CLIP AN INSPIRATION</div><h2>Add to your inspirations</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
-    <div class="chip-group clip-tabs" role="group" aria-label="How to add the image"><button type="button" class="chip" data-clip-tab="page">From a web page</button><button type="button" class="chip" data-clip-tab="image">Image address</button><button type="button" class="chip" data-clip-tab="upload">Upload</button></div>
-    <div id="clip-page-panel" class="clip-panel">
-      <div class="clip-url-row"><input id="clip-page-url" type="url" maxlength="2000" placeholder="https://… the page you found the design on" aria-label="Page address"><button type="button" id="clip-inspect" class="button secondary">Find images</button></div>
-      <div id="clip-candidates" class="clip-candidates" hidden></div>
-      <p id="clip-page-note" class="form-note" hidden></p>
+    <div class="clip-steps" aria-label="Steps">
+      <span class="clip-step-dot" data-step-dot="1">1 · Collection</span>
+      <span class="clip-step-dot" data-step-dot="2">2 · Capture</span>
+      <span class="clip-step-dot" data-step-dot="3">3 · Review &amp; save</span>
     </div>
-    <div id="clip-image-panel" class="clip-panel" hidden>
-      <input id="clip-image-url" type="url" maxlength="2000" placeholder="https://… a direct link to the image itself" aria-label="Image address">
-      <p class="form-note">The image is downloaded and stored with your account — never hotlinked from the source site.</p>
+    <div id="clip-step-1" class="clip-step">
+      <p class="form-note">Where should this inspiration live? Pick one of your collections, or start a new one.</p>
+      <div class="form-grid">
+        <label class="field">Collection<select id="clip-collection"></select></label>
+        <label class="field" id="clip-new-collection-field" hidden>New collection name<input id="clip-new-collection" type="text" maxlength="120" placeholder="Kitchen Inspirations"></label>
+      </div>
     </div>
-    <div id="clip-upload-panel" class="clip-panel" hidden>
-      <button type="button" id="clip-choose-file" class="button secondary full">Choose a PNG, JPEG or WebP…</button>
-      <p id="clip-file-name" class="form-note"></p>
+    <div id="clip-step-2" class="clip-step" hidden>
+      <div class="chip-group clip-tabs" role="group" aria-label="How to add the image"><button type="button" class="chip" data-clip-tab="page">From a web page</button><button type="button" class="chip" data-clip-tab="image">Image address</button><button type="button" class="chip" data-clip-tab="upload">Upload</button></div>
+      <div id="clip-page-panel" class="clip-panel">
+        <div class="clip-url-row"><input id="clip-page-url" type="url" maxlength="2000" placeholder="https://… the page you found the design on" aria-label="Page address"><button type="button" id="clip-inspect" class="button secondary">Find images</button></div>
+        <div id="clip-candidates" class="clip-candidates" hidden></div>
+        <p id="clip-page-note" class="form-note" hidden></p>
+      </div>
+      <div id="clip-image-panel" class="clip-panel" hidden>
+        <input id="clip-image-url" type="url" maxlength="2000" placeholder="https://… a direct link to the image itself" aria-label="Image address">
+        <p class="form-note">The image is downloaded and stored with your account — never hotlinked from the source site.</p>
+      </div>
+      <div id="clip-upload-panel" class="clip-panel" hidden>
+        <button type="button" id="clip-choose-file" class="button secondary full">Choose a PNG, JPEG or WebP…</button>
+        <p id="clip-file-name" class="form-note"></p>
+      </div>
     </div>
-    <!-- The product fields mirror the spec sheet's default columns, in its order:
-         Item, Brand, Model, Finish / Color, Size / Config, Link, Qty / Unit, Unit Price. -->
-    <div class="form-grid clip-fields">
-      <label class="field">Item<input id="clip-title" type="text" maxlength="200" placeholder="Marble waterfall island"></label>
-      <label class="field">Brand<input id="clip-brand" type="text" maxlength="200" placeholder="Kohler"></label>
-      <label class="field">Model<input id="clip-model" type="text" maxlength="100" placeholder="K-596-VS"></label>
-      <label class="field">Finish / Color<input id="clip-finish" type="text" maxlength="200" placeholder="Matte Black"></label>
-      <label class="field">Size / Config<input id="clip-size" type="text" maxlength="200" placeholder="30 in · single bowl"></label>
-      <label class="field">Link (product page)<input id="clip-link" type="url" maxlength="2000" placeholder="https://…"></label>
-      <label class="field">Qty / Unit<input id="clip-qty" type="text" maxlength="60" placeholder="1 EA"></label>
-      <label class="field">Unit Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
-      <label class="field">Category<select id="clip-category"><option value="">Choose automatically</option></select></label>
-      <label class="field">Collection<select id="clip-collection"></select></label>
-      <label class="field" id="clip-new-collection-field" hidden>New collection name<input id="clip-new-collection" type="text" maxlength="120" placeholder="Kitchen Inspirations"></label>
-      <label class="field">Tags (comma separated)<input id="clip-tags" type="text" maxlength="500" placeholder="modern, white oak, brass"></label>
-      <label class="field">Notes<input id="clip-notes" type="text" maxlength="2000" placeholder="Why you saved this"></label>
-      <label class="field form-span">Description<textarea id="clip-description" maxlength="2000"></textarea></label>
+    <div id="clip-step-3" class="clip-step" hidden>
+      <p class="form-note">Check what was captured — everything stays editable before it saves.</p>
+      <!-- The product fields mirror the spec sheet's default columns, in its order:
+           Item, Brand, Model, Finish / Color, Size / Config, Link, Qty / Unit, Unit Price. -->
+      <div class="form-grid clip-fields">
+        <label class="field">Item<input id="clip-title" type="text" maxlength="200" placeholder="Marble waterfall island"></label>
+        <label class="field">Brand<input id="clip-brand" type="text" maxlength="200" placeholder="Kohler"></label>
+        <label class="field">Model<input id="clip-model" type="text" maxlength="100" placeholder="K-596-VS"></label>
+        <label class="field">Finish / Color<input id="clip-finish" type="text" maxlength="200" placeholder="Matte Black"></label>
+        <label class="field">Size / Config<input id="clip-size" type="text" maxlength="200" placeholder="30 in · single bowl"></label>
+        <label class="field">Link (product page)<input id="clip-link" type="url" maxlength="2000" placeholder="https://…"></label>
+        <label class="field">Qty / Unit<input id="clip-qty" type="text" maxlength="60" placeholder="1 EA"></label>
+        <label class="field">Unit Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
+        <label class="field">Category<select id="clip-category"><option value="">Choose automatically</option></select></label>
+        <label class="field">Tags (comma separated)<input id="clip-tags" type="text" maxlength="500" placeholder="modern, white oak, brass"></label>
+        <label class="field">Notes<input id="clip-notes" type="text" maxlength="2000" placeholder="Why you saved this"></label>
+        <label class="field form-span">Description<textarea id="clip-description" maxlength="2000"></textarea></label>
+      </div>
     </div>
     <p id="clip-error" class="form-error" role="alert" hidden></p>
-    <div class="dialog-actions"><span id="clip-chosen" class="muted" role="status"></span><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="clip-save" class="button primary">Save inspiration</button></div>
+    <div class="dialog-actions"><span id="clip-chosen" class="muted" role="status"></span><button type="button" id="clip-back" class="button secondary" hidden>‹ Back</button><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="clip-next" class="button primary">Continue ›</button><button type="button" id="clip-save" class="button primary" hidden>Save inspiration</button></div>
   </dialog>
 
   <dialog id="inspiration-dialog" class="inspiration-dialog">

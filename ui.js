@@ -1782,9 +1782,42 @@ function setClipTab(tab) {
 }
 
 function updateClipChosen() {
-  $("clip-chosen").textContent = clipTab === "page" ? (clipCandidate ? "Image selected from the page." : "Find images, then pick one.")
+  $("clip-chosen").textContent = clipStep === 1 ? "Step 1 of 3 — choose where it files."
+    : clipStep === 3 ? "Step 3 of 3 — review the details, then save."
+    : clipTab === "page" ? (clipCandidate ? "Image selected from the page." : "Find images, then pick one to preview.")
     : clipTab === "image" ? "The image at that address will be saved."
     : (clipFile ? `Ready to upload ${clipFile.name}.` : "Choose an image file to upload.");
+}
+
+// The clip dialog walks three steps: collection first, then capture, then review and save.
+let clipStep = 1;
+
+function setClipStep(step) {
+  clipStep = step;
+  for (const n of [1, 2, 3]) $(`clip-step-${n}`).hidden = n !== step;
+  document.querySelectorAll("[data-step-dot]").forEach((dot) => {
+    const at = Number(dot.dataset.stepDot);
+    dot.classList.toggle("current", at === step);
+    dot.classList.toggle("done", at < step);
+  });
+  $("clip-back").hidden = step === 1;
+  $("clip-next").hidden = step === 3;
+  $("clip-save").hidden = step !== 3;
+  $("clip-error").hidden = true;
+  updateClipChosen();
+}
+
+function clipStepForward() {
+  const fail = (message) => { $("clip-error").textContent = message; $("clip-error").hidden = false; };
+  if (clipStep === 1) {
+    if ($("clip-collection").value === "__new" && !$("clip-new-collection").value.trim()) { fail("Name the new collection first."); return; }
+    setClipStep(2);
+  } else if (clipStep === 2) {
+    if (clipTab === "page" && !clipCandidate) { fail("Find images on the page, then pick the one to save."); return; }
+    if (clipTab === "image" && !$("clip-image-url").value.trim()) { fail("Paste the image's address first."); return; }
+    if (clipTab === "upload" && !clipFile) { fail("Choose an image file to upload."); return; }
+    setClipStep(3);
+  }
 }
 
 function openClip(pageUrl) {
@@ -1801,6 +1834,7 @@ function openClip(pageUrl) {
   if (!editableCollections().length) $("clip-collection").value = "__new";
   $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new";
   setClipTab("page");
+  setClipStep(1);
   $("clip-dialog").showModal();
   if (pageUrl) { $("clip-page-url").value = pageUrl; inspectPage(); }
 }
@@ -2221,6 +2255,7 @@ $("clip-lightbox-use").addEventListener("click", () => {
   if (clipCandidate?.alt && !$("clip-title").value) $("clip-title").value = clipCandidate.alt;
   updateClipChosen();
   $("clip-lightbox").close();
+  if (clipStep === 2 && clipCandidate) clipStepForward();   // the image is chosen — on to review
 });
 $("clip-lightbox-prev").addEventListener("click", () => showClipPreview(clipPreview - 1));
 $("clip-lightbox-next").addEventListener("click", () => showClipPreview(clipPreview + 1));
@@ -2233,6 +2268,8 @@ $("clip-lightbox-image").addEventListener("error", () => {
   if ($("clip-lightbox").open) $("clip-lightbox-caption").textContent = "This image cannot be previewed here — it may still save, or pick another.";
 });
 $("clip-collection").addEventListener("change", () => { $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new"; });
+$("clip-next").addEventListener("click", clipStepForward);
+$("clip-back").addEventListener("click", () => setClipStep(Math.max(1, clipStep - 1)));
 $("clip-choose-file").addEventListener("click", () => $("catalog-file").click());
 $("catalog-file").addEventListener("change", (event) => {
   clipFile = event.target.files[0] || null;

@@ -454,6 +454,10 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .insp-comment strong { font-size:11px; color:#4a3f24; }
 .insp-comment small { font-size:10px; color:#aba082; }
 .insp-comment p { margin:4px 0 0; font-size:12px; color:#4a4028; }
+.clip-steps { display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap; }
+.clip-step-dot { font-size:11px; font-weight:600; letter-spacing:.4px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:5px 12px; background:#fff; }
+.clip-step-dot.current { color:var(--gold-ink); border-color:var(--gold); background:var(--cream); }
+.clip-step-dot.done { color:var(--gold-ink); }
 .clip-tabs { margin-bottom:16px; }
 .clip-panel { margin-bottom:17px; }
 .clip-url-row { display:flex; gap:8px; margin:9px 0; }
