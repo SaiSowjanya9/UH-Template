@@ -1678,7 +1678,7 @@ document.addEventListener("click", (event) => {
 const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], approvals: [], ai: false, user: "", shared_accounts: false };
 let catCollectionId = "";          // "" = all inspirations
 let catFavsOnly = false;
-let clipTab = "page", clipCandidate = null, clipFile = null, clipInspected = null;
+let clipTab = "page", clipCandidate = null, clipFile = null, clipInspected = null, clipInspectFailed = false;
 
 const catImage = (name) => `/api/catalog/images/${encodeURIComponent(name || "")}`;
 const catItem = (id) => cat().items.find((i) => i["Item ID"] === id);
@@ -1817,7 +1817,12 @@ function clipStepForward() {
     if ($("clip-collection").value === "__new" && !$("clip-new-collection").value.trim()) { fail("Name the new collection first."); return; }
     setClipStep(2);
   } else if (clipStep === 2) {
-    if (clipTab === "page" && !clipCandidate) { fail("Find images on the page, then pick the one to save."); return; }
+    if (clipTab === "page" && !clipCandidate) {
+      fail(clipInspectFailed
+        ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or use the browser extension."
+        : "Find images on the page, then pick the one to save.");
+      return;
+    }
     if (clipTab === "image" && !$("clip-image-url").value.trim()) { fail("Paste the image's address first."); return; }
     if (clipTab === "upload" && !clipFile) { fail("Choose an image file to upload."); return; }
     setClipStep(3);
@@ -1825,7 +1830,8 @@ function clipStepForward() {
 }
 
 function openClip(pageUrl) {
-  clipCandidate = null; clipFile = null; clipInspected = null;
+  clipCandidate = null; clipFile = null; clipInspected = null; clipInspectFailed = false;
+  $("clip-page-note").classList.remove("form-error");
   for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size", "clip-link", "clip-qty"]) $(id).value = "";
   $("clip-file-name").textContent = "";
   $("clip-candidates").hidden = true;
@@ -1849,8 +1855,25 @@ async function inspectPage() {
   await action(async () => {
     $("clip-inspect").disabled = true;
     try {
-      const result = await api("/api/catalog/inspect", { url });
-      clipInspected = result; clipCandidate = null;
+      let result;
+      try {
+        result = await api("/api/catalog/inspect", { url });
+      } catch (error) {
+        // The site refused or could not be read. Explain inside the dialog, where the
+        // person is looking, and name the paths that still work for a site like this.
+        clipInspected = null; clipCandidate = null; clipInspectFailed = true;
+        $("clip-candidates").hidden = true;
+        $("clip-candidates").innerHTML = "";
+        $("clip-page-note").textContent = `${error.message} Some sites block server reading — you can still clip this: `
+          + "paste the picture's own address in the Image address tab (right-click the image → Copy image address), "
+          + "upload a screenshot, or use the browser extension (Get the clipper), which reads the page from inside your browser.";
+        $("clip-page-note").classList.add("form-error");
+        $("clip-page-note").hidden = false;
+        updateClipChosen();
+        return;
+      }
+      clipInspected = result; clipCandidate = null; clipInspectFailed = false;
+      $("clip-page-note").classList.remove("form-error");
       // Fill every default field the page offers, leaving anything already typed alone.
       for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
                                ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"],
