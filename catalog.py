@@ -41,7 +41,11 @@ IMAGE_LIMIT = 1920               # stored copies are resized down to this long s
 THUMB_LIMIT = 480
 MIN_SIDE = 80                    # anything smaller is an icon, not an inspiration
 PALETTE_SIZE = 5
-USER_AGENT = "Mozilla/5.0 (compatible; UH-Homes-Clipper/1.0)"
+# A plain browser user agent: many retail sites answer 403 to anything announcing itself
+# as a bot, and the clipper fetches one page a person pasted, throttled, not a crawl.
+# (Heavier bot walls - Akamai, Cloudflare challenges - still refuse; the extension covers those.)
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 COLLECTION_SHEET = CATALOG_COLLECTION_SHEET
 ITEM_SHEET = CATALOG_ITEM_SHEET
@@ -429,7 +433,8 @@ def safe_fetch(url, limit, accept="*/*"):
         check_address(parts.hostname)
         try:
             response = requests.get(url, stream=True, timeout=TIMEOUT, allow_redirects=False,
-                                    headers={"User-Agent": USER_AGENT, "Accept": accept})
+                                    headers={"User-Agent": USER_AGENT, "Accept": accept,
+                                             "Accept-Language": "en-US,en;q=0.9"})
         except requests.RequestException:
             raise ValidationError("That site could not be reached. Check the URL and try again.") from None
         with response:
