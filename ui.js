@@ -1789,7 +1789,7 @@ function updateClipChosen() {
 
 function openClip(pageUrl) {
   clipCandidate = null; clipFile = null; clipInspected = null;
-  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price"]) $(id).value = "";
+  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size"]) $(id).value = "";
   $("clip-file-name").textContent = "";
   $("clip-candidates").hidden = true;
   $("clip-candidates").innerHTML = "";
@@ -1813,9 +1813,11 @@ async function inspectPage() {
     try {
       const result = await api("/api/catalog/inspect", { url });
       clipInspected = result; clipCandidate = null;
-      if (!$("clip-title").value) $("clip-title").value = result.title || "";
-      if (!$("clip-description").value) $("clip-description").value = result.description || "";
-      if (!$("clip-price").value) $("clip-price").value = result.price || "";
+      // Fill every default field the page offers, leaving anything already typed alone.
+      for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
+                               ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"], ["clip-size", "size"]]) {
+        if (!$(id).value) $(id).value = result[key] || "";
+      }
       $("clip-page-note").textContent = result.images.length
         ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} found on ${result.site || "the page"} — pick the one to save.`
         : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
@@ -1838,8 +1840,10 @@ async function saveClip() {
     if (!collection && !newName) fail("Choose a collection, or name a new one.");
     const meta = { title: $("clip-title").value.trim(), description: $("clip-description").value.trim(),
                    notes: $("clip-notes").value.trim(), tags: $("clip-tags").value.trim(),
-                   category: $("clip-category").value, materials: "",
-                   price: $("clip-price").value.trim(), brand: clipInspected?.brand || "" };
+                   category: $("clip-category").value, materials: clipInspected?.materials || "",
+                   price: $("clip-price").value.trim(), brand: $("clip-brand").value.trim(),
+                   model: $("clip-model").value.trim(), finish: $("clip-finish").value.trim(),
+                   size: $("clip-size").value.trim() };
     setBusy(true, "Saving the inspiration…");
     try {
       if (clipTab === "upload") {
@@ -1909,6 +1913,9 @@ function inspirationHTML(item) {
           <label class="field form-span">Materials<input id="insp-materials" type="text" maxlength="500" value="${esc(item.Materials || "")}" ${off}></label>
           <label class="field">Price (suggestion)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
           <label class="field">Brand<input id="insp-brand" type="text" maxlength="200" value="${esc(item.Brand || "")}" ${off}></label>
+          <label class="field">Model / SKU<input id="insp-model" type="text" maxlength="100" value="${esc(item["Model #"] || "")}" ${off}></label>
+          <label class="field">Finish / Color<input id="insp-finish" type="text" maxlength="200" value="${esc(item["Finish / Color"] || "")}" ${off}></label>
+          <label class="field">Size / Configuration<input id="insp-size" type="text" maxlength="200" value="${esc(item["Size / Configuration"] || "")}" ${off}></label>
         </div>
         <div class="insp-ai">
           <button type="button" class="button secondary" data-insp-analyze>✶ ${cat().ai ? "Analyze with AI" : "Suggest category & materials"}</button>
@@ -1947,7 +1954,9 @@ async function saveInspiration() {
                      "Collection ID": $("insp-collection").value, Approval: $("insp-approval").value,
                      Tags: $("insp-tags").value.trim(), Description: $("insp-description").value.trim(),
                      Notes: $("insp-notes").value.trim(), Materials: $("insp-materials").value.trim(),
-                     Price: $("insp-price").value.trim(), Brand: $("insp-brand").value.trim() };
+                     Price: $("insp-price").value.trim(), Brand: $("insp-brand").value.trim(),
+                     "Model #": $("insp-model").value.trim(), "Finish / Color": $("insp-finish").value.trim(),
+                     "Size / Configuration": $("insp-size").value.trim() };
     await persist("/api/catalog/items", { item: item["Item ID"], values }, () => !!catItem(item["Item ID"]));
     $("inspiration-dialog").close();
     await refresh();

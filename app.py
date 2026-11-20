@@ -773,7 +773,8 @@ def import_spec_csv():
 
 CLIP_THROTTLE = auth.Throttle(limit=120, window=900)
 CLIP_META_FIELDS = ["title", "description", "notes", "tags", "category",
-                    "source_url", "source_site", "materials", "price", "brand"]
+                    "source_url", "source_site", "materials", "price", "brand",
+                    "model", "finish", "size"]
 CATALOG_IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg"}
 
 

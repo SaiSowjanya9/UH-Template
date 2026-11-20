@@ -146,11 +146,17 @@ class CatalogAppTests(AppTestCase):
         with patch.object(catalog, "safe_fetch", return_value=(raw, "image/jpeg", "https://example.com/pic.jpg")):
             response = self.post("/api/catalog/clip",
                                  {"collection": cid, "image_url": "https://example.com/pic.jpg",
-                                  "source_url": "https://example.com/post", "title": "Garden patio"})
+                                  "source_url": "https://example.com/post", "title": "Garden patio",
+                                  "brand": "Belgard", "model": "CAT-450", "finish": "Slate Gray",
+                                  "size": "24x24 in"})
         self.assertEqual(response.status_code, 200, response.json)
         item = next(i for i in self.state()["catalog"]["items"] if i["Item ID"] == response.json["item"])
         self.assertEqual(item["Source URL"], "https://example.com/post")
         self.assertEqual(item["Category"], "Landscaping")
+        self.assertEqual(item["Brand"], "Belgard")
+        self.assertEqual(item["Model #"], "CAT-450")
+        self.assertEqual(item["Finish / Color"], "Slate Gray")
+        self.assertEqual(item["Size / Configuration"], "24x24 in")
         self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
 
     def test_clipping_can_create_the_collection_in_the_same_save(self):
@@ -424,7 +430,8 @@ class AssignmentTests(AppTestCase):
         return [r for r in self.state()["selections"] if r.get("Catalog Item ID") == item_id]
 
     def test_one_catalog_item_becomes_line_items_in_many_projects_without_duplication(self):
-        item_id = self.saved_item(price="$1,299.00 USD", brand="Brizo", category="Kitchen")
+        item_id = self.saved_item(price="$1,299.00 USD", brand="Brizo", category="Kitchen",
+                                  model="63075-BL", finish="Matte Black", size="Single handle")
         before = len(self.state()["catalog"]["items"])
         response = self.post(f"/api/catalog/items/{item_id}/assign",
                              {"projects": ["UH-101", "UH-103"], "values": {"Room / Area": "Kitchen", "Qty": "2"}})
@@ -439,6 +446,9 @@ class AssignmentTests(AppTestCase):
             self.assertEqual(float(row["Qty"]), 2.0)
             self.assertEqual(float(row["Unit Price"]), 1299.0)   # parsed from the clipped price
             self.assertEqual(row["Manufacturer"], "Brizo")
+            self.assertEqual(row["Model #"], "63075-BL")         # the spec fields ride along
+            self.assertEqual(row["Finish / Color"], "Matte Black")
+            self.assertEqual(row["Size / Configuration"], "Single handle")
             self.assertEqual(row["Client Status"], "Proposed")
         # the master record was referenced, never copied
         self.assertEqual(len(self.state()["catalog"]["items"]), before)
@@ -501,7 +511,8 @@ PRODUCT_HTML = """<html><head><title>Faucet</title>
 <meta property="og:title" content="Odin Pull-Down Faucet">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[{"@type":"Product","name":"Odin Pull-Down Faucet",
-"brand":{"@type":"Brand","name":"Brizo"},
+"brand":{"@type":"Brand","name":"Brizo"},"sku":"63075-BL","color":"Matte Black",
+"size":"Single handle, 16 in","material":["brass","stainless steel"],
 "offers":[{"@type":"Offer","price":"1299.00","priceCurrency":"USD"}]}]}
 </script></head><body><img src="/f.jpg" width="900" height="900"></body></html>"""
 
@@ -510,19 +521,31 @@ META_PRICE_HTML = """<html><head>
 <meta property="product:price:amount" content="12.50">
 <meta property="product:price:currency" content="USD">
 <meta property="og:brand" content="Clay Imports">
+<meta property="product:retailer_part_no" content="CT-8x8-OLE">
+<meta property="product:color" content="Terracotta">
+<meta property="product:size" content="8x8 in">
+<meta property="product:material" content="cement">
 </head><body></body></html>"""
 
 
 class ParserTests(unittest.TestCase):
-    def test_price_and_brand_come_from_json_ld_product_data(self):
+    def test_the_spec_fields_come_from_json_ld_product_data(self):
         page = catalog.parse_page(PRODUCT_HTML, "https://example.com/faucet")
         self.assertEqual(page["price"], "1299.00 USD")
         self.assertEqual(page["brand"], "Brizo")
+        self.assertEqual(page["model"], "63075-BL")
+        self.assertEqual(page["finish"], "Matte Black")
+        self.assertEqual(page["size"], "Single handle, 16 in")
+        self.assertEqual(page["materials"], "brass, stainless steel")
 
-    def test_price_and_brand_fall_back_to_meta_tags(self):
+    def test_the_spec_fields_fall_back_to_meta_tags(self):
         page = catalog.parse_page(META_PRICE_HTML, "https://example.com/tile")
         self.assertEqual(page["price"], "12.50 USD")
         self.assertEqual(page["brand"], "Clay Imports")
+        self.assertEqual(page["model"], "CT-8x8-OLE")
+        self.assertEqual(page["finish"], "Terracotta")
+        self.assertEqual(page["size"], "8x8 in")
+        self.assertEqual(page["materials"], "cement")
 
     def test_price_number_reads_the_amount_out_of_clipped_text(self):
         self.assertEqual(catalog.price_number("$1,299.00 USD"), 1299.0)

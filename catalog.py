@@ -52,12 +52,12 @@ COLLECTION_FIELDS = ["Collection ID", "Name", "Description", "Cover Image", "Pri
 ITEM_FIELDS = ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags", "Category",
                "Source URL", "Source Site", "Image File", "Thumb File", "Image Hash", "Colors",
                "Materials", "Favorite", "Approval", "Saved By", "Saved On", "Updated",
-               "Price", "Brand"]
+               "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration"]
 COMMENT_FIELDS = ["Comment ID", "Item ID", "Author", "Comment", "Created"]
 # The fields an editor may write directly; everything else is derived or stamped here.
 ITEM_EDIT_FIELDS = ["Title", "Description", "Notes", "Tags", "Category", "Source URL",
                     "Source Site", "Materials", "Favorite", "Approval", "Collection ID",
-                    "Price", "Brand"]
+                    "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration"]
 
 CATEGORIES = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Flooring & Tiles",
               "Lighting & Fixtures", "Ceiling Designs", "Wall Treatments", "Exterior",
@@ -326,6 +326,8 @@ def add_item(wb, collection_id, processed, meta, user, require_login):
         "Colors": ", ".join(processed["colors"]), "Materials": clean(meta.get("materials"))[:500],
         "Favorite": "", "Approval": "", "Saved By": (user or ""), "Saved On": stamp(), "Updated": stamp(),
         "Price": clean(meta.get("price"))[:50], "Brand": clean(meta.get("brand"))[:200],
+        "Model #": clean(meta.get("model"))[:100], "Finish / Color": clean(meta.get("finish"))[:200],
+        "Size / Configuration": clean(meta.get("size"))[:200],
     })
     touch_collection(wb, collection["Collection ID"])
     return item_id, image_name, thumb_name, not stored
@@ -358,6 +360,9 @@ def selection_values_for(item, project_id, extra=None):
         "Qty": extra.get("Qty") or 1,
         "Unit Price": price if price is not None else "",
         "Manufacturer": clean(item.get("Brand")) or clean(item.get("Source Site")),
+        "Model #": clean(item.get("Model #")),
+        "Finish / Color": clean(item.get("Finish / Color")),
+        "Size / Configuration": clean(item.get("Size / Configuration")),
         "Product Name": clean(item.get("Title")),
         "Product URL": clean(item.get("Source URL")),
         "Client Notes": clean(extra.get("Client Notes")),
@@ -521,25 +526,40 @@ def ld_products(scripts):
 
 
 def product_info(meta, ld_scripts):
-    """Price and brand read as suggestions from the page's own structured data."""
-    price, currency, brand = "", "", ""
+    """The spec-sheet fields read as suggestions from the page's own structured data:
+    price, brand, model / SKU, finish or color, size and materials."""
+
+    def name_of(node):
+        return clean(node.get("name") if isinstance(node, dict) else node)
+
+    info = {"price": "", "brand": "", "model": "", "finish": "", "size": "", "materials": ""}
+    currency = ""
     for product in ld_products(ld_scripts):
         offers = product.get("offers")
         offers = offers[0] if isinstance(offers, list) and offers else offers
-        if isinstance(offers, dict) and not price:
-            price = clean(offers.get("price") or offers.get("lowPrice"))
+        if isinstance(offers, dict) and not info["price"]:
+            info["price"] = clean(offers.get("price") or offers.get("lowPrice"))
             currency = clean(offers.get("priceCurrency"))
-        node = product.get("brand")
-        if not brand:
-            brand = clean(node.get("name") if isinstance(node, dict) else node)
-    if not price:
-        price = clean(meta.get("product:price:amount") or meta.get("og:price:amount"))
-        currency = currency or clean(meta.get("product:price:currency") or meta.get("og:price:currency"))
-    if not brand:
-        brand = clean(meta.get("product:brand") or meta.get("og:brand"))
-    if price and currency and currency.upper() not in price.upper():
-        price = f"{price} {currency.upper()}"
-    return price[:50], brand[:200]
+        info["brand"] = info["brand"] or name_of(product.get("brand"))
+        info["model"] = info["model"] or clean(product.get("sku") or product.get("mpn")) or name_of(product.get("model"))
+        info["finish"] = info["finish"] or name_of(product.get("color"))
+        info["size"] = info["size"] or name_of(product.get("size"))
+        if not info["materials"]:
+            material = product.get("material")
+            parts = material if isinstance(material, list) else [material]
+            info["materials"] = ", ".join(filter(None, (name_of(p) for p in parts)))
+    fallbacks = {"price": ("product:price:amount", "og:price:amount"),
+                 "brand": ("product:brand", "og:brand"),
+                 "model": ("product:retailer_part_no", "product:mfr_part_no"),
+                 "finish": ("product:color",), "size": ("product:size",),
+                 "materials": ("product:material",)}
+    for key, names in fallbacks.items():
+        info[key] = info[key] or clean(next((meta[n] for n in names if meta.get(n)), ""))
+    currency = currency or clean(meta.get("product:price:currency") or meta.get("og:price:currency"))
+    if info["price"] and currency and currency.upper() not in info["price"].upper():
+        info["price"] = f"{info['price']} {currency.upper()}"
+    limits = {"price": 50, "brand": 200, "model": 100, "finish": 200, "size": 200, "materials": 500}
+    return {key: value[:limits[key]] for key, value in info.items()}
 
 
 def price_number(text):
@@ -581,12 +601,11 @@ def parse_page(html, base_url):
     for entry in parser.images:
         if not tiny(entry):
             add(entry["url"], entry["alt"])
-    price, brand = product_info(meta, parser.ld_scripts)
     return {"title": clean(meta.get("og:title") or parser.title)[:200],
             "description": clean(meta.get("og:description") or meta.get("description"))[:2000],
             "site": clean(meta.get("og:site_name") or host.removeprefix("www."))[:200],
             "source_url": base_url,
-            "price": price, "brand": brand,
+            **product_info(meta, parser.ld_scripts),
             "images": candidates[:MAX_CANDIDATES]}
 
 

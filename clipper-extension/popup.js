@@ -44,9 +44,33 @@ async function saveSettings() {
   startClipper();
 }
 
-// Runs inside the page: every usable image plus the page's own metadata.
+// Runs inside the page: every usable image plus the page's own metadata, including the
+// spec-sheet fields (brand, model, finish, size, price, materials) its structured data offers.
 function collect() {
   const meta = (name) => document.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.content || "";
+  const product = {};
+  const nameOf = (node) => String((node && typeof node === "object" ? node.name : node) || "").trim();
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== "object") return;
+    if ([].concat(node["@type"] || []).some((k) => typeof k === "string" && k.toLowerCase() === "product")) {
+      const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+      if (!product.price && offers && typeof offers === "object" && (offers.price || offers.lowPrice)) {
+        const amount = String(offers.price || offers.lowPrice);
+        const currency = String(offers.priceCurrency || "");
+        product.price = currency && !amount.toUpperCase().includes(currency.toUpperCase()) ? `${amount} ${currency.toUpperCase()}` : amount;
+      }
+      product.brand = product.brand || nameOf(node.brand);
+      product.model = product.model || String(node.sku || node.mpn || "").trim() || nameOf(node.model);
+      product.finish = product.finish || nameOf(node.color);
+      product.size = product.size || nameOf(node.size);
+      product.materials = product.materials || [].concat(node.material || []).map(nameOf).filter(Boolean).join(", ");
+    }
+    Object.values(node).forEach(walk);
+  };
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try { walk(JSON.parse(script.textContent)); } catch { /* unreadable structured data is skipped */ }
+  }
   const seen = new Set();
   const images = [];
   const add = (url, alt, area) => {
@@ -65,6 +89,12 @@ function collect() {
   return { url: location.href, title: meta("og:title") || document.title || "",
            site: meta("og:site_name") || location.hostname.replace(/^www\./, ""),
            description: meta("og:description") || meta("description") || "",
+           price: (product.price || meta("product:price:amount") || "").slice(0, 50),
+           brand: (product.brand || meta("product:brand") || meta("og:brand") || "").slice(0, 200),
+           model: (product.model || "").slice(0, 100),
+           finish: (product.finish || meta("product:color") || "").slice(0, 200),
+           size: (product.size || meta("product:size") || "").slice(0, 200),
+           materials: (product.materials || meta("product:material") || "").slice(0, 500),
            images: images.slice(0, 60) };
 }
 
@@ -130,6 +160,8 @@ async function clip() {
   setStatus("clip-status", "Saving to UH Homes…");
   const body = { image_url: selected.url, source_url: page.url, source_site: page.site,
                  title: $("clip-title").value.trim(), description: page.description,
+                 price: page.price || "", brand: page.brand || "", model: page.model || "",
+                 finish: page.finish || "", size: page.size || "", materials: page.materials || "",
                  collection, new_collection: newName };
   const response = await chrome.runtime.sendMessage({ type: "uh-clip", settings, body });
   if (response?.ok) {

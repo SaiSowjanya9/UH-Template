@@ -93,7 +93,8 @@ CATALOG_SHEETS = {
     CATALOG_ITEM_SHEET: ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags",
                          "Category", "Source URL", "Source Site", "Image File", "Thumb File",
                          "Image Hash", "Colors", "Materials", "Favorite", "Approval",
-                         "Saved By", "Saved On", "Updated", "Price", "Brand"],
+                         "Saved By", "Saved On", "Updated", "Price", "Brand",
+                         "Model #", "Finish / Color", "Size / Configuration"],
     CATALOG_COMMENT_SHEET: ["Comment ID", "Item ID", "Author", "Comment", "Created"],
 }
 CATALOG_IMAGE_NAME = re.compile(r"^cat-[0-9a-f]{16}(-thumb)?\.(png|jpg)$")
