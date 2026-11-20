@@ -36,10 +36,22 @@ let EMBLEM_SVG;
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
-  $("toast").textContent = message;
-  $("toast").classList.toggle("error", error);
-  $("toast").hidden = false;
-  toastTimer = setTimeout(() => { $("toast").hidden = true; }, error ? 11000 : 5000);
+  const el = $("toast");
+  el.textContent = message;
+  el.classList.toggle("error", error);
+  el.hidden = false;
+  // An open modal dialog paints in the top layer, above any z-index, so a toast used to show
+  // dimmed behind its backdrop — "no notification" to the person waiting on a save. As a
+  // popover the toast joins the top layer; closing and reopening moves it back above a dialog
+  // that has opened since the last message, because the top layer stacks by recency.
+  if (el.showPopover) {
+    if (el.matches(":popover-open")) el.hidePopover();
+    el.showPopover();
+  }
+  toastTimer = setTimeout(() => {
+    if (el.hidePopover && el.matches(":popover-open")) el.hidePopover();
+    el.hidden = true;
+  }, error ? 11000 : 5000);
 }
 
 // A request that never answers - a sleeping hosted instance, a dropped connection - used to
