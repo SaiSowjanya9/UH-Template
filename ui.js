@@ -1893,50 +1893,54 @@ async function inspectPage() {
 }
 
 async function saveClip() {
-  await action(async () => {
-    const collectionChoice = $("clip-collection").value;
-    const newName = collectionChoice === "__new" ? $("clip-new-collection").value.trim() : "";
-    const collection = collectionChoice === "__new" ? "" : collectionChoice;
-    const fail = (message) => { $("clip-error").textContent = message; $("clip-error").hidden = false; throw new Error(message); };
-    $("clip-error").hidden = true;
-    if (!collection && !newName) fail("Choose a collection, or name a new one.");
-    const meta = { title: $("clip-title").value.trim(), description: $("clip-description").value.trim(),
-                   notes: $("clip-notes").value.trim(), tags: $("clip-tags").value.trim(),
-                   category: $("clip-category").value, materials: clipInspected?.materials || "",
-                   price: $("clip-price").value.trim(), brand: $("clip-brand").value.trim(),
-                   model: $("clip-model").value.trim(), finish: $("clip-finish").value.trim(),
-                   size: $("clip-size").value.trim(), qty_unit: $("clip-qty").value.trim(),
-                   source_url: $("clip-link").value.trim() };
-    setBusy(true, "Saving the inspiration…");
-    try {
-      if (clipTab === "upload") {
-        if (!clipFile) fail("Choose an image file to upload.");
-        if (clipFile.size > 8 * 1024 * 1024) fail("Choose a file smaller than 8 MB.");
-        const data = new FormData();
-        data.append("file", clipFile);
-        for (const [key, value] of Object.entries(meta)) data.append(key, value);
-        data.append("collection", collection);
-        data.append("new_collection", newName);
-        await api("/api/catalog/items/upload", data);
-      } else {
-        const body = { ...meta, collection, new_collection: newName };
-        if (clipTab === "page") {
-          if (!clipCandidate) fail("Find images on the page, then pick the one to save.");
-          body.image_url = clipCandidate.url;
-          body.source_url = body.source_url || $("clip-page-url").value.trim();
-          body.source_site = clipInspected?.site || "";
-        } else {
-          if (!$("clip-image-url").value.trim()) fail("Paste the image's address first.");
-          body.image_url = $("clip-image-url").value.trim();
-        }
-        await api("/api/catalog/clip", body);
-      }
-      $("clip-dialog").close();
-      state.view = "catalog";
-      await refresh();
-      toast("Inspiration saved to your collection.");
-    } finally { setBusy(false); }
-  });
+  const fail = (message) => { $("clip-error").textContent = message; $("clip-error").hidden = false; };
+  const collectionChoice = $("clip-collection").value;
+  const newName = collectionChoice === "__new" ? $("clip-new-collection").value.trim() : "";
+  const collection = collectionChoice === "__new" ? "" : collectionChoice;
+  $("clip-error").hidden = true;
+  if (!collection && !newName) { fail("Choose a collection, or name a new one."); return; }
+  const meta = { title: $("clip-title").value.trim(), description: $("clip-description").value.trim(),
+                 notes: $("clip-notes").value.trim(), tags: $("clip-tags").value.trim(),
+                 category: $("clip-category").value, materials: clipInspected?.materials || "",
+                 price: $("clip-price").value.trim(), brand: $("clip-brand").value.trim(),
+                 model: $("clip-model").value.trim(), finish: $("clip-finish").value.trim(),
+                 size: $("clip-size").value.trim(), qty_unit: $("clip-qty").value.trim(),
+                 source_url: $("clip-link").value.trim() };
+  let request;
+  if (clipTab === "upload") {
+    if (!clipFile) { fail("Choose an image file to upload."); return; }
+    if (clipFile.size > 8 * 1024 * 1024) { fail("Choose a file smaller than 8 MB."); return; }
+    const data = new FormData();
+    data.append("file", clipFile);
+    for (const [key, value] of Object.entries(meta)) data.append(key, value);
+    data.append("collection", collection);
+    data.append("new_collection", newName);
+    request = api("/api/catalog/items/upload", data);
+  } else {
+    const body = { ...meta, collection, new_collection: newName };
+    if (clipTab === "page") {
+      if (!clipCandidate) { fail("Find images on the page, then pick the one to save."); return; }
+      body.image_url = clipCandidate.url;
+      body.source_url = body.source_url || $("clip-page-url").value.trim();
+      body.source_site = clipInspected?.site || "";
+    } else {
+      if (!$("clip-image-url").value.trim()) { fail("Paste the image's address first."); return; }
+      body.image_url = $("clip-image-url").value.trim();
+    }
+    request = api("/api/catalog/clip", body);
+  }
+  setBusy(true, "Saving the inspiration…");
+  try { await request; }
+  catch (error) {
+    // The save itself was refused — usually the site blocking the image download too.
+    // Keep the dialog open and say where to go instead of losing the work to a toast.
+    fail(`${error.message} If the site is blocking the app, clip it with the browser extension (Get the clipper), `
+       + "or save a screenshot of the picture and use the Upload tab.");
+    return;
+  } finally { setBusy(false); }
+  $("clip-dialog").close();
+  state.view = "catalog";
+  await action(async () => { await refresh(); toast("Inspiration saved to your collection."); });
 }
 
 // --- Inspiration detail ------------------------------------------------------
