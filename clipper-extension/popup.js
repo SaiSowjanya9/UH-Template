@@ -48,6 +48,7 @@ async function saveSettings() {
 // spec-sheet fields (brand, model, finish, size, price, materials) its structured data offers.
 function collect() {
   const meta = (name) => document.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.content || "";
+  const micro = (name) => document.querySelector(`[itemprop="${name}" i][content]`)?.getAttribute("content") || "";
   const product = {};
   const nameOf = (node) => String((node && typeof node === "object" ? node.name : node) || "").trim();
   const walk = (node) => {
@@ -89,12 +90,12 @@ function collect() {
   return { url: location.href, title: meta("og:title") || document.title || "",
            site: meta("og:site_name") || location.hostname.replace(/^www\./, ""),
            description: meta("og:description") || meta("description") || "",
-           price: (product.price || meta("product:price:amount") || "").slice(0, 50),
-           brand: (product.brand || meta("product:brand") || meta("og:brand") || "").slice(0, 200),
-           model: (product.model || "").slice(0, 100),
-           finish: (product.finish || meta("product:color") || "").slice(0, 200),
-           size: (product.size || meta("product:size") || "").slice(0, 200),
-           materials: (product.materials || meta("product:material") || "").slice(0, 500),
+           price: (product.price || meta("product:price:amount") || micro("price") || "").slice(0, 50),
+           brand: (product.brand || meta("product:brand") || meta("og:brand") || micro("brand") || "").slice(0, 200),
+           model: (product.model || micro("sku") || micro("mpn") || "").slice(0, 100),
+           finish: (product.finish || meta("product:color") || micro("color") || "").slice(0, 200),
+           size: (product.size || meta("product:size") || micro("size") || "").slice(0, 200),
+           materials: (product.materials || meta("product:material") || micro("material") || "").slice(0, 500),
            images: images.slice(0, 60) };
 }
 

@@ -462,6 +462,14 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .clip-candidate { border:2px solid transparent; border-radius:6px; overflow:hidden; background:#f6f2e6; padding:0; height:96px; }
 .clip-candidate img { width:100%; height:100%; object-fit:cover; display:block; }
 .clip-candidate.selected { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold); }
+/* The lightbox a clicked candidate opens in: the image large, with next/previous and Use. */
+.clip-lightbox { width:min(880px,calc(100vw - 32px)); padding:18px; }
+.clip-lightbox figure { margin:0; }
+.clip-lightbox img { width:100%; max-height:62vh; object-fit:contain; display:block; border-radius:6px; border:1px solid var(--line); background:#f6f2e6; }
+.clip-lightbox figcaption { font-size:11px; color:var(--muted); margin-top:9px; overflow-wrap:anywhere; }
+.clip-lightbox-close { position:absolute; top:12px; right:12px; }
+.clip-lightbox-actions { display:flex; align-items:center; gap:9px; margin-top:14px; }
+.clip-lightbox-actions #clip-lightbox-use { margin-left:auto; }
 .clip-fields { margin-top:6px; }
 #clip-image-panel input { width:100%; border:1px solid #e3dac0; border-radius:4px; background:#fff; padding:10px 11px; font-size:13px; color:#4a4028; }
 .assistant-answer { border:1px solid var(--line); background:#fdfbf2; border-radius:6px; padding:13px 15px; font-size:13px; color:#4a4028; line-height:1.6; margin-bottom:13px; white-space:pre-wrap; }

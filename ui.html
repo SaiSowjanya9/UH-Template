@@ -173,6 +173,20 @@
     <div id="inspiration-body"></div>
   </dialog>
 
+  <dialog id="clip-lightbox" class="clip-lightbox" aria-label="Image preview">
+    <button type="button" class="icon-button clip-lightbox-close" id="clip-lightbox-close" aria-label="Close preview">×</button>
+    <figure>
+      <img id="clip-lightbox-image" src="" alt="" referrerpolicy="no-referrer">
+      <figcaption id="clip-lightbox-caption"></figcaption>
+    </figure>
+    <div class="clip-lightbox-actions">
+      <button type="button" class="button secondary" id="clip-lightbox-prev" aria-label="Previous image">‹ Previous</button>
+      <span id="clip-lightbox-count" class="muted" role="status"></span>
+      <button type="button" class="button secondary" id="clip-lightbox-next" aria-label="Next image">Next ›</button>
+      <button type="button" class="button primary" id="clip-lightbox-use">Use this image</button>
+    </div>
+  </dialog>
+
   <dialog id="assistant-dialog">
     <div class="dialog-heading"><div><div class="eyebrow">AI DESIGN ASSISTANT</div><h2>Ask about your inspirations</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
     <div class="clip-url-row"><input id="assistant-question" type="text" maxlength="500" placeholder="Show bathrooms with marble countertops…" aria-label="Question"><button type="button" id="assistant-ask" class="button primary">Ask</button></div>

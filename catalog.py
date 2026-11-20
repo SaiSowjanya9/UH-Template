@@ -448,15 +448,18 @@ def safe_fetch(url, limit, accept="*/*"):
 
 
 class PageParser(HTMLParser):
-    """Just enough HTML reading for the clipper: meta tags, the title and every image."""
+    """Just enough HTML reading for the clipper: meta tags, microdata, the title and every image."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.meta, self.images, self._title, self._in_title = {}, [], [], False
         self.ld_scripts, self._ld = [], None
+        self.micro = {}
 
     def handle_starttag(self, tag, attrs):
         a = {k.lower(): (v or "") for k, v in attrs}
+        if a.get("itemprop") and a.get("content"):
+            self.micro.setdefault(a["itemprop"].lower(), a["content"])
         if tag == "meta":
             key = (a.get("property") or a.get("name") or "").lower()
             if key and a.get("content"):
@@ -527,21 +530,24 @@ def ld_products(scripts):
     return found
 
 
-def product_info(meta, ld_scripts):
-    """The spec-sheet fields read as suggestions from the page's own structured data:
-    price, brand, model / SKU, finish or color, size and materials."""
+def product_info(meta, ld_scripts, micro=None):
+    """The spec-sheet fields read as suggestions from the page's own structured data —
+    JSON-LD products first, then Open Graph / product meta tags, then microdata — plus
+    the product's name and its own photos, which are the cleanest candidates a page has."""
+    micro = micro or {}
 
     def name_of(node):
         return clean(node.get("name") if isinstance(node, dict) else node)
 
-    info = {"price": "", "brand": "", "model": "", "finish": "", "size": "", "materials": ""}
-    currency = ""
+    info = {"title": "", "price": "", "brand": "", "model": "", "finish": "", "size": "", "materials": ""}
+    currency, images = "", []
     for product in ld_products(ld_scripts):
         offers = product.get("offers")
         offers = offers[0] if isinstance(offers, list) and offers else offers
         if isinstance(offers, dict) and not info["price"]:
             info["price"] = clean(offers.get("price") or offers.get("lowPrice"))
             currency = clean(offers.get("priceCurrency"))
+        info["title"] = info["title"] or name_of(product.get("name"))
         info["brand"] = info["brand"] or name_of(product.get("brand"))
         info["model"] = info["model"] or clean(product.get("sku") or product.get("mpn")) or name_of(product.get("model"))
         info["finish"] = info["finish"] or name_of(product.get("color"))
@@ -550,6 +556,12 @@ def product_info(meta, ld_scripts):
             material = product.get("material")
             parts = material if isinstance(material, list) else [material]
             info["materials"] = ", ".join(filter(None, (name_of(p) for p in parts)))
+        image = product.get("image")
+        for entry in (image if isinstance(image, list) else [image]):
+            if isinstance(entry, dict):
+                entry = entry.get("url") or entry.get("contentUrl")
+            if isinstance(entry, str) and clean(entry):
+                images.append(clean(entry))
     fallbacks = {"price": ("product:price:amount", "og:price:amount"),
                  "brand": ("product:brand", "og:brand"),
                  "model": ("product:retailer_part_no", "product:mfr_part_no"),
@@ -557,11 +569,17 @@ def product_info(meta, ld_scripts):
                  "materials": ("product:material",)}
     for key, names in fallbacks.items():
         info[key] = info[key] or clean(next((meta[n] for n in names if meta.get(n)), ""))
-    currency = currency or clean(meta.get("product:price:currency") or meta.get("og:price:currency"))
+    # Microdata (itemprop) is the last resort, for pages with neither JSON-LD nor og tags.
+    micro_keys = {"price": ("price", "lowprice"), "brand": ("brand",), "model": ("sku", "mpn", "model"),
+                  "finish": ("color",), "size": ("size",), "materials": ("material",)}
+    for key, names in micro_keys.items():
+        info[key] = info[key] or clean(next((micro[n] for n in names if micro.get(n)), ""))
+    currency = currency or clean(meta.get("product:price:currency") or meta.get("og:price:currency")
+                                 or micro.get("pricecurrency"))
     if info["price"] and currency and currency.upper() not in info["price"].upper():
         info["price"] = f"{info['price']} {currency.upper()}"
-    limits = {"price": 50, "brand": 200, "model": 100, "finish": 200, "size": 200, "materials": 500}
-    return {key: value[:limits[key]] for key, value in info.items()}
+    limits = {"title": 200, "price": 50, "brand": 200, "model": 100, "finish": 200, "size": 200, "materials": 500}
+    return {**{key: value[:limits[key]] for key, value in info.items()}, "_images": images}
 
 
 def price_number(text):
@@ -597,17 +615,23 @@ def parse_page(html, base_url):
         seen.add(url)
         candidates.append({"url": url, "alt": clean(alt)[:200]})
 
+    product = product_info(meta, parser.ld_scripts, parser.micro)
+    # The product's own name over the page title, and its own photos right after og:image:
+    # on a retail page they are the item and its picture, not the furniture around them.
+    title = product.pop("title") or clean(meta.get("og:title") or parser.title)[:200]
     for key in ("og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"):
         if meta.get(key):
             add(meta[key], meta.get("og:title", ""))
+    for url in product.pop("_images"):
+        add(url, title)
     for entry in parser.images:
         if not tiny(entry):
             add(entry["url"], entry["alt"])
-    return {"title": clean(meta.get("og:title") or parser.title)[:200],
+    return {"title": title,
             "description": clean(meta.get("og:description") or meta.get("description"))[:2000],
             "site": clean(meta.get("og:site_name") or host.removeprefix("www."))[:200],
             "source_url": base_url,
-            **product_info(meta, parser.ld_scripts),
+            **product,
             "images": candidates[:MAX_CANDIDATES]}
 
 

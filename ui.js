@@ -2196,13 +2196,41 @@ $("catalog-gallery").addEventListener("keydown", (event) => {
 document.querySelectorAll("[data-clip-tab]").forEach((button) => button.addEventListener("click", () => setClipTab(button.dataset.clipTab)));
 $("clip-inspect").addEventListener("click", inspectPage);
 $("clip-page-url").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); inspectPage(); } });
+// A clicked thumbnail opens the lightbox; "Use this image" is what actually selects it.
+let clipPreview = -1;
+
+function showClipPreview(index) {
+  const images = clipInspected?.images || [];
+  if (!images.length) return;
+  clipPreview = ((index % images.length) + images.length) % images.length;
+  const image = images[clipPreview];
+  $("clip-lightbox-caption").textContent = image.alt || image.url;
+  $("clip-lightbox-image").alt = image.alt || "Image preview";
+  $("clip-lightbox-image").src = image.url;
+  $("clip-lightbox-count").textContent = `${clipPreview + 1} of ${images.length}`;
+  if (!$("clip-lightbox").open) $("clip-lightbox").showModal();
+}
+
 $("clip-candidates").addEventListener("click", (event) => {
   const button = event.target.closest("[data-candidate]");
-  if (!button) return;
-  clipCandidate = clipInspected?.images[Number(button.dataset.candidate)] || null;
-  $("clip-candidates").querySelectorAll(".clip-candidate").forEach((b) => b.classList.toggle("selected", b === button));
+  if (button) showClipPreview(Number(button.dataset.candidate));
+});
+$("clip-lightbox-use").addEventListener("click", () => {
+  clipCandidate = clipInspected?.images[clipPreview] || null;
+  $("clip-candidates").querySelectorAll(".clip-candidate").forEach((b) => b.classList.toggle("selected", Number(b.dataset.candidate) === clipPreview));
   if (clipCandidate?.alt && !$("clip-title").value) $("clip-title").value = clipCandidate.alt;
   updateClipChosen();
+  $("clip-lightbox").close();
+});
+$("clip-lightbox-prev").addEventListener("click", () => showClipPreview(clipPreview - 1));
+$("clip-lightbox-next").addEventListener("click", () => showClipPreview(clipPreview + 1));
+$("clip-lightbox-close").addEventListener("click", () => $("clip-lightbox").close());
+$("clip-lightbox").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowLeft") { event.preventDefault(); showClipPreview(clipPreview - 1); }
+  if (event.key === "ArrowRight") { event.preventDefault(); showClipPreview(clipPreview + 1); }
+});
+$("clip-lightbox-image").addEventListener("error", () => {
+  if ($("clip-lightbox").open) $("clip-lightbox-caption").textContent = "This image cannot be previewed here — it may still save, or pick another.";
 });
 $("clip-collection").addEventListener("change", () => { $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new"; });
 $("clip-choose-file").addEventListener("click", () => $("catalog-file").click());

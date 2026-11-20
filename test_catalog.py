@@ -520,8 +520,21 @@ PRODUCT_HTML = """<html><head><title>Faucet</title>
 {"@context":"https://schema.org","@graph":[{"@type":"Product","name":"Odin Pull-Down Faucet",
 "brand":{"@type":"Brand","name":"Brizo"},"sku":"63075-BL","color":"Matte Black",
 "size":"Single handle, 16 in","material":["brass","stainless steel"],
+"image":["https://cdn.example.com/odin-main.jpg",{"@type":"ImageObject","url":"https://cdn.example.com/odin-side.jpg"}],
 "offers":[{"@type":"Offer","price":"1299.00","priceCurrency":"USD"}]}]}
 </script></head><body><img src="/f.jpg" width="900" height="900"></body></html>"""
+
+MICRO_HTML = """<html><head><title>Shaker Wall Cabinet | Example Store</title></head>
+<body itemscope itemtype="https://schema.org/Product">
+<meta itemprop="brand" content="Diamond NOW">
+<meta itemprop="sku" content="G10-W3030">
+<meta itemprop="color" content="Painted White">
+<meta itemprop="size" content="30 x 30 in">
+<meta itemprop="material" content="plywood">
+<meta itemprop="price" content="149.00">
+<meta itemprop="priceCurrency" content="USD">
+<img src="/cabinet.jpg" width="700" height="700">
+</body></html>"""
 
 META_PRICE_HTML = """<html><head>
 <meta property="og:title" content="Cement Tile">
@@ -538,12 +551,26 @@ META_PRICE_HTML = """<html><head>
 class ParserTests(unittest.TestCase):
     def test_the_spec_fields_come_from_json_ld_product_data(self):
         page = catalog.parse_page(PRODUCT_HTML, "https://example.com/faucet")
+        self.assertEqual(page["title"], "Odin Pull-Down Faucet")   # the product's own name
         self.assertEqual(page["price"], "1299.00 USD")
         self.assertEqual(page["brand"], "Brizo")
         self.assertEqual(page["model"], "63075-BL")
         self.assertEqual(page["finish"], "Matte Black")
         self.assertEqual(page["size"], "Single handle, 16 in")
         self.assertEqual(page["materials"], "brass, stainless steel")
+        urls = [img["url"] for img in page["images"]]
+        # the product's own photos are offered as candidates, however the page nested them
+        self.assertIn("https://cdn.example.com/odin-main.jpg", urls)
+        self.assertIn("https://cdn.example.com/odin-side.jpg", urls)
+
+    def test_the_spec_fields_fall_back_to_microdata(self):
+        page = catalog.parse_page(MICRO_HTML, "https://example.com/cabinet")
+        self.assertEqual(page["price"], "149.00 USD")
+        self.assertEqual(page["brand"], "Diamond NOW")
+        self.assertEqual(page["model"], "G10-W3030")
+        self.assertEqual(page["finish"], "Painted White")
+        self.assertEqual(page["size"], "30 x 30 in")
+        self.assertEqual(page["materials"], "plywood")
 
     def test_the_spec_fields_fall_back_to_meta_tags(self):
         page = catalog.parse_page(META_PRICE_HTML, "https://example.com/tile")
