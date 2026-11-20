@@ -9,13 +9,14 @@ import tempfile
 import threading
 from pathlib import Path
 
-from flask import Flask, Request, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Request, g, jsonify, redirect, render_template, request, send_file, session, url_for
 from PIL import Image
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
 import build_lookbook
+import catalog
 import common
 import spec_template
 import supabase_store
@@ -76,6 +77,34 @@ EXPORT_LOCK = threading.Lock()
 THROTTLE = auth.Throttle()
 # Reachable without a session: the sign-in page and the assets and health check it needs.
 OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz"}
+# Reachable with a clipper token instead of a session: what the browser extension calls.
+# The token is signed with the app's secret and carries only the issuing user's email.
+CLIPPER_ENDPOINTS = {"catalog_clip", "clip_inspect", "clipper_collections"}
+CLIPPER_TOKEN_DAYS = 90
+
+
+def clipper_serializer():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(app.secret_key, salt="uh-clipper")
+
+
+def clipper_identity():
+    """The email inside a valid X-UH-Clipper header, '' for a local-mode token, else None."""
+    header = request.headers.get("X-UH-Clipper", "")
+    if not header or len(header) > 600:
+        return None
+    try:
+        data = clipper_serializer().loads(header, max_age=CLIPPER_TOKEN_DAYS * 86400)
+    except Exception:
+        return None
+    return str((data or {}).get("email", ""))
+
+
+def catalog_user():
+    """Who is acting: the clipper token's holder, the signed-in session, or nobody locally."""
+    if "clipper" in g:
+        return g.clipper
+    return (session.get("user") or {}).get("email", "") if REQUIRE_LOGIN else ""
 
 
 def csrf_token():
@@ -93,6 +122,13 @@ def guard():
         return None                 # let Flask raise the stored 400/404 (e.g. an untrusted Host)
     if request.endpoint == "login":
         return None                 # the sign-in form carries its own token as a field
+    if request.endpoint in CLIPPER_ENDPOINTS:
+        email = clipper_identity()
+        if email is not None:
+            # The signed token is the credential, so no session or CSRF check applies; an
+            # invalid or missing token falls through to the normal session rules instead.
+            g.clipper = email
+            return None
     if REQUIRE_LOGIN and not session.get("user") and request.endpoint not in OPEN_ENDPOINTS:
         if request.path.startswith("/api/"):
             return jsonify(error="Your session has ended. Sign in again to continue."), 401
@@ -222,9 +258,11 @@ EXPORT_COLUMNS = [{"key": key, "label": label, "matches": key in SPEC_MATCH_FIEL
 
 @app.get("/api/state")
 def state():
+    user = catalog_user()
     with store.lock:
         wb, revision = store.snapshot()
         rows = detailed_records(wb, "Selections")
+        collections, items, comments = catalog.visible_catalog(wb, user, REQUIRE_LOGIN)
         return jsonify(projects=detailed_records(wb, "Projects"), selections=rows,
                        manufacturers=records(wb, "Manufacturers"), sections=common.section_order(wb),
                        locations=common.location_order(wb),
@@ -232,6 +270,10 @@ def state():
                        units=unit_order(wb),
                        client_statuses=CLIENT_STATUSES,
                        export_columns=EXPORT_COLUMNS,
+                       catalog={"collections": collections, "items": items, "comments": comments,
+                                "categories": catalog.CATEGORIES, "privacies": catalog.PRIVACIES,
+                                "approvals": catalog.APPROVALS, "ai": bool(catalog.ai_settings()),
+                                "user": user, "shared_accounts": REQUIRE_LOGIN},
                        revision=revision,
                        workspace=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
 
@@ -723,6 +765,243 @@ def import_spec_csv():
         sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
         store.save(wb, revision, f"spec csv import {project_id} (+{added}/~{updated})")
     return jsonify(ok=True, added=added, updated=updated)
+
+
+# ---------------------------------------------------------------------------
+# The design catalog: collections of clipped inspirations (see catalog.py).
+# ---------------------------------------------------------------------------
+
+CLIP_THROTTLE = auth.Throttle(limit=120, window=900)
+CLIP_META_FIELDS = ["title", "description", "notes", "tags", "category",
+                    "source_url", "source_site", "materials", "price", "brand"]
+CATALOG_IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg"}
+
+
+def throttle_clips():
+    """Fetching other sites and calling the AI are the expensive, abusable requests."""
+    key = catalog_user() or request.remote_addr or "unknown"
+    try:
+        CLIP_THROTTLE.check(key)
+    except auth.AuthError:
+        raise ValidationError("Too many clip requests in a short time. Wait a few minutes and try again.") from None
+    CLIP_THROTTLE.record(key)
+
+
+def clip_meta(source):
+    """The metadata a clip carries, cleaned the same way whether it came as JSON or a form."""
+    meta = validate_values({key: common.clean(source.get(key)) for key in CLIP_META_FIELDS}, CLIP_META_FIELDS)
+    for key in ("source_url",):
+        if meta.get(key) and not meta[key].startswith(("http://", "https://")):
+            meta[key] = ""
+    return meta
+
+
+def finish_clip(raw, meta, data):
+    """Process, store and record one clipped image; shared by upload, URL clip and the extension."""
+    processed = catalog.process_image(raw)
+    user = catalog_user()
+    with store.lock:
+        wb, revision = store.snapshot()
+        collection_id = common.clean(data.get("collection"))
+        created = None
+        if not collection_id and common.clean(data.get("new_collection")):
+            _, created = catalog.save_collection(wb, {"values": {"Name": common.clean(data.get("new_collection")),
+                                                                 "Privacy": "Private"}}, user, REQUIRE_LOGIN)
+            collection_id = created
+        item_id, image_name, thumb_name, new_file = catalog.add_item(
+            wb, collection_id, processed, meta, user, REQUIRE_LOGIN)
+        if new_file:
+            catalog.store_processed(store, processed)
+        store.save(wb, revision, f"catalog: clip {meta.get('title') or item_id}")
+    return jsonify(ok=True, item=item_id, collection=collection_id, new_collection=created,
+                   image=image_name, thumb=thumb_name)
+
+
+@app.post("/api/catalog/collections")
+def save_catalog_collection():
+    data = payload()
+    with store.lock:
+        wb, revision = current(data)
+        note, extra = catalog.save_collection(wb, data, catalog_user(), REQUIRE_LOGIN)
+        store.save(wb, revision, note)
+    if data.get("delete"):
+        for name in extra or []:
+            try:
+                store.delete_catalog_image(name)
+            except Exception:
+                pass
+        return jsonify(ok=True, deleted=True)
+    return jsonify(ok=True, collection=extra if isinstance(extra, str) else (data.get("values") or {}).get("Collection ID"))
+
+
+@app.post("/api/catalog/items")
+def save_catalog_item():
+    data = payload()
+    with store.lock:
+        wb, revision = current(data)
+        note, orphans = catalog.save_item(wb, data, catalog_user(), REQUIRE_LOGIN)
+        store.save(wb, revision, note)
+    for name in orphans or []:
+        try:
+            store.delete_catalog_image(name)
+        except Exception:
+            pass
+    return jsonify(ok=True, deleted=bool(data.get("delete")))
+
+
+@app.post("/api/catalog/items/<item_id>/assign")
+def assign_catalog_item(item_id):
+    """One catalog item into one or more projects. Each project gets its own Selections row —
+    a copy of the clipped details carrying the Catalog Item ID as a reference — so the master
+    catalog record is reused, never duplicated, and later catalog edits never rewrite a
+    project's own quantities, notes or status."""
+    data = payload()
+    projects = data.get("projects")
+    if not isinstance(projects, list) or not projects or len(projects) > 50:
+        raise ValidationError("Choose at least one project to add this item to.")
+    extra = validate_values(data.get("values") or {}, ["Section", "Room / Area", "Location", "Qty", "Client Notes"])
+    with store.lock:
+        wb, revision = current(data)
+        item = catalog.viewable_item(wb, item_id, catalog_user(), REQUIRE_LOGIN)
+        known = {p["Project ID"] for p in records(wb, "Projects")}
+        chosen = list(dict.fromkeys(common.clean(p) for p in projects))
+        if any(p not in known for p in chosen):
+            raise ValidationError("Choose existing projects. Refresh the page and try again.")
+        sheet = ensure_selection_columns(wb)
+        rows = {}
+        for project_id in chosen:
+            row = next_row(sheet)
+            values = validate_values(catalog.selection_values_for(item, project_id, extra),
+                                     SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
+            put(sheet, row, merge_selection(None, values, row))
+            rows[project_id] = row
+        from openpyxl.utils import get_column_letter
+        sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+        store.save(wb, revision, f"catalog: add {item['Title'] or item['Item ID']} to {len(rows)} project(s)")
+    return jsonify(ok=True, rows=rows)
+
+
+@app.post("/api/catalog/items/upload")
+def upload_catalog_item():
+    upload = request.files.get("file")
+    if not upload:
+        raise ValidationError("Choose a PNG, JPEG or WebP image.")
+    meta = clip_meta(request.form)
+    return finish_clip(upload.read(), meta, request.form)
+
+
+@app.post("/api/catalog/inspect")
+def clip_inspect():
+    """What a pasted page offers: its title, site, description and candidate images."""
+    throttle_clips()
+    data = request.get_json(silent=True) or {}
+    return jsonify(ok=True, **catalog.inspect_page(common.clean(data.get("url"))))
+
+
+@app.post("/api/catalog/clip")
+def catalog_clip():
+    """Save one inspiration: an image the server downloads itself, or bytes the clipper sends."""
+    throttle_clips()
+    data = request.get_json(silent=True) or {}
+    meta = clip_meta(data)
+    if common.clean(data.get("image_data")):
+        import base64
+        try:
+            raw = base64.b64decode(str(data["image_data"])[:11_000_000], validate=True)
+        except Exception:
+            raise ValidationError("The clipped image data could not be read. Try saving the image again.") from None
+    elif common.clean(data.get("image_url")):
+        raw = catalog.fetch_image(data["image_url"])
+        if not meta.get("source_url"):
+            meta["source_url"] = common.clean(data.get("image_url"))
+    else:
+        raise ValidationError("Clip an image: pick one from the page, paste an image address, or upload a file.")
+    return finish_clip(raw, meta, data)
+
+
+@app.get("/api/catalog/clipper/collections")
+def clipper_collections():
+    """The collections this clipper may file into — what the extension's picker shows."""
+    user = catalog_user()
+    with store.lock:
+        wb, _ = store.snapshot()
+        collections, items, _ = catalog.visible_catalog(wb, user, REQUIRE_LOGIN)
+    counts = {}
+    for item in items:
+        counts[item["Collection ID"]] = counts.get(item["Collection ID"], 0) + 1
+    return jsonify(ok=True, collections=[{"id": c["Collection ID"], "name": c["Name"],
+                                          "count": counts.get(c["Collection ID"], 0)}
+                                         for c in collections if c["_editable"]])
+
+
+@app.get("/api/catalog/images/<name>")
+def catalog_image(name):
+    """A stored inspiration image or its thumbnail. Names are hash-derived and validated."""
+    raw = store.read_catalog_image(name)
+    response = send_file(io.BytesIO(raw), mimetype=CATALOG_IMAGE_MIME.get(Path(name).suffix, "image/jpeg"),
+                         as_attachment=bool(request.args.get("download")), download_name=name)
+    # Hash-named files never change, so the browser may keep them through the 2.5s polls.
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
+
+
+@app.post("/api/catalog/comments")
+def save_catalog_comment():
+    data = payload()
+    with store.lock:
+        wb, revision = current(data)
+        note = catalog.add_comment(wb, data, catalog_user(), REQUIRE_LOGIN)
+        store.save(wb, revision, note)
+    return jsonify(ok=True)
+
+
+@app.post("/api/catalog/items/<item_id>/analyze")
+def analyze_catalog_item(item_id):
+    """AI suggestions for one inspiration — or the local palette-and-keywords fallback."""
+    throttle_clips()
+    with store.lock:
+        wb, _ = store.snapshot()
+        _, items, _ = catalog.visible_catalog(wb, catalog_user(), REQUIRE_LOGIN)
+    item = catalog.find(items, "Item ID", item_id)
+    if not item:
+        raise ValidationError("This inspiration no longer exists. Refresh the page.")
+    config = catalog.ai_settings()
+    if not config:
+        return jsonify(ok=True, **catalog.local_analysis(item))
+    name = item["Image File"]
+    raw = store.read_catalog_image(name)
+    return jsonify(ok=True, **catalog.analyze_image(raw, CATALOG_IMAGE_MIME.get(Path(name).suffix, "image/jpeg"), config))
+
+
+@app.post("/api/catalog/assistant")
+def catalog_assistant():
+    """Questions about the saved inspirations, answered as suggestions — never specifications."""
+    throttle_clips()
+    data = request.get_json(silent=True) or {}
+    with store.lock:
+        wb, _ = store.snapshot()
+        _, items, _ = catalog.visible_catalog(wb, catalog_user(), REQUIRE_LOGIN)
+    return jsonify(ok=True, **catalog.assistant_answer(data.get("question"), items, catalog.ai_settings()))
+
+
+@app.get("/api/catalog/similar")
+def catalog_similar():
+    """Saved inspirations close to this one, by category, tags, materials and palette."""
+    with store.lock:
+        wb, _ = store.snapshot()
+        _, items, _ = catalog.visible_catalog(wb, catalog_user(), REQUIRE_LOGIN)
+    item = catalog.find(items, "Item ID", common.clean(request.args.get("item")))
+    if not item:
+        raise ValidationError("This inspiration no longer exists. Refresh the page.")
+    return jsonify(ok=True, item_ids=catalog.similar_items(item, items))
+
+
+@app.post("/api/catalog/clipper-token")
+def clipper_token():
+    """A signed token the browser extension and bookmarklet authenticate with. It carries
+    only the issuing user's email; Supabase keys never reach the extension."""
+    token = clipper_serializer().dumps({"email": catalog_user()})
+    return jsonify(ok=True, token=token, days=CLIPPER_TOKEN_DAYS)
 
 
 def check_exposure():

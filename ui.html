@@ -15,6 +15,7 @@
     <nav aria-label="Workspace navigation">
       <button class="nav-item active" data-view="selections" title="Selection tracker"><span class="nav-symbol">▦</span> Selection tracker</button>
       <button class="nav-item" data-view="spec" title="Spec sheet"><span class="nav-symbol">▤</span> Spec sheet</button>
+      <button class="nav-item" data-view="catalog" title="Design inspirations"><span class="nav-symbol">❖</span> Inspirations</button>
     </nav>
     <div class="project-label"><span>PROJECTS</span><button id="new-project" class="icon-button" aria-label="Add project">+</button></div>
     <div id="project-list" class="project-list"><span class="muted">Loading projects…</span></div>
@@ -43,7 +44,7 @@
       </section>
       <section id="stats" class="stats" aria-label="Project statistics"></section>
       <section id="selections-view" class="view">
-        <div class="section-heading"><div><h2>Selections schedule</h2><p>The source of truth for your client’s home.</p></div><div class="heading-actions"><button id="add-selection" class="button primary">+ Add selection</button></div></div>
+        <div class="section-heading"><div><h2>Selections schedule</h2><p>The source of truth for your client’s home.</p></div><div class="heading-actions"><button id="add-from-catalog" class="button secondary">❖ From catalog</button><button id="add-selection" class="button primary">+ Add selection</button></div></div>
         <div class="table-panel"><div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Search selections" placeholder="Search items, brands, model numbers…"></label><select id="section-filter" aria-label="Filter by category"><option value="">All categories</option></select><select id="location-filter" aria-label="Filter by location"><option value="">All locations</option></select></div>
           <div class="table-scroll"><table><thead><tr><th>ITEM / LOCATION</th><th>MANUFACTURER / MODEL</th><th>FINISH / QTY</th><th>LINK</th><th>CLIENT STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="selection-rows"></tbody></table></div>
           <div id="table-empty" class="empty-state" hidden><div class="empty-icon">◇</div><h3>No selections here yet</h3><p>Add your first selection, import a spec sheet, or adjust your filters.</p></div>
@@ -67,6 +68,21 @@
         </div>
         <div id="spec-groups" class="spec-groups"></div>
         <div class="spec-total"><span>Estimated total <small>priced line items only</small></span><strong id="spec-total">—</strong></div>
+      </section>
+      <section id="catalog-view" class="view" hidden>
+        <div class="section-heading"><div><h2>My design inspirations</h2><p>Clip ideas from anywhere on the web and keep them in collections — kitchens, baths, flooring, lighting, exteriors and more.</p></div>
+          <div class="heading-actions"><button id="catalog-assistant-open" class="button secondary">✶ Ask about my ideas</button><button id="catalog-clipper-open" class="button secondary">⚲ Get the clipper</button><button id="new-collection" class="button secondary">+ New collection</button><button id="catalog-add" class="button primary">+ Add inspiration</button></div>
+        </div>
+        <div id="collection-strip" class="collection-strip"></div>
+        <div class="table-panel catalog-panel">
+          <div class="filters">
+            <label class="search-field"><span aria-hidden="true">⌕</span><input id="catalog-search" type="search" aria-label="Search inspirations" placeholder="Search titles, tags, materials, notes…"></label>
+            <select id="catalog-category" aria-label="Filter by category"><option value="">All categories</option></select>
+            <button id="catalog-favs" class="chip catalog-favs" aria-pressed="false">♥ Favorites</button>
+          </div>
+          <div id="catalog-gallery" class="catalog-gallery"></div>
+          <div id="catalog-empty" class="empty-state" hidden><div class="empty-icon">❖</div><h3>No inspirations here yet</h3><p>Clip a design from any website, paste an image address, or upload a photo you love.</p><button id="catalog-empty-add" class="button primary">+ Add your first inspiration</button></div>
+        </div>
       </section>
       <section id="manufacturers-view" class="view" hidden><div class="section-heading"><div><h2>The brands behind the details.</h2><p>Keep each manufacturer’s official website with their products.</p></div><button id="add-manufacturer" class="button primary">+ Add manufacturer</button></div><div id="manufacturer-grid" class="manufacturer-grid"></div></section>
       <footer class="main-footer"><span class="footer-brand"><img src="/brand/symbol.png" alt="">UH HOMES <span class="footer-separator">/</span> STUDIO</span><span>Thoughtful details. Beautiful homes.</span></footer>
@@ -101,6 +117,98 @@
     <p class="form-note">Downloads and imports apply to the project selected in the sidebar.</p>
     <div class="dialog-actions"><span id="files-chosen" class="muted" role="status"></span><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="files-ok" class="button primary" disabled>OK</button></div>
   </dialog>
+  <input type="file" id="catalog-file" accept="image/png,image/jpeg,image/webp" hidden>
+  <dialog id="collection-dialog"><form id="collection-form">
+    <div class="dialog-heading"><div><div class="eyebrow">DESIGN INSPIRATIONS</div><h2 id="collection-title">New collection</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <div class="form-grid">
+      <label class="field">Name<input id="collection-name" type="text" maxlength="120" required placeholder="Kitchen Inspirations"></label>
+      <label class="field">Privacy<select id="collection-privacy"></select></label>
+      <label class="field form-span">Description<textarea id="collection-description" maxlength="2000" placeholder="What belongs in this collection?"></textarea></label>
+      <label class="field form-span" id="collection-shared-field">Share with (email, or email:edit — comma separated)<input id="collection-shared" type="text" maxlength="2000" placeholder="designer@studio.com:edit, builder@site.com"></label>
+    </div>
+    <p class="form-note" id="collection-note">Private collections are yours alone. Shared collections are visible to the whole team; email entries grant a named person view or edit access.</p>
+    <p id="collection-error" class="form-error" role="alert" hidden></p>
+    <div class="dialog-actions"><button type="button" id="collection-delete" class="text-button" hidden>Delete collection</button><button type="button" class="button secondary close-dialog">Cancel</button><button type="submit" class="button primary">Save collection</button></div>
+  </form></dialog>
+
+  <dialog id="clip-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">CLIP AN INSPIRATION</div><h2>Add to your inspirations</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <div class="chip-group clip-tabs" role="group" aria-label="How to add the image"><button type="button" class="chip" data-clip-tab="page">From a web page</button><button type="button" class="chip" data-clip-tab="image">Image address</button><button type="button" class="chip" data-clip-tab="upload">Upload</button></div>
+    <div id="clip-page-panel" class="clip-panel">
+      <div class="clip-url-row"><input id="clip-page-url" type="url" maxlength="2000" placeholder="https://… the page you found the design on" aria-label="Page address"><button type="button" id="clip-inspect" class="button secondary">Find images</button></div>
+      <div id="clip-candidates" class="clip-candidates" hidden></div>
+      <p id="clip-page-note" class="form-note" hidden></p>
+    </div>
+    <div id="clip-image-panel" class="clip-panel" hidden>
+      <input id="clip-image-url" type="url" maxlength="2000" placeholder="https://… a direct link to the image itself" aria-label="Image address">
+      <p class="form-note">The image is downloaded and stored with your account — never hotlinked from the source site.</p>
+    </div>
+    <div id="clip-upload-panel" class="clip-panel" hidden>
+      <button type="button" id="clip-choose-file" class="button secondary full">Choose a PNG, JPEG or WebP…</button>
+      <p id="clip-file-name" class="form-note"></p>
+    </div>
+    <div class="form-grid clip-fields">
+      <label class="field">Title<input id="clip-title" type="text" maxlength="200" placeholder="Marble waterfall island"></label>
+      <label class="field">Category<select id="clip-category"><option value="">Choose automatically</option></select></label>
+      <label class="field">Collection<select id="clip-collection"></select></label>
+      <label class="field" id="clip-new-collection-field" hidden>New collection name<input id="clip-new-collection" type="text" maxlength="120" placeholder="Kitchen Inspirations"></label>
+      <label class="field">Tags (comma separated)<input id="clip-tags" type="text" maxlength="500" placeholder="modern, white oak, brass"></label>
+      <label class="field">Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
+      <label class="field">Notes<input id="clip-notes" type="text" maxlength="2000" placeholder="Why you saved this"></label>
+      <label class="field form-span">Description<textarea id="clip-description" maxlength="2000"></textarea></label>
+    </div>
+    <p id="clip-error" class="form-error" role="alert" hidden></p>
+    <div class="dialog-actions"><span id="clip-chosen" class="muted" role="status"></span><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="clip-save" class="button primary">Save inspiration</button></div>
+  </dialog>
+
+  <dialog id="inspiration-dialog" class="inspiration-dialog">
+    <div id="inspiration-body"></div>
+  </dialog>
+
+  <dialog id="assistant-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">AI DESIGN ASSISTANT</div><h2>Ask about your inspirations</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <div class="clip-url-row"><input id="assistant-question" type="text" maxlength="500" placeholder="Show bathrooms with marble countertops…" aria-label="Question"><button type="button" id="assistant-ask" class="button primary">Ask</button></div>
+    <p class="form-note">Answers are suggestions drawn from what you have saved — not verified product specifications.</p>
+    <div id="assistant-answer" class="assistant-answer" hidden></div>
+    <div id="assistant-results" class="assistant-results"></div>
+  </dialog>
+
+  <dialog id="assign-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">CATALOG</div><h2 id="assign-title">Add to projects</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <p class="form-note">The catalog keeps one master record. Each project you pick gets its own line item referencing it — with its own quantity, room, notes and status — so the same item is reusable across unlimited projects.</p>
+    <div id="assign-projects" class="assign-projects" aria-label="Projects"></div>
+    <div class="form-grid">
+      <label class="field">Room / Area (optional)<input id="assign-room" type="text" maxlength="200" placeholder="Kitchen"></label>
+      <label class="field">Qty<input id="assign-qty" type="number" min="0" step="any" value="1"></label>
+    </div>
+    <p id="assign-error" class="form-error" role="alert" hidden></p>
+    <div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="assign-save" class="button primary">Add to selected projects</button></div>
+  </dialog>
+
+  <dialog id="catalog-picker-dialog" class="catalog-picker-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">CATALOG</div><h2 id="picker-title">Add from catalog</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <label class="search-field"><span aria-hidden="true">⌕</span><input id="picker-search" type="search" placeholder="Search titles, tags, brands, materials…" aria-label="Search catalog"></label>
+    <div id="picker-grid" class="picker-grid"></div>
+    <p class="form-note">Each added item becomes this project's own line item, referencing the catalog record it came from. Removing it later never deletes the catalog item.</p>
+    <p id="picker-error" class="form-error" role="alert" hidden></p>
+    <div class="dialog-actions"><span id="picker-count" class="muted" role="status"></span><button type="button" class="button secondary close-dialog">Cancel</button><button type="button" id="picker-add" class="button primary" disabled>Add to project</button></div>
+  </dialog>
+
+  <dialog id="clipper-dialog">
+    <div class="dialog-heading"><div><div class="eyebrow">UH HOMES CLIPPER</div><h2>Clip from anywhere</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
+    <section class="clipper-section">
+      <h3>Bookmarklet — works in any browser</h3>
+      <p class="form-note">Drag this link to your bookmarks bar. On any page you like, click it to clip that page here.</p>
+      <p><a id="clipper-bookmarklet" class="button secondary" href="#">✂ Clip to UH Homes</a></p>
+    </section>
+    <section class="clipper-section">
+      <h3>Browser extension</h3>
+      <p class="form-note">Load the <code>clipper-extension</code> folder (beside the app) via your browser's Extensions page → “Load unpacked”. Then paste this app's address and a clipper token into the extension's setup.</p>
+      <div class="clip-url-row"><input id="clipper-token" type="text" readonly placeholder="Generate a token to connect the extension" aria-label="Clipper token"><button type="button" id="clipper-generate" class="button secondary">Generate token</button><button type="button" id="clipper-copy" class="button secondary" hidden>Copy</button></div>
+      <p class="form-note" id="clipper-note">The token identifies you to this workspace and expires after 90 days. Treat it like a password.</p>
+    </section>
+  </dialog>
+
   <span id="spec-save-status" class="save-status" role="status" hidden></span>
   <div id="toast" role="status" class="toast" hidden></div>
 </body>

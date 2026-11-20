@@ -22,7 +22,7 @@ const isBulkGroup = (name) => { const n = String(name || "").trim(); return n ==
 // itself - and drawn as an empty card until its first line item puts it in the workspace.
 // state.specNaming is the one card whose heading is still being typed.
 const heldGroups = () => state.specHeld.filter((g) => g.field === state.specGroup && g.project === state.project);
-const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers" };
+const names = { selections: "Selection tracker", spec: "Spec sheet", manufacturers: "Manufacturers", catalog: "Design inspirations" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isUrl = (value) => { try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } };
 const fixUrl = (url) => { const m = String(url || "").match(/^https?:\/\/misc\.hajoca\.com\/reports\/[^/]+\/s(\d+\.pdf)/); return m ? `https://www.hajoca.com/Misc/DisplayPDF.aspx?s=${m[1]}` : url; };
@@ -169,7 +169,7 @@ function render() {
   if (!data) return;
   const project = selectedProject(), rows = projectRows();
   const linked = rows.filter((r) => isUrl(r["Product URL"])).length;
-  const bare = state.view === "spec";   // the spec sheet stands on its own
+  const bare = state.view === "spec" || state.view === "catalog";   // these views stand on their own, apart from any one project
   $("project-list").innerHTML = data.projects.length ? data.projects.map((p) => `<button class="project-choice ${p["Project ID"] === state.project ? "selected" : ""}" data-project="${esc(p["Project ID"])}"><span><strong>${esc(p["Project Name"])}</strong><small>${esc(p["Project ID"])}</small></span></button>`).join("") : '<p class="muted">Add a project to get started.</p>';
   $("project-summary").hidden = !project || state.view === "manufacturers" || bare;
   $("stats").hidden = !project || state.view === "manufacturers" || bare;
@@ -227,9 +227,9 @@ function render() {
   $("stats").innerHTML = [["Total selections", rows.length, `${new Set(rows.map((r) => r.Section || "Other")).size} categories`], ["Product links", linked, `of ${rows.length} with a product page`], ["Priced total", budget.toLocaleString(undefined, { maximumFractionDigits: 0 }), `${priced.length} of ${rows.length} priced`]].map(([label, value, note]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value"><strong>${value}</strong><span>${note}</span></div></div>`).join("");
   $("page-title").textContent = names[state.view];
   // the spec sheet is the standard specification, so it is not labelled with one project
-  $("breadcrumb-name").textContent = project && !["manufacturers", "spec"].includes(state.view)
+  $("breadcrumb-name").textContent = project && !["manufacturers", "spec", "catalog"].includes(state.view)
     ? `${project["Project Name"]} / ${names[state.view]}` : names[state.view];
-  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", manufacturers: "Keep your trusted brands and official websites together." }[state.view];
+  $("page-subtitle").textContent = { selections: "Every material. Every finish. All in one place.", spec: "The full specification, grouped the way you work.", manufacturers: "Keep your trusted brands and official websites together.", catalog: "Everything you have clipped, beautifully organized." }[state.view];
   // the spec sheet edits the same rows the exports print, so name the home it belongs to
   if (state.view === "spec" && project) $("page-subtitle").textContent = `Specifying ${project["Project Name"]}`;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
@@ -242,6 +242,7 @@ function render() {
   $("location-filter").value = oldLocation;
   renderTable();
   renderSpec();
+  renderCatalog();
   $("manufacturer-grid").innerHTML = data.manufacturers.map((m, index) => `<article class="manufacturer-card"><h3>${esc(m.Manufacturer)}</h3><p>${esc(m["Official Domain"])}</p><p>${esc(m.Notes || "Official product source")}</p><button class="text-button" data-manufacturer="${index}">Edit manufacturer ↗</button></article>`).join("") || '<div class="empty-state"><h3>Add your first manufacturer</h3><p>Enter the brand and its official website domain.</p></div>';
   attachImageErrors();
   restoreFocus();
@@ -1657,7 +1658,614 @@ document.addEventListener("click", (event) => {
   if (button.dataset.manufacturer !== undefined) openEditor("manufacturer", state.data.manufacturers[Number(button.dataset.manufacturer)]);
 });
 
-refresh().catch((error) => {
+// ---------------------------------------------------------------------------
+// Design inspirations: collections of images clipped from the web (see catalog.py).
+// Collections and items arrive with /api/state, so the 2.5s poll keeps them fresh;
+// image bytes are stored by the app and served from /api/catalog/images, never hotlinked.
+// ---------------------------------------------------------------------------
+const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], privacies: [], approvals: [], ai: false, user: "", shared_accounts: false };
+let catCollectionId = "";          // "" = all inspirations
+let catFavsOnly = false;
+let clipTab = "page", clipCandidate = null, clipFile = null, clipInspected = null;
+
+const catImage = (name) => `/api/catalog/images/${encodeURIComponent(name || "")}`;
+const catItem = (id) => cat().items.find((i) => i["Item ID"] === id);
+const catCollection = (id) => cat().collections.find((c) => c["Collection ID"] === id);
+const catCollections = () => [...cat().collections].sort((a, b) => String(b.Updated || "").localeCompare(String(a.Updated || "")));
+const catItems = () => [...cat().items].sort((a, b) => String(b["Saved On"] || "").localeCompare(String(a["Saved On"] || "")));
+const editableCollections = () => catCollections().filter((c) => c._editable);
+const itemThumb = (i) => catImage(i["Thumb File"] || i["Image File"]);
+const collectionItems = (id) => catItems().filter((i) => i["Collection ID"] === id);
+const coverFor = (c) => {
+  if (c["Cover Image"]) return catImage(c["Cover Image"]);
+  const first = collectionItems(c["Collection ID"])[0];
+  return first ? itemThumb(first) : "";
+};
+
+function renderCatalog() {
+  const data = cat();
+  if (!$("catalog-view") || state.view !== "catalog") return;
+  const oldCategory = $("catalog-category").value;
+  $("catalog-category").innerHTML = '<option value="">All categories</option>' + data.categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  $("catalog-category").value = oldCategory;
+  if (catCollectionId && !catCollection(catCollectionId)) catCollectionId = "";
+  const strip = [`<button class="collection-card all-card ${catCollectionId === "" ? "selected" : ""}" data-collection="">
+      <span class="collection-cover" aria-hidden="true">❖</span>
+      <span class="collection-body"><strong>All inspirations</strong><small>${data.items.length} saved</small></span></button>`];
+  for (const c of catCollections()) {
+    const count = collectionItems(c["Collection ID"]).length;
+    const cover = coverFor(c);
+    const shared = (c.Privacy === "Shared" || c["Shared With"]) ? '<span class="pill">Shared</span>' : "";
+    const viewOnly = c._editable ? "" : '<span class="pill">View only</span>';
+    strip.push(`<button class="collection-card ${catCollectionId === c["Collection ID"] ? "selected" : ""}" data-collection="${esc(c["Collection ID"])}" title="${esc(c.Description || c.Name)}">
+      <span class="collection-cover">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : "❖"}</span>
+      <span class="collection-body"><strong>${esc(c.Name)}</strong><small>${count} inspiration${count === 1 ? "" : "s"}${c.Updated ? ` · ${esc(String(c.Updated).slice(0, 10))}` : ""}</small><span class="collection-pills">${shared}${viewOnly}</span></span></button>`);
+  }
+  $("collection-strip").innerHTML = strip.join("");
+  const query = $("catalog-search").value.trim().toLowerCase(), category = $("catalog-category").value;
+  const rows = catItems().filter((i) => (!catCollectionId || i["Collection ID"] === catCollectionId)
+    && (!category || i.Category === category)
+    && (!catFavsOnly || i.Favorite === "Yes")
+    && (!query || [i.Title, i.Description, i.Notes, i.Tags, i.Category, i.Materials, i["Source Site"]].join(" ").toLowerCase().includes(query)));
+  $("catalog-gallery").innerHTML = rows.map((i) => `<article class="insp-card" data-insp="${esc(i["Item ID"])}" tabindex="0" role="button" aria-label="Open ${esc(i.Title || "inspiration")}">
+      <img src="${esc(itemThumb(i))}" alt="${esc(i.Title || "Saved inspiration")}" loading="lazy">
+      <button class="insp-fav ${i.Favorite === "Yes" ? "active" : ""}" data-fav="${esc(i["Item ID"])}" aria-label="${i.Favorite === "Yes" ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${i.Favorite === "Yes"}">♥</button>
+      <div class="insp-body"><strong>${esc(i.Title || "Untitled inspiration")}</strong><small>${[i.Category, i["Source Site"]].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</small></div>
+    </article>`).join("");
+  $("catalog-empty").hidden = rows.length > 0;
+  const selected = catCollection(catCollectionId);
+  $("catalog-gallery").classList.toggle("empty", !rows.length);
+  $("page-subtitle").textContent = selected ? (selected.Description || `Collection · ${selected.Name}`) : "Everything you have clipped, beautifully organized.";
+}
+
+// --- Collection editor ------------------------------------------------------
+let editingCollection = null;
+
+function openCollectionEditor(collection) {
+  editingCollection = collection || null;
+  $("collection-title").textContent = collection ? collection.Name : "New collection";
+  $("collection-name").value = collection?.Name || "";
+  $("collection-description").value = collection?.Description || "";
+  $("collection-privacy").innerHTML = cat().privacies.map((p) => `<option value="${esc(p)}" ${collection?.Privacy === p ? "selected" : ""}>${esc(p)}</option>`).join("");
+  $("collection-shared").value = collection?.["Shared With"] || "";
+  $("collection-shared-field").hidden = !cat().shared_accounts;
+  $("collection-delete").hidden = !collection;
+  $("collection-error").hidden = true;
+  $("collection-dialog").showModal();
+}
+
+async function saveCollection(event) {
+  event.preventDefault();
+  await action(async () => {
+    const values = { "Collection ID": editingCollection?.["Collection ID"] || "",
+                     Name: $("collection-name").value.trim(),
+                     Description: $("collection-description").value.trim(),
+                     Privacy: $("collection-privacy").value,
+                     "Shared With": cat().shared_accounts ? $("collection-shared").value.trim() : "",
+                     "Cover Image": editingCollection?.["Cover Image"] || "" };
+    try {
+      const result = await persist("/api/catalog/collections", { values });
+      $("collection-dialog").close();
+      if (!editingCollection && result.collection) catCollectionId = result.collection;
+      await refresh();
+      toast(editingCollection ? "Collection updated." : "Collection created. Clip something beautiful into it.");
+    } catch (error) {
+      $("collection-error").textContent = error.message;
+      $("collection-error").hidden = false;
+      throw error;
+    }
+  });
+}
+
+async function deleteCollection() {
+  const collection = editingCollection;
+  if (!collection) return;
+  const count = collectionItems(collection["Collection ID"]).length;
+  if (!confirm(`Delete “${collection.Name}”${count ? ` and its ${count} saved inspiration${count === 1 ? "" : "s"}` : ""}? This cannot be undone.`)) return;
+  await action(async () => {
+    await persist("/api/catalog/collections", { values: { "Collection ID": collection["Collection ID"], Name: collection.Name }, delete: true, cascade: true });
+    $("collection-dialog").close();
+    if (catCollectionId === collection["Collection ID"]) catCollectionId = "";
+    await refresh();
+    toast("Collection deleted.");
+  });
+}
+
+// --- Clip dialog: from a page, an image address, or an upload ---------------
+function setClipTab(tab) {
+  clipTab = tab;
+  document.querySelectorAll("[data-clip-tab]").forEach((b) => b.classList.toggle("active", b.dataset.clipTab === tab));
+  $("clip-page-panel").hidden = tab !== "page";
+  $("clip-image-panel").hidden = tab !== "image";
+  $("clip-upload-panel").hidden = tab !== "upload";
+  updateClipChosen();
+}
+
+function updateClipChosen() {
+  $("clip-chosen").textContent = clipTab === "page" ? (clipCandidate ? "Image selected from the page." : "Find images, then pick one.")
+    : clipTab === "image" ? "The image at that address will be saved."
+    : (clipFile ? `Ready to upload ${clipFile.name}.` : "Choose an image file to upload.");
+}
+
+function openClip(pageUrl) {
+  clipCandidate = null; clipFile = null; clipInspected = null;
+  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price"]) $(id).value = "";
+  $("clip-file-name").textContent = "";
+  $("clip-candidates").hidden = true;
+  $("clip-candidates").innerHTML = "";
+  $("clip-page-note").hidden = true;
+  $("clip-error").hidden = true;
+  $("clip-category").innerHTML = '<option value="">Choose automatically</option>' + cat().categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  const options = editableCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === catCollectionId ? "selected" : ""}>${esc(c.Name)}</option>`).join("");
+  $("clip-collection").innerHTML = options + '<option value="__new">— New collection —</option>';
+  if (!editableCollections().length) $("clip-collection").value = "__new";
+  $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new";
+  setClipTab("page");
+  $("clip-dialog").showModal();
+  if (pageUrl) { $("clip-page-url").value = pageUrl; inspectPage(); }
+}
+
+async function inspectPage() {
+  const url = $("clip-page-url").value.trim();
+  if (!url) { toast("Paste the address of the page first.", true); return; }
+  await action(async () => {
+    $("clip-inspect").disabled = true;
+    try {
+      const result = await api("/api/catalog/inspect", { url });
+      clipInspected = result; clipCandidate = null;
+      if (!$("clip-title").value) $("clip-title").value = result.title || "";
+      if (!$("clip-description").value) $("clip-description").value = result.description || "";
+      if (!$("clip-price").value) $("clip-price").value = result.price || "";
+      $("clip-page-note").textContent = result.images.length
+        ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} found on ${result.site || "the page"} — pick the one to save.`
+        : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
+      $("clip-page-note").hidden = false;
+      $("clip-candidates").hidden = !result.images.length;
+      $("clip-candidates").innerHTML = result.images.map((img, index) => `<button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>`).join("");
+      $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate").hidden = true; }));
+      updateClipChosen();
+    } finally { $("clip-inspect").disabled = false; }
+  });
+}
+
+async function saveClip() {
+  await action(async () => {
+    const collectionChoice = $("clip-collection").value;
+    const newName = collectionChoice === "__new" ? $("clip-new-collection").value.trim() : "";
+    const collection = collectionChoice === "__new" ? "" : collectionChoice;
+    const fail = (message) => { $("clip-error").textContent = message; $("clip-error").hidden = false; throw new Error(message); };
+    $("clip-error").hidden = true;
+    if (!collection && !newName) fail("Choose a collection, or name a new one.");
+    const meta = { title: $("clip-title").value.trim(), description: $("clip-description").value.trim(),
+                   notes: $("clip-notes").value.trim(), tags: $("clip-tags").value.trim(),
+                   category: $("clip-category").value, materials: "",
+                   price: $("clip-price").value.trim(), brand: clipInspected?.brand || "" };
+    setBusy(true, "Saving the inspiration…");
+    try {
+      if (clipTab === "upload") {
+        if (!clipFile) fail("Choose an image file to upload.");
+        if (clipFile.size > 8 * 1024 * 1024) fail("Choose a file smaller than 8 MB.");
+        const data = new FormData();
+        data.append("file", clipFile);
+        for (const [key, value] of Object.entries(meta)) data.append(key, value);
+        data.append("collection", collection);
+        data.append("new_collection", newName);
+        await api("/api/catalog/items/upload", data);
+      } else {
+        const body = { ...meta, collection, new_collection: newName };
+        if (clipTab === "page") {
+          if (!clipCandidate) fail("Find images on the page, then pick the one to save.");
+          body.image_url = clipCandidate.url;
+          body.source_url = $("clip-page-url").value.trim();
+          body.source_site = clipInspected?.site || "";
+        } else {
+          if (!$("clip-image-url").value.trim()) fail("Paste the image's address first.");
+          body.image_url = $("clip-image-url").value.trim();
+        }
+        await api("/api/catalog/clip", body);
+      }
+      $("clip-dialog").close();
+      state.view = "catalog";
+      await refresh();
+      toast("Inspiration saved to your collection.");
+    } finally { setBusy(false); }
+  });
+}
+
+// --- Inspiration detail ------------------------------------------------------
+let inspOpen = null;
+
+function inspirationHTML(item) {
+  const collection = catCollection(item["Collection ID"]);
+  const editable = !!collection?._editable;
+  const off = editable ? "" : "disabled";
+  const colors = String(item.Colors || "").split(",").map((c) => c.trim()).filter(Boolean);
+  const comments = cat().comments.filter((c) => c["Item ID"] === item["Item ID"]);
+  const user = (cat().user || "").toLowerCase();
+  const owner = (collection?.Owner || "").toLowerCase();
+  const approvals = cat().approvals;
+  const source = item["Source URL"];
+  const usedIn = [...new Set((state.data?.selections || []).filter((r) => r["Catalog Item ID"] === item["Item ID"]).map((r) => r["Project ID"]))];
+  const usedNames = usedIn.map((id) => state.data.projects.find((p) => p["Project ID"] === id)?.["Project Name"] || id);
+  return `<div class="dialog-heading"><div><div class="eyebrow">${esc(collection?.Name || "Inspiration")}</div><h2>${esc(item.Title || "Untitled inspiration")}</h2></div>
+      <div class="insp-head-actions"><button type="button" class="insp-fav standalone ${item.Favorite === "Yes" ? "active" : ""}" data-insp-fav aria-pressed="${item.Favorite === "Yes"}" aria-label="Favorite">♥</button><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div></div>
+    <div class="insp-layout">
+      <div class="insp-media">
+        <a href="${esc(catImage(item["Image File"]))}" target="_blank" rel="noopener"><img src="${esc(catImage(item["Image File"]))}" alt="${esc(item.Title || "Saved inspiration")}"></a>
+        ${colors.length ? `<div class="insp-colors" aria-label="Color palette">${colors.map((c) => `<span class="color-dot" style="background:${esc(c)}" title="${esc(c)}"></span>`).join("")}</div>` : ""}
+        <p class="insp-meta">${[item["Source Site"], item["Saved By"] ? `saved by ${item["Saved By"]}` : "", item["Saved On"] ? `on ${String(item["Saved On"]).slice(0, 10)}` : ""].filter(Boolean).map(esc).join(" · ") || "Saved to your inspirations"}</p>
+        <div class="insp-links">${source ? `<a class="button secondary" href="${esc(source)}" target="_blank" rel="noopener noreferrer">Open original ↗</a>` : ""}<a class="button secondary" href="${esc(catImage(item["Image File"]))}?download=1">Download</a>${editable ? '<button type="button" class="button secondary" data-insp-cover>Use as collection cover</button>' : ""}<button type="button" class="button secondary" data-insp-assign>+ Add to projects</button></div>
+        <p class="insp-meta insp-projects">${usedIn.length ? `In ${usedIn.length} project${usedIn.length === 1 ? "" : "s"}: ${usedNames.map(esc).join(", ")}` : "Not in any project yet — add it to one to make it a line item."}</p>
+      </div>
+      <div class="insp-side">
+        <div class="form-grid insp-fields">
+          <label class="field form-span">Title<input id="insp-title" type="text" maxlength="200" value="${esc(item.Title || "")}" ${off}></label>
+          <label class="field">Category<select id="insp-category" ${off}>${["", ...cat().categories].map((c) => `<option value="${esc(c)}" ${item.Category === c ? "selected" : ""}>${esc(c || "—")}</option>`).join("")}</select></label>
+          <label class="field">Collection<select id="insp-collection" ${off}>${editableCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === item["Collection ID"] ? "selected" : ""}>${esc(c.Name)}</option>`).join("")}</select></label>
+          <label class="field">Feedback<select id="insp-approval" ${off}>${approvals.map((a) => `<option value="${esc(a)}" ${item.Approval === a ? "selected" : ""}>${esc(a || "—")}</option>`).join("")}</select></label>
+          <label class="field">Tags<input id="insp-tags" type="text" maxlength="500" value="${esc(item.Tags || "")}" ${off}></label>
+          <label class="field form-span">Description<textarea id="insp-description" maxlength="2000" ${off}>${esc(item.Description || "")}</textarea></label>
+          <label class="field form-span">My notes<textarea id="insp-notes" maxlength="2000" ${off}>${esc(item.Notes || "")}</textarea></label>
+          <label class="field form-span">Materials<input id="insp-materials" type="text" maxlength="500" value="${esc(item.Materials || "")}" ${off}></label>
+          <label class="field">Price (suggestion)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
+          <label class="field">Brand<input id="insp-brand" type="text" maxlength="200" value="${esc(item.Brand || "")}" ${off}></label>
+        </div>
+        <div class="insp-ai">
+          <button type="button" class="button secondary" data-insp-analyze>✶ ${cat().ai ? "Analyze with AI" : "Suggest category & materials"}</button>
+          <div id="insp-ai-result" class="insp-ai-result" hidden></div>
+        </div>
+        <section class="insp-similar-wrap"><h3>Similar saved designs</h3><div id="insp-similar" class="insp-similar"><span class="muted">Looking…</span></div></section>
+        <section class="insp-comments-wrap"><h3>Comments</h3>
+          <div id="insp-comments">${comments.map((c) => `<div class="insp-comment"><div><strong>${esc(c.Author || "You")}</strong><small> · ${esc(String(c.Created).slice(0, 16).replace("T", " "))}</small><p>${esc(c.Comment)}</p></div>${(!cat().shared_accounts || (c.Author || "").toLowerCase() === user || owner === user) ? `<button type="button" class="text-button" data-comment-delete="${esc(c["Comment ID"])}">Remove</button>` : ""}</div>`).join("") || '<p class="muted">No comments yet.</p>'}</div>
+          <div class="clip-url-row"><input id="insp-comment-text" type="text" maxlength="2000" placeholder="Add a comment for the team…" aria-label="Comment"><button type="button" class="button secondary" data-comment-add>Post</button></div>
+        </section>
+        <div class="dialog-actions">${editable ? '<button type="button" class="text-button" data-insp-delete>Delete inspiration</button>' : '<span class="muted">View only — shared with you</span>'}<button type="button" class="button secondary close-dialog">Close</button>${editable ? '<button type="button" class="button primary" data-insp-save>Save changes</button>' : ""}</div>
+      </div>
+    </div>`;
+}
+
+async function openInspiration(id) {
+  const item = catItem(id);
+  if (!item) return;
+  inspOpen = id;
+  $("inspiration-body").innerHTML = inspirationHTML(item);
+  $("inspiration-dialog").showModal();
+  try {
+    const result = await api(`/api/catalog/similar?item=${encodeURIComponent(id)}`);
+    const similar = result.item_ids.map(catItem).filter(Boolean);
+    $("insp-similar").innerHTML = similar.length
+      ? similar.map((s) => `<button type="button" class="insp-similar-card" data-insp-open="${esc(s["Item ID"])}" title="${esc(s.Title || "")}"><img src="${esc(itemThumb(s))}" alt="${esc(s.Title || "Similar design")}" loading="lazy"></button>`).join("")
+      : '<span class="muted">Nothing similar saved yet — clip more designs and they will appear here.</span>';
+  } catch { $("insp-similar").innerHTML = '<span class="muted">Similar designs are unavailable right now.</span>'; }
+}
+
+async function saveInspiration() {
+  const item = catItem(inspOpen);
+  if (!item) return;
+  await action(async () => {
+    const values = { Title: $("insp-title").value.trim(), Category: $("insp-category").value,
+                     "Collection ID": $("insp-collection").value, Approval: $("insp-approval").value,
+                     Tags: $("insp-tags").value.trim(), Description: $("insp-description").value.trim(),
+                     Notes: $("insp-notes").value.trim(), Materials: $("insp-materials").value.trim(),
+                     Price: $("insp-price").value.trim(), Brand: $("insp-brand").value.trim() };
+    await persist("/api/catalog/items", { item: item["Item ID"], values }, () => !!catItem(item["Item ID"]));
+    $("inspiration-dialog").close();
+    await refresh();
+    toast("Inspiration updated.");
+  });
+}
+
+async function toggleFavorite(id, fromDialog) {
+  const item = catItem(id);
+  if (!item) return;
+  await action(async () => {
+    await persist("/api/catalog/items", { item: id, values: { Favorite: item.Favorite === "Yes" ? "" : "Yes" } }, () => !!catItem(id));
+    await refresh();
+    if (fromDialog && catItem(id)) { $("inspiration-body").innerHTML = inspirationHTML(catItem(id)); }
+  });
+}
+
+async function analyzeInspiration() {
+  const item = catItem(inspOpen);
+  if (!item) return;
+  await action(async () => {
+    const box = $("insp-ai-result");
+    box.hidden = false;
+    box.innerHTML = '<span class="muted">Analyzing the image…</span>';
+    try {
+      const result = await api(`/api/catalog/items/${encodeURIComponent(item["Item ID"])}/analyze`, {});
+      const parts = [];
+      if (result.category) parts.push(`<div><dt>Category</dt><dd>${esc(result.category)}</dd></div>`);
+      if (result.style) parts.push(`<div><dt>Style</dt><dd>${esc(result.style)}</dd></div>`);
+      if (result.description) parts.push(`<div><dt>Description</dt><dd>${esc(result.description)}</dd></div>`);
+      if (result.materials?.length) parts.push(`<div><dt>Materials</dt><dd>${esc(result.materials.join(", "))}</dd></div>`);
+      if (result.tags?.length) parts.push(`<div><dt>Tags</dt><dd>${esc(result.tags.join(", "))}</dd></div>`);
+      box.innerHTML = parts.length
+        ? `<p class="muted">${result.source === "ai" ? "AI suggestions — review before applying." : "Suggested from your saved details (connect an AI key for image analysis)."}</p><dl class="insp-ai-grid">${parts.join("")}</dl><button type="button" class="button secondary" data-insp-apply>Apply suggestions</button>`
+        : '<p class="muted">Nothing could be suggested for this image yet.</p>';
+      box.dataset.result = JSON.stringify(result);
+    } catch (error) {
+      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+      throw error;
+    }
+  });
+}
+
+function applyAiSuggestions() {
+  const box = $("insp-ai-result");
+  let result;
+  try { result = JSON.parse(box.dataset.result || "{}"); } catch { return; }
+  if (result.category) $("insp-category").value = result.category;
+  if (result.description && !$("insp-description").value.trim()) $("insp-description").value = result.description;
+  if (result.materials?.length) $("insp-materials").value = [...new Set([...$("insp-materials").value.split(",").map((m) => m.trim()).filter(Boolean), ...result.materials])].join(", ");
+  const extra = [...(result.tags || []), ...(result.style ? [result.style] : [])];
+  if (extra.length) $("insp-tags").value = [...new Set([...$("insp-tags").value.split(",").map((t) => t.trim()).filter(Boolean), ...extra])].join(", ");
+  toast("Suggestions applied — review the fields, then press Save changes.");
+}
+
+async function deleteInspiration() {
+  const item = catItem(inspOpen);
+  if (!item) return;
+  if (!confirm(`Delete “${item.Title || "this inspiration"}”? This cannot be undone.`)) return;
+  await action(async () => {
+    await persist("/api/catalog/items", { item: item["Item ID"], delete: true }, () => !!catItem(item["Item ID"]));
+    $("inspiration-dialog").close();
+    await refresh();
+    toast("Inspiration deleted.");
+  });
+}
+
+async function setCollectionCover() {
+  const item = catItem(inspOpen);
+  const collection = item && catCollection(item["Collection ID"]);
+  if (!collection) return;
+  await action(async () => {
+    await persist("/api/catalog/collections", { values: { "Collection ID": collection["Collection ID"], Name: collection.Name,
+      Description: collection.Description || "", Privacy: collection.Privacy || "Private",
+      "Shared With": collection["Shared With"] || "", "Cover Image": item["Thumb File"] || item["Image File"] } });
+    await refresh();
+    toast(`“${item.Title || "This image"}” is now the cover of ${collection.Name}.`);
+  });
+}
+
+// --- Catalog → project assignment --------------------------------------------
+// One catalog item, many projects: each assignment writes that project its own Selections
+// row referencing the Catalog Item ID. The master record is reused, never duplicated, and
+// removing a line item later never touches the catalog.
+let assignItemId = null;
+
+function openAssign(id) {
+  const item = catItem(id);
+  if (!item || !state.data) return;
+  if (!state.data.projects.length) { toast("Add a project first, then assign catalog items to it.", true); return; }
+  assignItemId = id;
+  const used = new Set(state.data.selections.filter((r) => r["Catalog Item ID"] === id).map((r) => r["Project ID"]));
+  $("assign-title").textContent = `Add “${item.Title || "Untitled"}” to projects`;
+  $("assign-projects").innerHTML = state.data.projects.map((p) => `<label class="assign-project"><input type="checkbox" value="${esc(p["Project ID"])}"><span>${esc(p["Project ID"])} — ${esc(p["Project Name"] || "")}</span>${used.has(p["Project ID"]) ? '<small class="muted">already a line item there</small>' : ""}</label>`).join("");
+  $("assign-room").value = "";
+  $("assign-qty").value = "1";
+  $("assign-error").hidden = true;
+  $("assign-dialog").showModal();
+}
+
+async function saveAssign() {
+  if (!catItem(assignItemId)) return;
+  const chosen = Array.from($("assign-projects").querySelectorAll("input:checked"), (box) => box.value);
+  await action(async () => {
+    $("assign-error").hidden = true;
+    if (!chosen.length) {
+      $("assign-error").textContent = "Tick at least one project.";
+      $("assign-error").hidden = false;
+      return;
+    }
+    const values = { "Room / Area": $("assign-room").value.trim(), Qty: $("assign-qty").value.trim() || "1" };
+    await persist(`/api/catalog/items/${encodeURIComponent(assignItemId)}/assign`,
+                  { projects: chosen, values }, () => !!catItem(assignItemId));
+    $("assign-dialog").close();
+    await refresh();
+    if ($("inspiration-dialog").open && catItem(inspOpen)) $("inspiration-body").innerHTML = inspirationHTML(catItem(inspOpen));
+    toast(`Added to ${chosen.length} project${chosen.length === 1 ? "" : "s"} — each has its own line item now.`);
+  });
+}
+
+// --- The tracker's catalog picker ---------------------------------------------
+let pickerSelected = new Set();
+
+function renderPicker() {
+  const term = $("picker-search").value.trim().toLowerCase();
+  const items = catItems().filter((i) => !term || ["Title", "Tags", "Materials", "Brand", "Category", "Description"]
+    .some((f) => String(i[f] || "").toLowerCase().includes(term)));
+  const used = new Set(state.data.selections.filter((r) => r["Project ID"] === state.project && r["Catalog Item ID"]).map((r) => r["Catalog Item ID"]));
+  $("picker-grid").innerHTML = items.map((i) => `<button type="button" class="picker-card ${pickerSelected.has(i["Item ID"]) ? "selected" : ""}" data-pick="${esc(i["Item ID"])}"><img src="${esc(itemThumb(i))}" alt="${esc(i.Title || "Saved item")}" loading="lazy"><span class="picker-name">${esc(i.Title || "Untitled")}</span><span class="picker-sub">${[i.Brand, i.Price].filter(Boolean).map(esc).join(" · ")}</span>${used.has(i["Item ID"]) ? '<span class="picker-used">In this project</span>' : ""}</button>`).join("")
+    || '<p class="muted">Nothing matches that search.</p>';
+  $("picker-count").textContent = pickerSelected.size ? `${pickerSelected.size} selected` : "";
+  $("picker-add").disabled = !pickerSelected.size || state.busy;
+}
+
+function openCatalogPicker() {
+  if (state.busy || !state.data) return;
+  if (!state.project) { toast("Choose a project first.", true); return; }
+  if (!cat().items.length) { toast("Your catalog is empty — clip or upload an inspiration first.", true); return; }
+  pickerSelected = new Set();
+  $("picker-search").value = "";
+  $("picker-error").hidden = true;
+  const project = state.data.projects.find((p) => p["Project ID"] === state.project);
+  $("picker-title").textContent = `Add from catalog to ${project?.["Project Name"] || state.project}`;
+  renderPicker();
+  $("catalog-picker-dialog").showModal();
+}
+
+async function addPickedToProject() {
+  const chosen = [...pickerSelected].filter(catItem);
+  if (!chosen.length || !state.project) return;
+  await action(async () => {
+    setBusy(true, "Adding catalog items to the project…");
+    try {
+      for (const id of chosen) {
+        await persist(`/api/catalog/items/${encodeURIComponent(id)}/assign`,
+                      { projects: [state.project] }, () => !!catItem(id));
+      }
+      $("catalog-picker-dialog").close();
+      await refresh();
+      toast(`${chosen.length} catalog item${chosen.length === 1 ? "" : "s"} added to ${state.project}.`);
+    } finally { setBusy(false); }
+  });
+}
+
+async function addComment() {
+  const item = catItem(inspOpen);
+  const text = $("insp-comment-text").value.trim();
+  if (!item || !text) return;
+  await action(async () => {
+    await persist("/api/catalog/comments", { item: item["Item ID"], text }, () => !!catItem(item["Item ID"]));
+    await refresh();
+    if (catItem(inspOpen)) $("inspiration-body").innerHTML = inspirationHTML(catItem(inspOpen));
+  });
+}
+
+// --- AI assistant ------------------------------------------------------------
+async function askAssistant() {
+  const question = $("assistant-question").value.trim();
+  if (!question) return;
+  await action(async () => {
+    $("assistant-ask").disabled = true;
+    try {
+      const result = await api("/api/catalog/assistant", { question });
+      $("assistant-answer").textContent = result.answer;
+      $("assistant-answer").hidden = false;
+      const items = result.item_ids.map(catItem).filter(Boolean);
+      $("assistant-results").innerHTML = items.map((i) => `<button type="button" class="insp-similar-card" data-insp-open="${esc(i["Item ID"])}" title="${esc(i.Title || "")}"><img src="${esc(itemThumb(i))}" alt="${esc(i.Title || "Saved design")}" loading="lazy"><small>${esc(i.Title || "Untitled")}</small></button>`).join("");
+    } finally { $("assistant-ask").disabled = false; }
+  });
+}
+
+// --- Wiring ------------------------------------------------------------------
+$("new-collection").addEventListener("click", () => openCollectionEditor(null));
+$("collection-form").addEventListener("submit", saveCollection);
+$("collection-delete").addEventListener("click", () => action(deleteCollection));
+$("catalog-add").addEventListener("click", () => openClip());
+$("catalog-empty-add").addEventListener("click", () => openClip());
+$("catalog-search").addEventListener("input", renderCatalog);
+$("catalog-category").addEventListener("change", renderCatalog);
+$("catalog-favs").addEventListener("click", () => {
+  catFavsOnly = !catFavsOnly;
+  $("catalog-favs").classList.toggle("active", catFavsOnly);
+  $("catalog-favs").setAttribute("aria-pressed", String(catFavsOnly));
+  renderCatalog();
+});
+$("collection-strip").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-collection]");
+  if (!card || state.busy) return;
+  if (catCollectionId === card.dataset.collection && card.dataset.collection) {
+    const collection = catCollection(card.dataset.collection);
+    if (collection?._editable) { openCollectionEditor(collection); return; }
+  }
+  catCollectionId = card.dataset.collection;
+  renderCatalog();
+});
+$("collection-strip").addEventListener("dblclick", (event) => {
+  const card = event.target.closest("[data-collection]");
+  const collection = card && catCollection(card.dataset.collection);
+  if (collection?._editable) openCollectionEditor(collection);
+});
+$("catalog-gallery").addEventListener("click", (event) => {
+  const fav = event.target.closest("[data-fav]");
+  if (fav) { toggleFavorite(fav.dataset.fav, false); return; }
+  const card = event.target.closest("[data-insp]");
+  if (card) openInspiration(card.dataset.insp);
+});
+$("catalog-gallery").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const card = event.target.closest("[data-insp]");
+  if (card) openInspiration(card.dataset.insp);
+});
+document.querySelectorAll("[data-clip-tab]").forEach((button) => button.addEventListener("click", () => setClipTab(button.dataset.clipTab)));
+$("clip-inspect").addEventListener("click", inspectPage);
+$("clip-page-url").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); inspectPage(); } });
+$("clip-candidates").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-candidate]");
+  if (!button) return;
+  clipCandidate = clipInspected?.images[Number(button.dataset.candidate)] || null;
+  $("clip-candidates").querySelectorAll(".clip-candidate").forEach((b) => b.classList.toggle("selected", b === button));
+  if (clipCandidate?.alt && !$("clip-title").value) $("clip-title").value = clipCandidate.alt;
+  updateClipChosen();
+});
+$("clip-collection").addEventListener("change", () => { $("clip-new-collection-field").hidden = $("clip-collection").value !== "__new"; });
+$("clip-choose-file").addEventListener("click", () => $("catalog-file").click());
+$("catalog-file").addEventListener("change", (event) => {
+  clipFile = event.target.files[0] || null;
+  event.target.value = "";
+  $("clip-file-name").textContent = clipFile ? `Selected: ${clipFile.name}` : "";
+  updateClipChosen();
+});
+$("clip-save").addEventListener("click", saveClip);
+$("inspiration-dialog").addEventListener("click", (event) => {
+  const open = event.target.closest("[data-insp-open]");
+  if (open) { openInspiration(open.dataset.inspOpen); return; }
+  if (event.target.closest("[data-insp-fav]")) toggleFavorite(inspOpen, true);
+  else if (event.target.closest("[data-insp-save]")) saveInspiration();
+  else if (event.target.closest("[data-insp-delete]")) deleteInspiration();
+  else if (event.target.closest("[data-insp-analyze]")) analyzeInspiration();
+  else if (event.target.closest("[data-insp-apply]")) applyAiSuggestions();
+  else if (event.target.closest("[data-insp-cover]")) setCollectionCover();
+  else if (event.target.closest("[data-insp-assign]")) openAssign(inspOpen);
+  else if (event.target.closest("[data-comment-add]")) addComment();
+  else if (event.target.closest("[data-comment-delete]")) {
+    const id = event.target.closest("[data-comment-delete]").dataset.commentDelete;
+    action(async () => {
+      await persist("/api/catalog/comments", { comment: id, delete: true });
+      await refresh();
+      if (catItem(inspOpen)) $("inspiration-body").innerHTML = inspirationHTML(catItem(inspOpen));
+    });
+  }
+});
+$("assign-save").addEventListener("click", saveAssign);
+$("add-from-catalog").addEventListener("click", openCatalogPicker);
+$("picker-search").addEventListener("input", renderPicker);
+$("picker-grid").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-pick]");
+  if (!card || state.busy) return;
+  const id = card.dataset.pick;
+  if (pickerSelected.has(id)) pickerSelected.delete(id); else pickerSelected.add(id);
+  renderPicker();
+});
+$("picker-add").addEventListener("click", addPickedToProject);
+$("catalog-assistant-open").addEventListener("click", () => { $("assistant-answer").hidden = true; $("assistant-results").innerHTML = ""; $("assistant-question").value = ""; $("assistant-dialog").showModal(); $("assistant-question").focus(); });
+$("assistant-ask").addEventListener("click", askAssistant);
+$("assistant-question").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); askAssistant(); } });
+$("assistant-dialog").addEventListener("click", (event) => {
+  const open = event.target.closest("[data-insp-open]");
+  if (open) { $("assistant-dialog").close(); state.view = "catalog"; render(); openInspiration(open.dataset.inspOpen); }
+});
+$("catalog-clipper-open").addEventListener("click", () => {
+  const target = `${location.origin}/?clip=`;
+  $("clipper-bookmarklet").setAttribute("href", `javascript:void(window.open('${target}'+encodeURIComponent(location.href),'_blank'))`);
+  $("clipper-token").value = "";
+  $("clipper-copy").hidden = true;
+  $("clipper-dialog").showModal();
+});
+$("clipper-bookmarklet").addEventListener("click", (event) => { event.preventDefault(); toast("Drag this link to your bookmarks bar instead of clicking it here."); });
+$("clipper-generate").addEventListener("click", () => action(async () => {
+  const result = await api("/api/catalog/clipper-token", {});
+  $("clipper-token").value = result.token;
+  $("clipper-copy").hidden = false;
+  toast("Token generated. Paste it into the extension's setup — it expires in 90 days.");
+}));
+$("clipper-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("clipper-token").value); toast("Token copied."); }
+  catch { $("clipper-token").select(); toast("Press Ctrl+C to copy the selected token.", true); }
+});
+
+refresh().then(() => {
+  // The bookmarklet opens /?clip=<page>: land on the catalog with the clipper already reading that page.
+  const clipUrl = new URLSearchParams(location.search).get("clip");
+  if (clipUrl) {
+    history.replaceState(null, "", "/");
+    state.view = "catalog";
+    render();
+    openClip(clipUrl);
+  }
+}).catch((error) => {
   $("load-error").textContent = error.message;
   $("load-error").hidden = false;
   $("project-list").textContent = "Workspace unavailable";

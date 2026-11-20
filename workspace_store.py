@@ -33,7 +33,7 @@ BACKUP_PATTERN = re.compile(r"^[A-Za-z0-9_-]+_(\d{8})_(\d{6})_(\d+)\.xlsx$")
 
 # Client-approval lifecycle: the one status a selection carries.
 CLIENT_STATUSES = ["Proposed", "Presented", "Approved", "Rejected", "Changed"]
-OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location", "Unit", "Size / Configuration"]
+OPTIONAL_SELECTION_FIELDS = ["Client Status", "Unit Price", "Markup %", "Description Override", "Location", "Unit", "Size / Configuration", "Catalog Item ID"]
 # Where in the home a selection belongs - the schedule's grouping. Kept out of Section so
 # Section stays a pure trade category; the seeded list lives on Lists under "Locations".
 LOCATIONS = ["Entire Home", "1st Floor", "2nd Floor", "Outdoor Living", "Garage", "Bulk Items"]
@@ -79,6 +79,24 @@ GENERATED_SELECTION_FIELDS = [PRODUCT_LINK]
 # local workspace, objects under covers/ in the hosted bucket. Plain URLs and file paths still work.
 COVER_PREFIX = "cover:"
 COVER_NAME = re.compile(r"^cover-[A-Za-z0-9_-]{1,50}\.(png|jpg)$")
+
+# The design catalog (the clipper): collections and their saved inspirations live on these
+# sheets so they inherit validation, revision conflicts and backups like every other record.
+# Image bytes never enter the workbook: they live beside it (./catalog locally, catalog/ in
+# the hosted bucket) under hash-derived names the Image File / Thumb File cells point at.
+CATALOG_COLLECTION_SHEET = "Catalog Collections"
+CATALOG_ITEM_SHEET = "Catalog Items"
+CATALOG_COMMENT_SHEET = "Catalog Comments"
+CATALOG_SHEETS = {
+    CATALOG_COLLECTION_SHEET: ["Collection ID", "Name", "Description", "Cover Image", "Privacy",
+                               "Owner", "Shared With", "Created", "Updated"],
+    CATALOG_ITEM_SHEET: ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags",
+                         "Category", "Source URL", "Source Site", "Image File", "Thumb File",
+                         "Image Hash", "Colors", "Materials", "Favorite", "Approval",
+                         "Saved By", "Saved On", "Updated", "Price", "Brand"],
+    CATALOG_COMMENT_SHEET: ["Comment ID", "Item ID", "Author", "Comment", "Created"],
+}
+CATALOG_IMAGE_NAME = re.compile(r"^cat-[0-9a-f]{16}(-thumb)?\.(png|jpg)$")
 LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
 # Numeric input columns: (maximum, message)
 NUMERIC_FIELDS = {"Qty": (1_000_000, "Quantity must be a number between 0 and 1,000,000."),
@@ -843,6 +861,24 @@ def ensure_project_formulas(wb):
                 sheet.ws.cell(row, column, PROJECT_FORMULAS[field].format(row=row))
 
 
+def ensure_catalog_sheets(wb):
+    """The clipper's sheets, created or completed in place.
+
+    A workspace saved before the catalog existed reads back with empty catalog sheets, and a
+    sheet missing a column added later grows it at the end, so records() keeps finding every
+    header it writes by name.
+    """
+    for name, fields in CATALOG_SHEETS.items():
+        ws = wb[name] if name in wb else wb.create_sheet(name)
+        headers = {clean(c.value) for c in ws[1] if clean(c.value)}
+        column = max((c.column for c in ws[1] if clean(c.value)), default=0)
+        for field in fields:
+            if field not in headers:
+                column += 1
+                ws.cell(1, column, field).font = Font(bold=True)
+                ws.column_dimensions[get_column_letter(column)].width = 24
+
+
 def delete_record(wb, name, row):
     ws = wb[name]
     ws.delete_rows(row)
@@ -963,6 +999,25 @@ class LocalBackend:
             raise ValidationError("That cover image is no longer on disk. Upload it again.")
         return path.read_bytes()
 
+    @property
+    def catalog_dir(self):
+        return self.path.parent / "catalog"
+
+    def store_catalog_image(self, name, raw, content_type="image/jpeg"):
+        self.catalog_dir.mkdir(exist_ok=True)
+        (self.catalog_dir / name).write_bytes(raw)
+
+    def read_catalog_image(self, name):
+        path = self.catalog_dir / name
+        if path.parent.resolve() != self.catalog_dir.resolve() or not path.is_file():
+            raise ValidationError("That inspiration image is no longer on disk. Clip it again.")
+        return path.read_bytes()
+
+    def delete_catalog_image(self, name):
+        path = self.catalog_dir / name
+        if path.parent.resolve() == self.catalog_dir.resolve():
+            path.unlink(missing_ok=True)
+
 
 class WorkspaceStore:
     """Validation, repair and compare-and-swap around whichever backend holds the workspace."""
@@ -1005,6 +1060,7 @@ class WorkspaceStore:
             migrate_hajoca_links(wb)
             migrate_entire_home_items(wb)
             migrate_bulk_spec_details(wb)
+            ensure_catalog_sheets(wb)
             return wb, revision
 
     def save(self, wb, revision, note=""):
@@ -1024,6 +1080,7 @@ class WorkspaceStore:
             migrate_hajoca_links(wb)
             migrate_entire_home_items(wb)
             migrate_bulk_spec_details(wb)
+            ensure_catalog_sheets(wb)
             ensure_product_links(wb)
             ensure_list_values(wb)
             ensure_validations(wb)
@@ -1061,6 +1118,22 @@ class WorkspaceStore:
         if not COVER_NAME.match(name):
             raise ValidationError("Invalid cover image name.")
         return self.backend.read_cover(name)
+
+    def store_catalog_image(self, name, raw, content_type="image/jpeg"):
+        """A clipped inspiration image lives outside the workspace, like a cover does."""
+        if not CATALOG_IMAGE_NAME.match(name):
+            raise ValidationError("Invalid inspiration image name.")
+        self.backend.store_catalog_image(name, raw, content_type)
+
+    def read_catalog_image(self, name):
+        if not CATALOG_IMAGE_NAME.match(name):
+            raise ValidationError("Invalid inspiration image name.")
+        return self.backend.read_catalog_image(name)
+
+    def delete_catalog_image(self, name):
+        if not CATALOG_IMAGE_NAME.match(name):
+            raise ValidationError("Invalid inspiration image name.")
+        self.backend.delete_catalog_image(name)
 
     def import_bytes(self, raw, revision):
         try:

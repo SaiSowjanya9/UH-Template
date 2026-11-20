@@ -230,6 +230,19 @@ class SupabaseBackend:
         except RuntimeError:
             raise ValidationError("That cover image is no longer in storage. Upload it again.") from None
 
+    def store_catalog_image(self, name, raw, content_type="image/jpeg"):
+        # Beside the versions and covers: an inspiration image is not a restorable workspace.
+        self.api.upload(f"catalog/{name}", raw, content_type)
+
+    def read_catalog_image(self, name):
+        try:
+            return self.api.download(f"catalog/{name}")
+        except RuntimeError:
+            raise ValidationError("That inspiration image is no longer in storage. Clip it again.") from None
+
+    def delete_catalog_image(self, name):
+        self.api.remove(f"catalog/{name}")
+
 
 def push(source):
     """Seed the hosted workspace from a local file, replacing whatever revision is current."""

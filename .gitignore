@@ -8,4 +8,6 @@ __pycache__/
 tmp*.xlsx
 .venv/
 backups/
+catalog/
+covers/
 lookup_state/

@@ -1,0 +1,24 @@
+body { width: 360px; margin: 0; font: 13px Arial, Helvetica, sans-serif; color: #2e2a1f; background: #faf8f1; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #2a261d; color: #fff; }
+.brand img { width: 24px; height: 24px; }
+.brand strong { display: block; font-size: 13px; }
+.brand small { color: #d6ccae; font-size: 11px; }
+.brand .icon-button { margin-left: auto; background: none; border: 0; color: #d6ccae; font-size: 16px; cursor: pointer; }
+section { padding: 13px 14px 15px; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+label { display: block; font-size: 11px; font-weight: 600; color: #7d7050; margin: 9px 0; }
+label input, label select { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; border: 1px solid #e3dac0; border-radius: 4px; background: #fff; padding: 8px 9px; font: inherit; color: #4a4028; }
+label.check { display: flex; align-items: center; gap: 7px; font-weight: 400; }
+label.check input { width: auto; margin: 0; }
+.note { font-size: 11px; color: #857d69; line-height: 1.5; }
+button.primary, button.secondary { border-radius: 5px; padding: 9px 14px; font-size: 11px; font-weight: 600; cursor: pointer; }
+button.primary { width: 100%; background: #8d7342; color: #fff; border: 1px solid #8d7342; }
+button.primary:disabled { opacity: .5; cursor: default; }
+button.secondary { background: #fdfbf2; color: #6b5a33; border: 1px solid #e0d8be; }
+.actions { display: flex; gap: 8px; margin-top: 11px; }
+.actions .primary { flex: 1; width: auto; }
+.page-line { font-size: 11px; color: #857d69; margin-bottom: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 240px; overflow-y: auto; }
+.images button { border: 2px solid transparent; border-radius: 5px; padding: 0; background: #f3eedd; overflow: hidden; height: 72px; cursor: pointer; }
+.images button img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.images button.selected { border-color: #aa8960; box-shadow: 0 0 0 1px #aa8960; }

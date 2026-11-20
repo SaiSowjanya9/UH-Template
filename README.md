@@ -113,6 +113,29 @@ every save, two people editing the same project at the same time will see
 *"Someone else saved first"*; the app is built for taking turns, and moving selections into
 Postgres rows is what would lift that.
 
+## Design Inspiration Catalog
+
+The **Catalog** tab is a built-in design clipping and inspiration library. Browse the internet, find a kitchen, bathroom, flooring or lighting design you like, and save it into your UH Homes account — organized into collections, with AI-assisted categorization and team collaboration.
+
+**What you can do:**
+
+- **Collections** — create named groups (Kitchen Inspirations, Bathroom Designs, etc.) with cover images, descriptions, privacy settings and sharing.
+- **Save inspirations** — upload images from your computer, paste an image URL, or paste a webpage URL and pick from the images the server finds on it. Every image is downloaded, validated, optimized and stored in UH Homes storage; external URLs are metadata, not the stored asset. Product pages with structured data also fill in the price and brand automatically.
+- **Organize** — edit, move between collections, tag, add notes, favorite, comment, and set approval status. Search and filter across everything you have saved.
+- **Assign to projects** — the catalog is the master library: one clipped item can be added to any number of projects. **+ Add to projects** on an inspiration (or **❖ From catalog** on the Selection tracker) creates that project its own line item — title, section, product link, quantity and price prefilled from the clip, referenced by Catalog Item ID. Each project's line item keeps its own quantity, room, notes and client status: removing it never deletes the catalog record, and later catalog edits never rewrite a project's rows.
+- **AI features** — when `ANTHROPIC_API_KEY` is set in `.env`, the Catalog can auto-categorize images, describe designs, recognize materials, and answer natural-language questions about your saved inspirations. Without the key, a local keyword/color fallback handles categorization, palette extraction and basic search.
+- **Collaboration** — share collections with teammates (read-only or edit), leave comments, and track approval status. Privacy is per-collection; local mode is single-user.
+- **Browser extension** — load `clipper-extension/` as an unpacked Manifest V3 extension in Chrome or Edge. Connect it to this app with a clipper token (generated in the Catalog tab). The extension lets you clip images from any webpage with one click.
+- **Bookmarklet** — for browsers that do not support extensions, drag the bookmarklet link from the Catalog tab to your bookmarks bar. Clicking it on any page sends you to the Catalog's clip dialog with the page URL pre-filled.
+
+**Setup:**
+
+1. The Catalog works out of the box — no extra configuration needed for basic use.
+2. For AI features, add `ANTHROPIC_API_KEY` to `.env` (see `.env.example`).
+3. For the browser extension, open `chrome://extensions` or `edge://extensions`, enable Developer mode, click "Load unpacked" and select the `clipper-extension/` folder. Then paste the app address and a clipper token into the extension popup.
+
+**Storage:** Catalog metadata lives in additional workbook sheets (managed through `WorkspaceStore` like everything else). Image files are stored in the backend's object storage — `catalog_images/` locally, the Supabase Storage bucket when hosted. Thumbnails and duplicate detection by content hash keep storage efficient.
+
 ## Optional command-line workflow
 
 The generators also run as scripts, against the workspace directly. The client finish-schedule,
@@ -239,6 +262,7 @@ build_word.py                      editable Word version, fillable copy and spec
 build_powerpoint.py                editable PowerPoint version
 lookbook_config.json               brand settings
 common.py                          shared helpers
+catalog.py                         design-inspiration catalog logic
 build_tracker.py                   recreates a blank workspace (only if needed)
 workspace_store.py                 validation, backups and the local file backend
 supabase_store.py                  the hosted backend, plus push/pull for the workspace
@@ -246,4 +270,5 @@ auth.py                            team sign-in against Supabase Auth
 wsgi.py                            hosted entry point (single process)
 render.yaml                        Render deployment blueprint
 supabase/migrations/               database schema for the hosted mode
+clipper-extension/                 Manifest V3 browser extension for one-click clipping
 ```
