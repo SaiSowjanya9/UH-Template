@@ -76,8 +76,9 @@ store = open_store()
 TOKEN = secrets.token_urlsafe(32)
 EXPORT_LOCK = threading.Lock()
 THROTTLE = auth.Throttle()
-# Reachable without a session: the sign-in page and the assets and health check it needs.
-OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz"}
+# Reachable without a session: the sign-in page and the assets and health check it needs,
+# plus the clipper download — static public code with no secrets or workspace data in it.
+OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz", "clipper_extension_zip"}
 # Reachable with a clipper token instead of a session: what the browser extension calls.
 # The token is signed with the app's secret and carries only the issuing user's email.
 CLIPPER_ENDPOINTS = {"catalog_clip", "clip_inspect", "clipper_collections"}

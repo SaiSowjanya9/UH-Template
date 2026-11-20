@@ -355,6 +355,13 @@ class HostedCatalogTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         return response.json
 
+    def test_the_clipper_extension_downloads_without_signing_in(self):
+        """The zip is static public code; a teammate setting up should not need a session first."""
+        import zipfile
+        response = self.client.get("/clipper-extension.zip")        # no sign_in()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("clipper-extension/manifest.json", zipfile.ZipFile(io.BytesIO(response.data)).namelist())
+
     def test_every_signed_in_member_sees_and_edits_every_collection(self):
         """Privacy and sharing were removed: the catalog is one shared team workspace."""
         owner = self.sign_in("owner@uh.test")
