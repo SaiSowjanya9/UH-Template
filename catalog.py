@@ -27,7 +27,7 @@ from urllib.parse import urljoin, urlsplit
 import requests
 from PIL import Image
 
-from common import Sheet, clean
+from common import Sheet, clean, split_qty_unit
 from workspace_store import (CATALOG_COLLECTION_SHEET, CATALOG_COMMENT_SHEET, CATALOG_ITEM_SHEET,
                              ValidationError, next_row, put, records, validate_values)
 
@@ -52,12 +52,12 @@ COLLECTION_FIELDS = ["Collection ID", "Name", "Description", "Cover Image", "Pri
 ITEM_FIELDS = ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags", "Category",
                "Source URL", "Source Site", "Image File", "Thumb File", "Image Hash", "Colors",
                "Materials", "Favorite", "Approval", "Saved By", "Saved On", "Updated",
-               "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration"]
+               "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"]
 COMMENT_FIELDS = ["Comment ID", "Item ID", "Author", "Comment", "Created"]
 # The fields an editor may write directly; everything else is derived or stamped here.
 ITEM_EDIT_FIELDS = ["Title", "Description", "Notes", "Tags", "Category", "Source URL",
                     "Source Site", "Materials", "Favorite", "Approval", "Collection ID",
-                    "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration"]
+                    "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"]
 
 CATEGORIES = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Flooring & Tiles",
               "Lighting & Fixtures", "Ceiling Designs", "Wall Treatments", "Exterior",
@@ -327,7 +327,7 @@ def add_item(wb, collection_id, processed, meta, user, require_login):
         "Favorite": "", "Approval": "", "Saved By": (user or ""), "Saved On": stamp(), "Updated": stamp(),
         "Price": clean(meta.get("price"))[:50], "Brand": clean(meta.get("brand"))[:200],
         "Model #": clean(meta.get("model"))[:100], "Finish / Color": clean(meta.get("finish"))[:200],
-        "Size / Configuration": clean(meta.get("size"))[:200],
+        "Size / Configuration": clean(meta.get("size"))[:200], "Qty / Unit": clean(meta.get("qty_unit"))[:60],
     })
     touch_collection(wb, collection["Collection ID"])
     return item_id, image_name, thumb_name, not stored
@@ -351,13 +351,15 @@ def selection_values_for(item, project_id, extra=None):
     Project-specific fields (quantity, room, notes, status) start their own life here."""
     extra = extra or {}
     price = price_number(item.get("Price"))
+    pair = split_qty_unit(item.get("Qty / Unit"))
     return {
         "Project ID": project_id,
         "Item": clean(item.get("Title")) or f"Inspiration {item['Item ID']}",
         "Section": clean(extra.get("Section")) or clean(item.get("Category")),
         "Room / Area": clean(extra.get("Room / Area")),
         "Location": clean(extra.get("Location")),
-        "Qty": extra.get("Qty") or 1,
+        "Qty": extra.get("Qty") or pair["Qty"] or 1,
+        "Unit": pair["Unit"],
         "Unit Price": price if price is not None else "",
         "Manufacturer": clean(item.get("Brand")) or clean(item.get("Source Site")),
         "Model #": clean(item.get("Model #")),

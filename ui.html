@@ -147,17 +147,21 @@
       <button type="button" id="clip-choose-file" class="button secondary full">Choose a PNG, JPEG or WebP…</button>
       <p id="clip-file-name" class="form-note"></p>
     </div>
+    <!-- The product fields mirror the spec sheet's default columns, in its order:
+         Item, Brand, Model, Finish / Color, Size / Config, Link, Qty / Unit, Unit Price. -->
     <div class="form-grid clip-fields">
-      <label class="field">Title<input id="clip-title" type="text" maxlength="200" placeholder="Marble waterfall island"></label>
+      <label class="field">Item<input id="clip-title" type="text" maxlength="200" placeholder="Marble waterfall island"></label>
+      <label class="field">Brand<input id="clip-brand" type="text" maxlength="200" placeholder="Kohler"></label>
+      <label class="field">Model<input id="clip-model" type="text" maxlength="100" placeholder="K-596-VS"></label>
+      <label class="field">Finish / Color<input id="clip-finish" type="text" maxlength="200" placeholder="Matte Black"></label>
+      <label class="field">Size / Config<input id="clip-size" type="text" maxlength="200" placeholder="30 in · single bowl"></label>
+      <label class="field">Link (product page)<input id="clip-link" type="url" maxlength="2000" placeholder="https://…"></label>
+      <label class="field">Qty / Unit<input id="clip-qty" type="text" maxlength="60" placeholder="1 EA"></label>
+      <label class="field">Unit Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
       <label class="field">Category<select id="clip-category"><option value="">Choose automatically</option></select></label>
       <label class="field">Collection<select id="clip-collection"></select></label>
       <label class="field" id="clip-new-collection-field" hidden>New collection name<input id="clip-new-collection" type="text" maxlength="120" placeholder="Kitchen Inspirations"></label>
       <label class="field">Tags (comma separated)<input id="clip-tags" type="text" maxlength="500" placeholder="modern, white oak, brass"></label>
-      <label class="field">Brand<input id="clip-brand" type="text" maxlength="200" placeholder="Kohler"></label>
-      <label class="field">Model / SKU<input id="clip-model" type="text" maxlength="100" placeholder="K-596-VS"></label>
-      <label class="field">Finish / Color<input id="clip-finish" type="text" maxlength="200" placeholder="Matte Black"></label>
-      <label class="field">Size / Configuration<input id="clip-size" type="text" maxlength="200" placeholder="30 in · single bowl"></label>
-      <label class="field">Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
       <label class="field">Notes<input id="clip-notes" type="text" maxlength="2000" placeholder="Why you saved this"></label>
       <label class="field form-span">Description<textarea id="clip-description" maxlength="2000"></textarea></label>
     </div>

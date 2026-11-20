@@ -1789,7 +1789,7 @@ function updateClipChosen() {
 
 function openClip(pageUrl) {
   clipCandidate = null; clipFile = null; clipInspected = null;
-  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size"]) $(id).value = "";
+  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size", "clip-link", "clip-qty"]) $(id).value = "";
   $("clip-file-name").textContent = "";
   $("clip-candidates").hidden = true;
   $("clip-candidates").innerHTML = "";
@@ -1815,7 +1815,8 @@ async function inspectPage() {
       clipInspected = result; clipCandidate = null;
       // Fill every default field the page offers, leaving anything already typed alone.
       for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
-                               ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"], ["clip-size", "size"]]) {
+                               ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"],
+                               ["clip-size", "size"], ["clip-link", "source_url"]]) {
         if (!$(id).value) $(id).value = result[key] || "";
       }
       $("clip-page-note").textContent = result.images.length
@@ -1843,7 +1844,8 @@ async function saveClip() {
                    category: $("clip-category").value, materials: clipInspected?.materials || "",
                    price: $("clip-price").value.trim(), brand: $("clip-brand").value.trim(),
                    model: $("clip-model").value.trim(), finish: $("clip-finish").value.trim(),
-                   size: $("clip-size").value.trim() };
+                   size: $("clip-size").value.trim(), qty_unit: $("clip-qty").value.trim(),
+                   source_url: $("clip-link").value.trim() };
     setBusy(true, "Saving the inspiration…");
     try {
       if (clipTab === "upload") {
@@ -1860,7 +1862,7 @@ async function saveClip() {
         if (clipTab === "page") {
           if (!clipCandidate) fail("Find images on the page, then pick the one to save.");
           body.image_url = clipCandidate.url;
-          body.source_url = $("clip-page-url").value.trim();
+          body.source_url = body.source_url || $("clip-page-url").value.trim();
           body.source_site = clipInspected?.site || "";
         } else {
           if (!$("clip-image-url").value.trim()) fail("Paste the image's address first.");
@@ -1903,7 +1905,14 @@ function inspirationHTML(item) {
       </div>
       <div class="insp-side">
         <div class="form-grid insp-fields">
-          <label class="field form-span">Title<input id="insp-title" type="text" maxlength="200" value="${esc(item.Title || "")}" ${off}></label>
+          <label class="field form-span">Item<input id="insp-title" type="text" maxlength="200" value="${esc(item.Title || "")}" ${off}></label>
+          <label class="field">Brand<input id="insp-brand" type="text" maxlength="200" value="${esc(item.Brand || "")}" ${off}></label>
+          <label class="field">Model<input id="insp-model" type="text" maxlength="100" value="${esc(item["Model #"] || "")}" ${off}></label>
+          <label class="field">Finish / Color<input id="insp-finish" type="text" maxlength="200" value="${esc(item["Finish / Color"] || "")}" ${off}></label>
+          <label class="field">Size / Config<input id="insp-size" type="text" maxlength="200" value="${esc(item["Size / Configuration"] || "")}" ${off}></label>
+          <label class="field form-span">Link (product page)<input id="insp-link" type="url" maxlength="2000" value="${esc(item["Source URL"] || "")}" ${off}></label>
+          <label class="field">Qty / Unit<input id="insp-qty" type="text" maxlength="60" value="${esc(item["Qty / Unit"] || "")}" ${off}></label>
+          <label class="field">Unit Price (as clipped)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
           <label class="field">Category<select id="insp-category" ${off}>${["", ...cat().categories].map((c) => `<option value="${esc(c)}" ${item.Category === c ? "selected" : ""}>${esc(c || "—")}</option>`).join("")}</select></label>
           <label class="field">Collection<select id="insp-collection" ${off}>${editableCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === item["Collection ID"] ? "selected" : ""}>${esc(c.Name)}</option>`).join("")}</select></label>
           <label class="field">Feedback<select id="insp-approval" ${off}>${approvals.map((a) => `<option value="${esc(a)}" ${item.Approval === a ? "selected" : ""}>${esc(a || "—")}</option>`).join("")}</select></label>
@@ -1911,11 +1920,6 @@ function inspirationHTML(item) {
           <label class="field form-span">Description<textarea id="insp-description" maxlength="2000" ${off}>${esc(item.Description || "")}</textarea></label>
           <label class="field form-span">My notes<textarea id="insp-notes" maxlength="2000" ${off}>${esc(item.Notes || "")}</textarea></label>
           <label class="field form-span">Materials<input id="insp-materials" type="text" maxlength="500" value="${esc(item.Materials || "")}" ${off}></label>
-          <label class="field">Price (suggestion)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
-          <label class="field">Brand<input id="insp-brand" type="text" maxlength="200" value="${esc(item.Brand || "")}" ${off}></label>
-          <label class="field">Model / SKU<input id="insp-model" type="text" maxlength="100" value="${esc(item["Model #"] || "")}" ${off}></label>
-          <label class="field">Finish / Color<input id="insp-finish" type="text" maxlength="200" value="${esc(item["Finish / Color"] || "")}" ${off}></label>
-          <label class="field">Size / Configuration<input id="insp-size" type="text" maxlength="200" value="${esc(item["Size / Configuration"] || "")}" ${off}></label>
         </div>
         <div class="insp-ai">
           <button type="button" class="button secondary" data-insp-analyze>✶ ${cat().ai ? "Analyze with AI" : "Suggest category & materials"}</button>
@@ -1956,7 +1960,8 @@ async function saveInspiration() {
                      Notes: $("insp-notes").value.trim(), Materials: $("insp-materials").value.trim(),
                      Price: $("insp-price").value.trim(), Brand: $("insp-brand").value.trim(),
                      "Model #": $("insp-model").value.trim(), "Finish / Color": $("insp-finish").value.trim(),
-                     "Size / Configuration": $("insp-size").value.trim() };
+                     "Size / Configuration": $("insp-size").value.trim(), "Qty / Unit": $("insp-qty").value.trim(),
+                     "Source URL": $("insp-link").value.trim() };
     await persist("/api/catalog/items", { item: item["Item ID"], values }, () => !!catItem(item["Item ID"]));
     $("inspiration-dialog").close();
     await refresh();

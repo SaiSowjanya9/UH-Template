@@ -148,7 +148,7 @@ class CatalogAppTests(AppTestCase):
                                  {"collection": cid, "image_url": "https://example.com/pic.jpg",
                                   "source_url": "https://example.com/post", "title": "Garden patio",
                                   "brand": "Belgard", "model": "CAT-450", "finish": "Slate Gray",
-                                  "size": "24x24 in"})
+                                  "size": "24x24 in", "qty_unit": "120 sq ft"})
         self.assertEqual(response.status_code, 200, response.json)
         item = next(i for i in self.state()["catalog"]["items"] if i["Item ID"] == response.json["item"])
         self.assertEqual(item["Source URL"], "https://example.com/post")
@@ -157,6 +157,7 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(item["Model #"], "CAT-450")
         self.assertEqual(item["Finish / Color"], "Slate Gray")
         self.assertEqual(item["Size / Configuration"], "24x24 in")
+        self.assertEqual(item["Qty / Unit"], "120 sq ft")
         self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
 
     def test_clipping_can_create_the_collection_in_the_same_save(self):
@@ -431,7 +432,8 @@ class AssignmentTests(AppTestCase):
 
     def test_one_catalog_item_becomes_line_items_in_many_projects_without_duplication(self):
         item_id = self.saved_item(price="$1,299.00 USD", brand="Brizo", category="Kitchen",
-                                  model="63075-BL", finish="Matte Black", size="Single handle")
+                                  model="63075-BL", finish="Matte Black", size="Single handle",
+                                  qty_unit="3 EA")
         before = len(self.state()["catalog"]["items"])
         response = self.post(f"/api/catalog/items/{item_id}/assign",
                              {"projects": ["UH-101", "UH-103"], "values": {"Room / Area": "Kitchen", "Qty": "2"}})
@@ -449,6 +451,7 @@ class AssignmentTests(AppTestCase):
             self.assertEqual(row["Model #"], "63075-BL")         # the spec fields ride along
             self.assertEqual(row["Finish / Color"], "Matte Black")
             self.assertEqual(row["Size / Configuration"], "Single handle")
+            self.assertEqual(row["Unit"], "EA")                  # the clipped '3 EA', split
             self.assertEqual(row["Client Status"], "Proposed")
         # the master record was referenced, never copied
         self.assertEqual(len(self.state()["catalog"]["items"]), before)
@@ -456,6 +459,10 @@ class AssignmentTests(AppTestCase):
         again = self.post(f"/api/catalog/items/{item_id}/assign", {"projects": ["UH-102"]})
         self.assertEqual(again.status_code, 200, again.json)
         self.assertEqual({r["Project ID"] for r in self.assigned_rows(item_id)}, {"UH-101", "UH-102", "UH-103"})
+        # without an override, the quantity comes out of the clipped 'Qty / Unit'
+        third = next(r for r in self.assigned_rows(item_id) if r["Project ID"] == "UH-102")
+        self.assertEqual(float(third["Qty"]), 3.0)
+        self.assertEqual(third["Unit"], "EA")
         self.assertEqual(len(self.state()["catalog"]["items"]), before)
 
     def test_an_unknown_project_and_an_empty_choice_are_refused(self):
