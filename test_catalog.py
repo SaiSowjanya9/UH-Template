@@ -168,6 +168,40 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(state["collections"][0]["Name"], "Exterior Designs")
         self.assertEqual(state["items"][0]["Collection ID"], response.json["collection"])
 
+    def test_a_clip_can_land_straight_on_a_projects_spec_sheet(self):
+        """The extension's 'Also add to project': one clip saves the library item and writes
+        that project its own referencing line item in the same save."""
+        cid = self.make_collection()
+        with patch.object(catalog, "safe_fetch", return_value=(picture((40, 70, 110)), "image/jpeg", "https://example.com/p.jpg")):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "image_url": "https://example.com/p.jpg",
+                                  "source_url": "https://example.com/pendant", "title": "Brass pendant",
+                                  "brand": "Visual Comfort", "model": "TOB5003", "price": "$429.00",
+                                  "projects": ["UH-101"], "room": "Kitchen"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(list(response.json["rows"]), ["UH-101"])
+        row = next(r for r in self.state()["selections"] if r.get("Catalog Item ID") == response.json["item"])
+        self.assertEqual(row["Project ID"], "UH-101")
+        self.assertEqual(row["Room / Area"], "Kitchen")
+        self.assertEqual(row["Item"], "Brass pendant")
+        self.assertEqual(row["Manufacturer"], "Visual Comfort")
+        self.assertEqual(row["Model #"], "TOB5003")
+        self.assertEqual(float(row["Unit Price"]), 429.0)       # parsed from the clipped price
+        self.assertEqual(row["Product URL"], "https://example.com/pendant")
+        # the library kept the master record too
+        self.assertTrue(any(i["Item ID"] == response.json["item"] for i in self.state()["catalog"]["items"]))
+
+    def test_a_clip_into_an_unknown_project_is_refused_whole(self):
+        """A bad project refuses the entire clip — nothing half saved in the library."""
+        cid = self.make_collection()
+        with patch.object(catalog, "safe_fetch", return_value=(picture((5, 5, 5)), "image/jpeg", "https://example.com/q.jpg")):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "image_url": "https://example.com/q.jpg",
+                                  "title": "Ghost sconce", "projects": ["UH-999"]})
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("Ghost sconce", [i["Title"] for i in self.state()["catalog"]["items"]])
+        self.assertFalse(any(r.get("Item") == "Ghost sconce" for r in self.state()["selections"]))
+
     def test_inspect_reads_metadata_and_candidate_images(self):
         with patch.object(catalog, "safe_fetch", return_value=(PAGE_HTML.encode(), "text/html", "https://example.com/post")):
             response = self.post("/api/catalog/inspect", {"url": "https://example.com/post"})
@@ -275,6 +309,9 @@ class CatalogAppTests(AppTestCase):
         listing = self.client.get("/api/catalog/clipper/collections", headers={"X-UH-Clipper": token})
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.json["collections"][0]["count"], 1)
+        projects = self.client.get("/api/catalog/clipper/projects", headers={"X-UH-Clipper": token})
+        self.assertEqual(projects.status_code, 200)
+        self.assertIn("UH-101", [p["id"] for p in projects.json["projects"]])
         forged = self.client.post("/api/catalog/clip", json={"collection": cid, "image_data": raw},
                                   headers={"X-UH-Clipper": token[:-4] + "zzzz"})
         self.assertEqual(forged.status_code, 403)              # falls through to the CSRF rule
@@ -406,6 +443,10 @@ class HostedCatalogTests(unittest.TestCase):
         self.assertEqual(item["Saved By"], "owner@uh.test")
         no_token = fresh.post("/api/catalog/clip", json={"collection": cid, "image_data": raw})
         self.assertEqual(no_token.status_code, 401)            # no session and no token
+        # the project list the extension's picker shows follows the same rule
+        self.assertEqual(fresh.get("/api/catalog/clipper/projects").status_code, 401)
+        self.assertEqual(fresh.get("/api/catalog/clipper/projects",
+                                   headers={"X-UH-Clipper": token}).status_code, 200)
 
 
 class AssignmentTests(AppTestCase):

@@ -27,34 +27,13 @@
     setTimeout(() => note.remove(), error ? 8000 : 4000);
   };
 
-  // The spec-sheet fields the page's structured data offers, read once per hover save.
+  // The spec-sheet fields the page offers, read once per hover save through the shared
+  // deep scanner (scan.js, injected by the popup just before this file).
   const productInfo = () => {
-    const product = {};
-    const nameOf = (node) => String((node && typeof node === "object" ? node.name : node) || "").trim();
-    const walk = (node) => {
-      if (Array.isArray(node)) { node.forEach(walk); return; }
-      if (!node || typeof node !== "object") return;
-      if ([].concat(node["@type"] || []).some((k) => typeof k === "string" && k.toLowerCase() === "product")) {
-        const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-        if (!product.price && offers && typeof offers === "object" && (offers.price || offers.lowPrice)) {
-          const amount = String(offers.price || offers.lowPrice);
-          const currency = String(offers.priceCurrency || "");
-          product.price = currency && !amount.toUpperCase().includes(currency.toUpperCase()) ? `${amount} ${currency.toUpperCase()}` : amount;
-        }
-        product.brand = product.brand || nameOf(node.brand);
-        product.model = product.model || String(node.sku || node.mpn || "").trim() || nameOf(node.model);
-        product.finish = product.finish || nameOf(node.color);
-        product.size = product.size || nameOf(node.size);
-        product.materials = product.materials || [].concat(node.material || []).map(nameOf).filter(Boolean).join(", ");
-      }
-      Object.values(node).forEach(walk);
-    };
-    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-      try { walk(JSON.parse(script.textContent)); } catch { /* unreadable structured data is skipped */ }
-    }
-    return { price: (product.price || "").slice(0, 50), brand: (product.brand || "").slice(0, 200),
-             model: (product.model || "").slice(0, 100), finish: (product.finish || "").slice(0, 200),
-             size: (product.size || "").slice(0, 200), materials: (product.materials || "").slice(0, 500) };
+    if (typeof window.__uhCollect !== "function") return {};
+    const page = window.__uhCollect();
+    return { price: page.price, brand: page.brand, model: page.model, finish: page.finish,
+             size: page.size, materials: page.materials, description: page.description };
   };
 
   let current = null;
@@ -82,7 +61,6 @@
         source_url: location.href,
         source_site: location.hostname.replace(/^www\./, ""),
         title: current.alt || document.title || "",
-        description: "",
         ...productInfo(),
       },
     }, (response) => {

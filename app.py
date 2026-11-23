@@ -81,7 +81,7 @@ THROTTLE = auth.Throttle()
 OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz", "clipper_extension_zip"}
 # Reachable with a clipper token instead of a session: what the browser extension calls.
 # The token is signed with the app's secret and carries only the issuing user's email.
-CLIPPER_ENDPOINTS = {"catalog_clip", "clip_inspect", "clipper_collections"}
+CLIPPER_ENDPOINTS = {"catalog_clip", "clip_inspect", "clipper_collections", "clipper_projects"}
 CLIPPER_TOKEN_DAYS = 90
 
 
@@ -799,10 +799,45 @@ def clip_meta(source):
     return meta
 
 
+def catalog_item_rows(wb, item, projects, extra):
+    """One Selections row per chosen project for a catalog item — the copy-with-reference
+    the assign dialog and the clipper's 'add to project' both write."""
+    known = {p["Project ID"] for p in records(wb, "Projects")}
+    chosen = list(dict.fromkeys(common.clean(p) for p in projects))
+    if not chosen or any(p not in known for p in chosen):
+        raise ValidationError("Choose existing projects. Refresh the page and try again.")
+    sheet = ensure_selection_columns(wb)
+    rows = {}
+    for project_id in chosen:
+        row = next_row(sheet)
+        values = validate_values(catalog.selection_values_for(item, project_id, extra),
+                                 SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
+        put(sheet, row, merge_selection(None, values, row))
+        rows[project_id] = row
+    from openpyxl.utils import get_column_letter
+    sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+    return rows
+
+
+def clip_projects(data):
+    """The projects a clip asks to land on, cleaned: a list from the extension's JSON,
+    a comma-separated string from a form, nothing from a plain clip."""
+    projects = data.get("projects") or []
+    if isinstance(projects, str):
+        projects = projects.split(",")
+    if not isinstance(projects, list) or len(projects) > 50:
+        raise ValidationError("Send projects as a list of project IDs.")
+    return [common.clean(p) for p in projects if common.clean(p)]
+
+
 def finish_clip(raw, meta, data):
-    """Process, store and record one clipped image; shared by upload, URL clip and the extension."""
+    """Process, store and record one clipped image; shared by upload, URL clip and the
+    extension. `projects` sends the new item straight onto those projects' spec sheets
+    (one referencing Selections row each) in the same save."""
     processed = catalog.process_image(raw)
     user = catalog_user()
+    projects = clip_projects(data)
+    room = common.clean(data.get("room"))[:200]
     with store.lock:
         wb, revision = store.snapshot()
         collection_id = common.clean(data.get("collection"))
@@ -813,11 +848,16 @@ def finish_clip(raw, meta, data):
             collection_id = created
         item_id, image_name, thumb_name, new_file = catalog.add_item(
             wb, collection_id, processed, meta, user, REQUIRE_LOGIN)
+        rows = {}
+        if projects:
+            item = catalog.viewable_item(wb, item_id, user, REQUIRE_LOGIN)
+            rows = catalog_item_rows(wb, item, projects, {"Room / Area": room})
         if new_file:
             catalog.store_processed(store, processed)
-        store.save(wb, revision, f"catalog: clip {meta.get('title') or item_id}")
+        note = f"catalog: clip {meta.get('title') or item_id}"
+        store.save(wb, revision, note + (f" into {len(rows)} project(s)" if rows else ""))
     return jsonify(ok=True, item=item_id, collection=collection_id, new_collection=created,
-                   image=image_name, thumb=thumb_name)
+                   image=image_name, thumb=thumb_name, rows=rows)
 
 
 @app.post("/api/catalog/collections")
@@ -866,20 +906,7 @@ def assign_catalog_item(item_id):
     with store.lock:
         wb, revision = current(data)
         item = catalog.viewable_item(wb, item_id, catalog_user(), REQUIRE_LOGIN)
-        known = {p["Project ID"] for p in records(wb, "Projects")}
-        chosen = list(dict.fromkeys(common.clean(p) for p in projects))
-        if any(p not in known for p in chosen):
-            raise ValidationError("Choose existing projects. Refresh the page and try again.")
-        sheet = ensure_selection_columns(wb)
-        rows = {}
-        for project_id in chosen:
-            row = next_row(sheet)
-            values = validate_values(catalog.selection_values_for(item, project_id, extra),
-                                     SELECTION_FIELDS + OPTIONAL_SELECTION_FIELDS)
-            put(sheet, row, merge_selection(None, values, row))
-            rows[project_id] = row
-        from openpyxl.utils import get_column_letter
-        sheet.ws.auto_filter.ref = f"A1:{get_column_letter(sheet.ws.max_column)}{sheet.ws.max_row}"
+        rows = catalog_item_rows(wb, item, projects, extra)
         store.save(wb, revision, f"catalog: add {item['Title'] or item['Item ID']} to {len(rows)} project(s)")
     return jsonify(ok=True, rows=rows)
 
@@ -935,6 +962,18 @@ def clipper_collections():
     return jsonify(ok=True, collections=[{"id": c["Collection ID"], "name": c["Name"],
                                           "count": counts.get(c["Collection ID"], 0)}
                                          for c in collections])
+
+
+@app.get("/api/catalog/clipper/projects")
+def clipper_projects():
+    """The projects a clip may be sent straight into — what the extension's picker shows."""
+    with store.lock:
+        wb, _ = store.snapshot()
+        rows = records(wb, "Projects")
+    return jsonify(ok=True, projects=[
+        {"id": p["Project ID"],
+         "name": common.clean(p.get("Project Name")) or common.clean(p.get("Client Name")) or p["Project ID"]}
+        for p in rows if common.clean(p.get("Project ID"))])
 
 
 @app.get("/api/catalog/images/<name>")

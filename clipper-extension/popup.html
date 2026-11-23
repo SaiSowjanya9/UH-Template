@@ -22,8 +22,20 @@
     <div id="images" class="images" aria-label="Images on this page"></div>
     <p id="no-images" class="note" hidden>No images could be read on this page. Try the app's clip dialog with the page address instead.</p>
     <label>Title<input id="clip-title" type="text" maxlength="200"></label>
+    <p id="details-note" class="note" role="status"></p>
+    <div class="grid2">
+      <label>Price<input id="clip-price" type="text" maxlength="50"></label>
+      <label>Brand<input id="clip-brand" type="text" maxlength="200"></label>
+      <label>Model # / SKU<input id="clip-model" type="text" maxlength="100"></label>
+      <label>Finish / Color<input id="clip-finish" type="text" maxlength="200"></label>
+    </div>
+    <label>Size / Dimensions<input id="clip-size" type="text" maxlength="200"></label>
+    <label>Materials<input id="clip-materials" type="text" maxlength="500"></label>
+    <label>Description<textarea id="clip-description" rows="2" maxlength="2000"></textarea></label>
     <label>Collection<select id="clip-collection"></select></label>
     <label id="new-collection-row" hidden>New collection name<input id="clip-new-collection" type="text" maxlength="120" placeholder="Kitchen Inspirations"></label>
+    <label>Also add to project<select id="clip-project"></select></label>
+    <label id="clip-room-row" hidden>Room / Area<input id="clip-room" type="text" maxlength="100" placeholder="Kitchen"></label>
     <div class="actions">
       <button id="hover-mode" class="secondary" title="Adds a Save button when you hover images on the page">Hover save</button>
       <button id="clip-save" class="primary" disabled>Save to UH Homes</button>

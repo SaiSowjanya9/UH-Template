@@ -2,8 +2,13 @@
 
 const $ = (id) => document.getElementById(id);
 let settings = null;            // { appUrl, token, direct }
-let page = null;                // what collect() read from the active tab
+let page = null;                // what the scanner read from the active tab
 let selected = null;            // the chosen image {url, alt}
+
+// The details panel: each input is prefilled with what the scanner found and stays
+// editable, so the person clipping chooses exactly what is saved — clearing a box
+// drops that detail, retyping it corrects the page's own wording.
+const DETAIL_FIELDS = ["price", "brand", "model", "finish", "size", "materials", "description"];
 
 const getSettings = () => new Promise((done) => chrome.storage.local.get(["appUrl", "token", "direct"], done));
 const setStatus = (id, message, error = false) => { const el = $(id); el.textContent = message; el.style.color = error ? "#984b3c" : ""; };
@@ -44,59 +49,12 @@ async function saveSettings() {
   startClipper();
 }
 
-// Runs inside the page: every usable image plus the page's own metadata, including the
-// spec-sheet fields (brand, model, finish, size, price, materials) its structured data offers.
-function collect() {
-  const meta = (name) => document.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.content || "";
-  const micro = (name) => document.querySelector(`[itemprop="${name}" i][content]`)?.getAttribute("content") || "";
-  const product = {};
-  const nameOf = (node) => String((node && typeof node === "object" ? node.name : node) || "").trim();
-  const walk = (node) => {
-    if (Array.isArray(node)) { node.forEach(walk); return; }
-    if (!node || typeof node !== "object") return;
-    if ([].concat(node["@type"] || []).some((k) => typeof k === "string" && k.toLowerCase() === "product")) {
-      const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-      if (!product.price && offers && typeof offers === "object" && (offers.price || offers.lowPrice)) {
-        const amount = String(offers.price || offers.lowPrice);
-        const currency = String(offers.priceCurrency || "");
-        product.price = currency && !amount.toUpperCase().includes(currency.toUpperCase()) ? `${amount} ${currency.toUpperCase()}` : amount;
-      }
-      product.brand = product.brand || nameOf(node.brand);
-      product.model = product.model || String(node.sku || node.mpn || "").trim() || nameOf(node.model);
-      product.finish = product.finish || nameOf(node.color);
-      product.size = product.size || nameOf(node.size);
-      product.materials = product.materials || [].concat(node.material || []).map(nameOf).filter(Boolean).join(", ");
-    }
-    Object.values(node).forEach(walk);
-  };
-  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-    try { walk(JSON.parse(script.textContent)); } catch { /* unreadable structured data is skipped */ }
-  }
-  const seen = new Set();
-  const images = [];
-  const add = (url, alt, area) => {
-    if (!url || seen.has(url) || !/^https?:/.test(url)) return;
-    if (/\.svg(\?|$)/i.test(url)) return;
-    seen.add(url);
-    images.push({ url, alt: (alt || "").slice(0, 200), area });
-  };
-  for (const key of ["og:image", "twitter:image"]) if (meta(key)) add(new URL(meta(key), location.href).href, meta("og:title"), 1e9);
-  for (const img of document.images) {
-    const area = (img.naturalWidth || img.width) * (img.naturalHeight || img.height);
-    if (area && area < 10000) continue;        // icons and trackers
-    add(img.currentSrc || img.src, img.alt, area || 0);
-  }
-  images.sort((a, b) => b.area - a.area);
-  return { url: location.href, title: meta("og:title") || document.title || "",
-           site: meta("og:site_name") || location.hostname.replace(/^www\./, ""),
-           description: meta("og:description") || meta("description") || "",
-           price: (product.price || meta("product:price:amount") || micro("price") || "").slice(0, 50),
-           brand: (product.brand || meta("product:brand") || meta("og:brand") || micro("brand") || "").slice(0, 200),
-           model: (product.model || micro("sku") || micro("mpn") || "").slice(0, 100),
-           finish: (product.finish || meta("product:color") || micro("color") || "").slice(0, 200),
-           size: (product.size || meta("product:size") || micro("size") || "").slice(0, 200),
-           materials: (product.materials || meta("product:material") || micro("material") || "").slice(0, 500),
-           images: images.slice(0, 60) };
+// The page is read by scan.js (shared with hover save): injected first, then asked for
+// everything it found — images plus the spec-sheet details, wherever the vendor put them.
+async function readPage(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["scan.js"] });
+  const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => window.__uhCollect() });
+  return result;
 }
 
 async function startClipper() {
@@ -109,8 +67,7 @@ async function startClipper() {
     return;
   }
   try {
-    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collect });
-    page = result;
+    page = await readPage(tab.id);
   } catch {
     $("page-title").textContent = "This page cannot be read by extensions.";
     $("no-images").hidden = false;
@@ -118,9 +75,13 @@ async function startClipper() {
   }
   $("page-title").textContent = `${page.site} — ${page.title}`;
   $("clip-title").value = page.title.slice(0, 200);
+  for (const field of DETAIL_FIELDS) $(`clip-${field}`).value = page[field] || "";
+  const count = DETAIL_FIELDS.filter((field) => page[field]).length;
+  $("details-note").textContent = count ? `${count} detail${count === 1 ? "" : "s"} found on the page — edit or clear anything before saving.`
+                                        : "Nothing found on this page — fill in what you know.";
   $("no-images").hidden = page.images.length > 0;
   $("images").innerHTML = "";
-  page.images.forEach((image, index) => {
+  page.images.forEach((image) => {
     const button = document.createElement("button");
     button.type = "button";
     button.title = image.alt || image.url;
@@ -138,14 +99,23 @@ async function startClipper() {
     $("images").appendChild(button);
   });
   try {
-    const response = await fetch(`${settings.appUrl}/api/catalog/clipper/collections`, { headers: { "X-UH-Clipper": settings.token } });
-    if (response.status === 401 || response.status === 403) { showSetup(); setStatus("setup-status", "The token has expired. Generate a new one in the app.", true); return; }
-    const data = await response.json();
+    const headers = { "X-UH-Clipper": settings.token };
+    const [collections, projects] = await Promise.all([
+      fetch(`${settings.appUrl}/api/catalog/clipper/collections`, { headers }),
+      fetch(`${settings.appUrl}/api/catalog/clipper/projects`, { headers }),
+    ]);
+    if (collections.status === 401 || collections.status === 403) { showSetup(); setStatus("setup-status", "The token has expired. Generate a new one in the app.", true); return; }
+    const data = await collections.json();
     $("clip-collection").innerHTML = (data.collections || []).map((c) => `<option value="${c.id}">${c.name} (${c.count})</option>`).join("")
       + '<option value="__new">— New collection —</option>';
-    chrome.storage.local.get(["lastCollection"], ({ lastCollection }) => {
+    const listed = projects.ok ? (await projects.json()).projects || [] : [];
+    $("clip-project").innerHTML = '<option value="">Library only</option>'
+      + listed.map((p) => `<option value="${p.id}">${p.id} — ${p.name}</option>`).join("");
+    chrome.storage.local.get(["lastCollection", "lastProject"], ({ lastCollection, lastProject }) => {
       if (lastCollection && [...$("clip-collection").options].some((o) => o.value === lastCollection)) $("clip-collection").value = lastCollection;
       $("new-collection-row").hidden = $("clip-collection").value !== "__new";
+      if (lastProject && [...$("clip-project").options].some((o) => o.value === lastProject)) $("clip-project").value = lastProject;
+      $("clip-room-row").hidden = !$("clip-project").value;
     });
   } catch {
     setStatus("clip-status", "The app could not be reached for your collections.", true);
@@ -157,17 +127,18 @@ async function clip() {
   const collection = $("clip-collection").value === "__new" ? "" : $("clip-collection").value;
   const newName = $("clip-collection").value === "__new" ? $("clip-new-collection").value.trim() : "";
   if (!collection && !newName) { setStatus("clip-status", "Choose a collection or name a new one.", true); return; }
+  const project = $("clip-project").value;
   $("clip-save").disabled = true;
   setStatus("clip-status", "Saving to UH Homes…");
   const body = { image_url: selected.url, source_url: page.url, source_site: page.site,
-                 title: $("clip-title").value.trim(), description: page.description,
-                 price: page.price || "", brand: page.brand || "", model: page.model || "",
-                 finish: page.finish || "", size: page.size || "", materials: page.materials || "",
-                 collection, new_collection: newName };
+                 title: $("clip-title").value.trim(), collection, new_collection: newName,
+                 projects: project ? [project] : [], room: project ? $("clip-room").value.trim() : "" };
+  for (const field of DETAIL_FIELDS) body[field] = $(`clip-${field}`).value.trim();
   const response = await chrome.runtime.sendMessage({ type: "uh-clip", settings, body });
   if (response?.ok) {
-    chrome.storage.local.set({ lastCollection: response.collection });
-    setStatus("clip-status", "Saved. Find it under Inspirations in UH Homes.");
+    chrome.storage.local.set({ lastCollection: response.collection, lastProject: project });
+    setStatus("clip-status", project ? `Saved — in your library and on ${project}'s spec sheet.`
+                                     : "Saved. Find it under Inspirations in UH Homes.");
   } else {
     setStatus("clip-status", response?.error || "The inspiration could not be saved.", true);
     $("clip-save").disabled = false;
@@ -181,6 +152,7 @@ async function enableHoverMode() {
   if (!collection) { setStatus("clip-status", "Pick an existing collection for hover saves first.", true); return; }
   await chrome.storage.local.set({ hoverCollection: collection });
   try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["scan.js"] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
     window.close();
   } catch {
@@ -193,6 +165,7 @@ $("open-settings").addEventListener("click", showSetup);
 $("clip-save").addEventListener("click", clip);
 $("hover-mode").addEventListener("click", enableHoverMode);
 $("clip-collection").addEventListener("change", () => { $("new-collection-row").hidden = $("clip-collection").value !== "__new"; });
+$("clip-project").addEventListener("change", () => { $("clip-room-row").hidden = !$("clip-project").value; });
 
 getSettings().then((stored) => {
   settings = stored.appUrl && stored.token ? { appUrl: stored.appUrl, token: stored.token, direct: !!stored.direct } : null;
