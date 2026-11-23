@@ -1061,6 +1061,34 @@ def clipper_extension_zip():
                      mimetype="application/zip")
 
 
+BOOKMARKLET_WRAPPER = """(() => {
+const APP = "__UH_APP__";
+__UH_SCANNER__
+const page = window.__uhCollect();
+const win = window.open(APP + "/?clipwait=1", "_blank");
+if (!win) { alert("The pop-up was blocked. Allow pop-ups for this bookmarklet and click it again."); return; }
+const answer = (event) => {
+  if (event.origin !== APP || event.data !== "uh-clip-ready") return;
+  window.removeEventListener("message", answer);
+  win.postMessage({ type: "uh-clip-page", page }, APP);
+};
+window.addEventListener("message", answer);
+setTimeout(() => window.removeEventListener("message", answer), 120000);
+})();"""
+
+
+@app.get("/api/catalog/bookmarklet")
+def clipper_bookmarklet():
+    """The bookmarklet's code: the extension's own page scanner (scan.js, the single deep
+    reader) wrapped in a hand-off that opens this app and posts it what the page offered.
+    The page is read from inside the browser, where it is already open — so a site whose
+    bot wall answers the server's fetch with a 403 clips exactly like any other. ui.js
+    fills in __UH_APP__ with its own origin and turns this into the javascript: link."""
+    scanner = (BASE / "clipper-extension" / "scan.js").read_text(encoding="utf-8")
+    return app.response_class(BOOKMARKLET_WRAPPER.replace("__UH_SCANNER__", scanner),
+                              mimetype="text/javascript")
+
+
 def check_exposure():
     """Refuse to serve beyond this machine without sign-in, so a misconfigured host cannot leak client data."""
     if LOCAL_ONLY:

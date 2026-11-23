@@ -298,6 +298,20 @@ class CatalogAppTests(AppTestCase):
         self.assertIn("clipper-extension/popup.js", names)
         self.assertTrue(all(name.startswith("clipper-extension/") for name in names))
 
+    def test_the_bookmarklet_serves_the_shared_scanner_with_the_handoff(self):
+        """A bot-walled page (403 to the server) is read in the browser instead: the
+        bookmarklet carries scan.js itself — the one deep reader — plus the postMessage
+        hand-off that delivers what it found to the app's /?clipwait=1 window."""
+        response = self.client.get("/api/catalog/bookmarklet")
+        self.assertEqual(response.status_code, 200)
+        code = response.get_data(as_text=True)
+        scanner = (Path(__file__).parent / "clipper-extension" / "scan.js").read_text(encoding="utf-8")
+        self.assertIn(scanner.strip(), code)         # the scanner itself, never a drifting copy
+        self.assertIn("uh-clip-ready", code)         # the app window says it is listening
+        self.assertIn("uh-clip-page", code)          # the page rides over in the answer
+        self.assertIn("__UH_APP__", code)            # ui.js fills in its own origin
+        self.assertIn("clipwait=1", code)
+
     def test_the_clipper_token_authenticates_without_a_session_and_a_forged_one_does_not(self):
         cid = self.make_collection()
         token = self.post("/api/catalog/clipper-token", {}).json["token"]

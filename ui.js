@@ -1864,32 +1864,58 @@ async function inspectPage() {
         clipInspected = null; clipCandidate = null; clipInspectFailed = true;
         $("clip-candidates").hidden = true;
         $("clip-candidates").innerHTML = "";
-        $("clip-page-note").textContent = `${error.message} Some sites block server reading — you can still clip this: `
-          + "paste the picture's own address in the Image address tab (right-click the image → Copy image address), "
-          + "upload a screenshot, or use the browser extension (Get the clipper), which reads the page from inside your browser.";
+        $("clip-page-note").textContent = `${error.message} This site blocks server reading, so paste no address here — `
+          + "clip it from inside your browser instead: click the ✂ Clip to UH Homes bookmarklet while on that page, "
+          + "or use the browser extension (both under Get the clipper). The images and details then arrive here by "
+          + "themselves. A screenshot in the Upload tab, or the picture's own address in the Image address tab, also work.";
         $("clip-page-note").classList.add("form-error");
         $("clip-page-note").hidden = false;
         updateClipChosen();
         return;
       }
-      clipInspected = result; clipCandidate = null; clipInspectFailed = false;
-      $("clip-page-note").classList.remove("form-error");
-      // Fill every default field the page offers, leaving anything already typed alone.
-      for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
-                               ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"],
-                               ["clip-size", "size"], ["clip-link", "source_url"]]) {
-        if (!$(id).value) $(id).value = result[key] || "";
-      }
-      $("clip-page-note").textContent = result.images.length
-        ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} found on ${result.site || "the page"} — pick the one to save.`
-        : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
-      $("clip-page-note").hidden = false;
-      $("clip-candidates").hidden = !result.images.length;
-      $("clip-candidates").innerHTML = result.images.map((img, index) => `<button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>`).join("");
-      $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate").hidden = true; }));
-      updateClipChosen();
+      showInspected(result);
     } finally { $("clip-inspect").disabled = false; }
   });
+}
+
+// What a read page looks like in the dialog, wherever the reading happened: the server's
+// inspect or the bookmarklet's in-browser scan both land here.
+function showInspected(result, how = "found on") {
+  clipInspected = result; clipCandidate = null; clipInspectFailed = false;
+  $("clip-page-note").classList.remove("form-error");
+  // Fill every default field the page offers, leaving anything already typed alone.
+  for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
+                           ["clip-brand", "brand"], ["clip-model", "model"], ["clip-finish", "finish"],
+                           ["clip-size", "size"], ["clip-link", "source_url"]]) {
+    if (!$(id).value) $(id).value = result[key] || "";
+  }
+  $("clip-page-note").textContent = result.images.length
+    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — pick the one to save.`
+    : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
+  $("clip-page-note").hidden = false;
+  $("clip-candidates").hidden = !result.images.length;
+  $("clip-candidates").innerHTML = result.images.map((img, index) => `<button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>`).join("");
+  $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate").hidden = true; }));
+  updateClipChosen();
+}
+
+// A page handed over by the bookmarklet: everything its in-browser scan read, validated
+// down to plain capped strings before any of it reaches the dialog.
+function openClipFromPage(page) {
+  const text = (value, max) => (typeof value === "string" ? value : "").slice(0, max).trim();
+  const result = { title: text(page.title, 200), site: text(page.site, 200),
+                   description: text(page.description, 2000), price: text(page.price, 50),
+                   brand: text(page.brand, 200), model: text(page.model, 100),
+                   finish: text(page.finish, 200), size: text(page.size, 200),
+                   materials: text(page.materials, 500), source_url: text(page.url, 2000),
+                   images: (Array.isArray(page.images) ? page.images : []).slice(0, 60)
+                     .map((img) => ({ url: text(img && img.url, 2000), alt: text(img && img.alt, 200) }))
+                     .filter((img) => /^https?:/.test(img.url)) };
+  state.view = "catalog";
+  render();
+  openClip();
+  $("clip-page-url").value = result.source_url;
+  showInspected(result, "read from your browser on");
 }
 
 async function saveClip() {
@@ -2346,12 +2372,26 @@ $("assistant-dialog").addEventListener("click", (event) => {
   const open = event.target.closest("[data-insp-open]");
   if (open) { $("assistant-dialog").close(); state.view = "catalog"; render(); openInspiration(open.dataset.inspOpen); }
 });
-$("catalog-clipper-open").addEventListener("click", () => {
-  const target = `${location.origin}/?clip=`;
-  $("clipper-bookmarklet").setAttribute("href", `javascript:void(window.open('${target}'+encodeURIComponent(location.href),'_blank'))`);
+// The bookmarklet carries the extension's own page scanner, served by the app so the two
+// never drift. It reads the page from inside the browser and posts the result here, so a
+// site whose bot wall 403s the server's fetch clips exactly like any other. The old
+// /?clip=<url> link stands in only until the real code arrives (or if it cannot).
+let bookmarkletHref = "";
+$("catalog-clipper-open").addEventListener("click", async () => {
+  $("clipper-bookmarklet").setAttribute("href",
+    bookmarkletHref || `javascript:void(window.open('${location.origin}/?clip='+encodeURIComponent(location.href),'_blank'))`);
   $("clipper-token").value = "";
   $("clipper-copy").hidden = true;
   $("clipper-dialog").showModal();
+  if (!bookmarkletHref) {
+    try {
+      const response = await fetch("/api/catalog/bookmarklet");
+      if (!response.ok) return;
+      const code = (await response.text()).replaceAll("__UH_APP__", location.origin);
+      bookmarkletHref = `javascript:${encodeURIComponent(code)}`;
+      $("clipper-bookmarklet").setAttribute("href", bookmarkletHref);
+    } catch { /* the stand-in link above still works for sites the server can read */ }
+  }
 });
 $("clipper-bookmarklet").addEventListener("click", (event) => { event.preventDefault(); toast("Drag this link to your bookmarks bar instead of clicking it here."); });
 $("clipper-generate").addEventListener("click", () => action(async () => {
@@ -2366,13 +2406,25 @@ $("clipper-copy").addEventListener("click", async () => {
 });
 
 refresh().then(() => {
-  // The bookmarklet opens /?clip=<page>: land on the catalog with the clipper already reading that page.
-  const clipUrl = new URLSearchParams(location.search).get("clip");
+  // An old bookmarklet opens /?clip=<page>: land on the catalog with the server reading that page.
+  const params = new URLSearchParams(location.search);
+  const clipUrl = params.get("clip");
   if (clipUrl) {
     history.replaceState(null, "", "/");
     state.view = "catalog";
     render();
     openClip(clipUrl);
+  }
+  // The current bookmarklet opens /?clipwait=1 and posts over what it already read in the
+  // browser — no server fetch, so a page behind a bot wall arrives all the same. The
+  // payload is validated field by field in openClipFromPage before any of it is shown.
+  if (params.has("clipwait")) {
+    history.replaceState(null, "", "/");
+    window.addEventListener("message", (event) => {
+      const page = event.data && event.data.type === "uh-clip-page" && event.data.page;
+      if (page && typeof page === "object") openClipFromPage(page);
+    });
+    window.opener?.postMessage("uh-clip-ready", "*");
   }
 }).catch((error) => {
   $("load-error").textContent = error.message;
