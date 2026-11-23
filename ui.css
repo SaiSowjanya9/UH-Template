@@ -493,7 +493,10 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .clip-lightbox figure { margin:0; }
 .clip-lightbox img { width:100%; max-height:62vh; object-fit:contain; display:block; border-radius:6px; border:1px solid var(--line); background:#f6f2e6; }
 .clip-lightbox figcaption { font-size:11px; color:var(--muted); margin-top:9px; overflow-wrap:anywhere; }
-.clip-lightbox-close { position:absolute; top:12px; right:12px; }
+/* The close sits on top of the photograph, so it cannot borrow the page's colors:
+   a dark disc inside a cream ring reads against a bright image and a dark one alike. */
+.clip-lightbox-close { position:absolute; top:14px; right:14px; z-index:2; width:36px; height:36px; padding:0; display:grid; place-items:center; border-radius:50%; background:#2a261d; color:#f6efdc; font-size:21px; line-height:1; box-shadow:0 0 0 2px rgba(253,251,244,.92),0 6px 18px rgba(24,20,10,.45); }
+.clip-lightbox-close:hover { background:#6b5636; color:#fff; box-shadow:0 0 0 2px #fff,0 8px 22px rgba(24,20,10,.5); }
 .clip-lightbox-actions { display:flex; align-items:center; gap:9px; margin-top:14px; }
 .clip-lightbox-actions #clip-lightbox-use { margin-left:auto; }
 .clip-fields { margin-top:6px; }
