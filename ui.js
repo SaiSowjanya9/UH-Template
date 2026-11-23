@@ -1858,16 +1858,16 @@ async function inspectPage() {
       let result;
       try {
         result = await api("/api/catalog/inspect", { url });
-      } catch (error) {
-        // The site refused or could not be read. Explain inside the dialog, where the
-        // person is looking, and name the paths that still work for a site like this.
+      } catch {
+        // The site refused or could not be read. No error codes here — just the flow
+        // that works for a page like this, inside the dialog where the person is looking.
         clipInspected = null; clipCandidate = null; clipInspectFailed = true;
         $("clip-candidates").hidden = true;
         $("clip-candidates").innerHTML = "";
-        $("clip-page-note").textContent = `${error.message} This site blocks server reading, so paste no address here — `
-          + "clip it from inside your browser instead: click the 🔶 Clip to UH Homes bookmark while on that page "
-          + "(set it up under Get the clipper). The images and details then arrive here by "
-          + "themselves. A screenshot in the Upload tab, or the picture's own address in the Image address tab, also work.";
+        $("clip-page-note").textContent = "This page prefers to be clipped with your Clip to UH Homes bookmark: "
+          + "1) Open the product page in another tab.  2) Click the bookmark in your bookmarks bar "
+          + "(set it up once under Get the clipper).  3) The images and details arrive here by themselves, "
+          + "ready to review and save. You can also upload a screenshot, or paste the picture's own address in the Image address tab.";
         $("clip-page-note").classList.add("form-error");
         $("clip-page-note").hidden = false;
         updateClipChosen();

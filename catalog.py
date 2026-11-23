@@ -383,7 +383,7 @@ def safe_fetch(url, limit, accept="*/*"):
                 url = urljoin(url, response.headers["Location"])
                 continue
             if response.status_code >= 400:
-                raise ValidationError(f"The site answered with an error (HTTP {response.status_code}) for that address.")
+                raise ValidationError("That site would not hand this over to the app.")
             body = io.BytesIO()
             for chunk in response.iter_content(65536):
                 body.write(chunk)
