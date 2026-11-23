@@ -1890,13 +1890,29 @@ function showInspected(result, how = "found on") {
     if (!$(id).value) $(id).value = result[key] || "";
   }
   $("clip-page-note").textContent = result.images.length
-    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — pick the one to save.`
+    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — pick the one to save, or × away the ones that don't belong.`
     : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
   $("clip-page-note").hidden = false;
-  $("clip-candidates").hidden = !result.images.length;
-  $("clip-candidates").innerHTML = result.images.map((img, index) => `<button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>`).join("");
-  $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate").hidden = true; }));
+  renderClipCandidates();
   updateClipChosen();
+}
+
+// The candidate grid. Each tile pairs the image (click to preview) with a × that removes
+// it from the choices — read pages bring banners and related products along, and clearing
+// them out leaves only the images worth comparing. Removing is this dialog's view only:
+// nothing is saved until one image is chosen and saved.
+function renderClipCandidates() {
+  const images = clipInspected?.images || [];
+  $("clip-candidates").hidden = !images.length;
+  $("clip-candidates").innerHTML = images.map((img, index) => `<div class="clip-candidate-box">
+      <button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>
+      <button type="button" class="clip-candidate-x" data-dismiss="${index}" title="Remove this image from the choices" aria-label="Remove this image from the choices">×</button>
+    </div>`).join("");
+  $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate-box").hidden = true; }));
+  if (clipCandidate) {
+    $("clip-candidates").querySelectorAll(".clip-candidate")
+      .forEach((b) => b.classList.toggle("selected", images[Number(b.dataset.candidate)] === clipCandidate));
+  }
 }
 
 // A page handed over by the bookmarklet: everything its in-browser scan read, validated
@@ -2302,6 +2318,17 @@ function showClipPreview(index) {
 }
 
 $("clip-candidates").addEventListener("click", (event) => {
+  const cross = event.target.closest("[data-dismiss]");
+  if (cross && clipInspected) {
+    const [removed] = clipInspected.images.splice(Number(cross.dataset.dismiss), 1);
+    if (clipCandidate === removed) { clipCandidate = null; updateClipChosen(); }
+    renderClipCandidates();
+    if (!clipInspected.images.length) {
+      $("clip-page-note").textContent = "Every image was removed — Find images (or the bookmarklet) brings them back.";
+      $("clip-page-note").hidden = false;
+    }
+    return;
+  }
   const button = event.target.closest("[data-candidate]");
   if (button) showClipPreview(Number(button.dataset.candidate));
 });
