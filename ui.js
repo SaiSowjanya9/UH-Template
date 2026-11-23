@@ -2422,26 +2422,11 @@ $("assistant-dialog").addEventListener("click", (event) => {
   const open = event.target.closest("[data-insp-open]");
   if (open) { $("assistant-dialog").close(); state.view = "catalog"; render(); openInspiration(open.dataset.inspOpen); }
 });
-// The bookmarklet carries the clipper's page scanner, served by the app so the two never
-// drift. It reads the page from inside the browser and posts the result here, so a
-// site whose bot wall 403s the server's fetch clips exactly like any other. The old
-// /?clip=<url> link stands in only until the real code arrives (or if it cannot).
-let bookmarkletHref = "";
-$("catalog-clipper-open").addEventListener("click", async () => {
-  $("clipper-bookmarklet").setAttribute("href",
-    bookmarkletHref || `javascript:void(window.open('${location.origin}/?clip='+encodeURIComponent(location.href),'_blank'))`);
-  $("clipper-dialog").showModal();
-  if (!bookmarkletHref) {
-    try {
-      const response = await fetch("/api/catalog/bookmarklet");
-      if (!response.ok) return;
-      const code = (await response.text()).replaceAll("__UH_APP__", location.origin);
-      bookmarkletHref = `javascript:${encodeURIComponent(code)}`;
-      $("clipper-bookmarklet").setAttribute("href", bookmarkletHref);
-    } catch { /* the stand-in link above still works for sites the server can read */ }
-  }
-});
-$("clipper-bookmarklet").addEventListener("click", (event) => { event.preventDefault(); toast("Drag this link to your bookmarks bar instead of clicking it here."); });
+// The clipper is the one downloadable bookmark file: it carries the page scanner and the
+// UH icon, which a bookmark only keeps when it is imported rather than dragged. It reads
+// the page from inside the browser and posts the result here, so a site whose bot wall
+// 403s the server's fetch clips exactly like any other.
+$("catalog-clipper-open").addEventListener("click", () => $("clipper-dialog").showModal());
 
 refresh().then(() => {
   // An old bookmarklet opens /?clip=<page>: land on the catalog with the server reading that page.

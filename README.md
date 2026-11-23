@@ -125,13 +125,13 @@ The **Catalog** tab is a built-in design clipping and inspiration library. Brows
 - **Assign to projects** — the catalog is the master library: one clipped item can be added to any number of projects. **+ Add to projects** on an inspiration (or **❖ From catalog** on the Selection tracker) creates that project its own line item — title, section, product link, quantity and price prefilled from the clip, referenced by Catalog Item ID. Each project's line item keeps its own quantity, room, notes and client status: removing it never deletes the catalog record, and later catalog edits never rewrite a project's rows.
 - **AI features** — when `ANTHROPIC_API_KEY` is set in `.env`, the Catalog can auto-categorize images, describe designs, recognize materials, and answer natural-language questions about your saved inspirations. Without the key, a local keyword/color fallback handles categorization, palette extraction and basic search.
 - **Collaboration** — share collections with teammates (read-only or edit), leave comments, and track approval status. Privacy is per-collection; local mode is single-user.
-- **Bookmarklet** — the clipper is one bookmark, nothing to install: open **Get the clipper** in the Catalog tab and drag the **Clip to UH Homes** link to your bookmarks bar. Clicking it on any product page reads the page from inside your browser (so sites that block the app's server still clip fine) and opens the Catalog's clip dialog with the images and details ready to review.
+- **Bookmarklet** — the clipper is one bookmark, nothing to install: open **Get the clipper** in the Catalog tab, download the bookmark file and import it (`Ctrl+Shift+O` → **⋮ menu → Import bookmarks**), then drag **Clip to UH Homes** onto your bookmarks bar. It is imported rather than dragged from the page because only an imported bookmark keeps the UH icon — a dragged `javascript:` bookmark always wears the browser's own globe. Clicking it on any product page reads the page from inside your browser (so sites that block the app's server still clip fine) and opens the Catalog's clip dialog with the images and details ready to review.
 
 **Setup:**
 
 1. The Catalog works out of the box — no extra configuration needed for basic use.
 2. For AI features, add `ANTHROPIC_API_KEY` to `.env` (see `.env.example`).
-3. For clipping from other sites, drag the bookmarklet from the Catalog tab's **Get the clipper** dialog to your bookmarks bar — that is the whole setup.
+3. For clipping from other sites, download and import the bookmark from the Catalog tab's **Get the clipper** dialog, then drag it onto your bookmarks bar — that is the whole setup.
 
 **Storage:** Catalog metadata lives in additional workbook sheets (managed through `WorkspaceStore` like everything else). Image files are stored in the backend's object storage — `catalog_images/` locally, the Supabase Storage bucket when hosted. Thumbnails and duplicate detection by content hash keep storage efficient.
 
