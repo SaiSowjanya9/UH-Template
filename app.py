@@ -1001,6 +1001,28 @@ def clipper_bookmarklet():
                               mimetype="text/javascript")
 
 
+@app.get("/clip-bookmark.html")
+def clip_bookmark_file():
+    """The bookmarklet as a ready-to-import bookmarks file carrying the UH gold icon.
+    A dragged javascript: bookmark always wears the browser's own globe — no page can
+    set it — but Chrome and Edge honor a bookmarks file's ICON attribute on import, so
+    importing this file puts a Clip to UH Homes in the bar with the real uh-icon.png."""
+    import base64
+    from urllib.parse import quote
+    scanner = (BASE / "clip_scan.js").read_text(encoding="utf-8")
+    code = BOOKMARKLET_WRAPPER.replace("__UH_SCANNER__", scanner) \
+                              .replace("__UH_APP__", request.host_url.rstrip("/"))
+    href = "javascript:" + quote(code, safe="!'()*-._~")      # quotes and & are encoded, so the attribute stays whole
+    icon = base64.b64encode((BASE / "brand_assets" / "uh-icon.png").read_bytes()).decode()
+    html = ("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n"
+            '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n'
+            "<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n"
+            f'    <DT><A HREF="{href}" ICON="data:image/png;base64,{icon}">Clip to UH Homes</A>\n'
+            "</DL><p>\n")
+    return send_file(io.BytesIO(html.encode("utf-8")), as_attachment=True,
+                     download_name="uh-clip-bookmark.html", mimetype="text/html")
+
+
 def check_exposure():
     """Refuse to serve beyond this machine without sign-in, so a misconfigured host cannot leak client data."""
     if LOCAL_ONLY:

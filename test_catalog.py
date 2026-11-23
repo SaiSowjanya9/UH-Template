@@ -302,6 +302,23 @@ class CatalogAppTests(AppTestCase):
         self.assertIn("__UH_APP__", code)            # ui.js fills in its own origin
         self.assertIn("clipwait=1", code)
 
+    def test_the_bookmark_file_carries_the_uh_icon_and_the_scanner(self):
+        """A dragged javascript: bookmark wears the browser's own globe, but Chrome and
+        Edge keep a bookmarks file's ICON on import — this file is how the bookmarks bar
+        gets the real UH gold symbol."""
+        response = self.client.get("/clip-bookmark.html")
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertTrue(text.startswith("<!DOCTYPE NETSCAPE-Bookmark-file-1>"))
+        self.assertIn('HREF="javascript:', text)
+        self.assertIn("uhCollect", text)                      # the scanner rides inside
+        self.assertIn("Clip to UH Homes", text)
+        href = text.split('HREF="', 1)[1].split('"', 1)[0]
+        self.assertNotIn("&", href)                           # quoted, so the attribute stays whole
+        import base64
+        icon = text.split('ICON="data:image/png;base64,', 1)[1].split('"', 1)[0]
+        self.assertEqual(base64.b64decode(icon)[:8], b"\x89PNG\r\n\x1a\n")
+
     def test_the_retired_browser_extension_stays_removed(self):
         """The extension was retired for the bookmarklet: its download, its picker routes
         and its token are gone, and the old token header no longer stands in for CSRF."""
