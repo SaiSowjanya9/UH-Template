@@ -1819,7 +1819,7 @@ function clipStepForward() {
   } else if (clipStep === 2) {
     if (clipTab === "page" && !clipCandidate) {
       fail(clipInspectFailed
-        ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or clip it with the 🔶 Clip to UH Homes bookmark."
+        ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or clip it with the Clip to UH Homes bookmark."
         : "Find images on the page, then pick the one to save.");
       return;
     }
@@ -1976,7 +1976,7 @@ async function saveClip() {
   catch (error) {
     // The save itself was refused — usually the site blocking the image download too.
     // Keep the dialog open and say where to go instead of losing the work to a toast.
-    fail(`${error.message} If the site is blocking the app, clip it with the 🔶 Clip to UH Homes bookmark (Get the clipper), `
+    fail(`${error.message} If the site is blocking the app, clip it with the Clip to UH Homes bookmark (Get the clipper), `
        + "or save a screenshot of the picture and use the Upload tab.");
     return;
   } finally { setBusy(false); }

@@ -489,10 +489,16 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .clipper-section { border-top:1px solid var(--line); padding-top:15px; margin-top:15px; }
 .clipper-section:first-of-type { border-top:0; padding-top:0; margin-top:0; }
 .clipper-section h3 { font-size:11px; letter-spacing:1.6px; text-transform:uppercase; color:var(--muted); }
-/* The UH gold symbol on the drag-me button. Only the link's text can follow it into the
-   bookmarks bar (browsers draw their own globe beside a bookmarklet), so the name leads
-   with the gold diamond that stands in for the symbol out there. */
-.bookmarklet-mark { height:15px; width:auto; vertical-align:-3px; margin-right:7px; }
+/* The drag-me bookmark is the one control in the app that is picked up rather than
+   clicked, so it wears its own dress: a dark ticket on a dashed gold perimeter — the
+   dashes say "cut me out", the grab cursor says how. Only the link's text follows it
+   into the bookmarks bar, so the anchor holds nothing but the symbol and the name. */
+.bookmarklet-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.bookmarklet-pill { display:inline-flex; align-items:center; gap:10px; padding:11px 20px; background:linear-gradient(135deg,#2a261d 0%,#453a26 100%); color:#f3e9d2; border:1.5px dashed var(--gold); border-radius:999px; font-weight:600; font-size:13px; letter-spacing:.5px; text-decoration:none; cursor:grab; box-shadow:0 3px 12px rgba(42,38,29,.28); }
+.bookmarklet-pill:hover { transform:translateY(-1px); box-shadow:0 5px 16px rgba(42,38,29,.38); color:#fff; }
+.bookmarklet-pill:active { cursor:grabbing; }
+.bookmarklet-mark { height:16px; width:auto; }
+.bookmarklet-hint { font-size:11px; color:var(--muted); letter-spacing:.6px; text-transform:uppercase; }
 @media (max-width:860px) { .insp-layout { grid-template-columns:1fr; } .inspiration-dialog { padding:20px; } }
 @media (max-width:640px) { .catalog-gallery { columns:2 140px; } .collection-strip { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); } .clip-url-row { flex-wrap:wrap; } }
 
