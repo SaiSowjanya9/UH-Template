@@ -1014,10 +1014,16 @@ def clip_bookmark_file():
                               .replace("__UH_APP__", request.host_url.rstrip("/"))
     href = "javascript:" + quote(code, safe="!'()*-._~")      # quotes and & are encoded, so the attribute stays whole
     icon = base64.b64encode((BASE / "brand_assets" / "uh-icon.png").read_bytes()).decode()
+    # The entry sits inside a PERSONAL_TOOLBAR_FOLDER folder on purpose: Chrome's importer
+    # reads that flag to decide whether an entry belongs to the bookmarks bar or to Other
+    # bookmarks, and an import that lands out of sight reads as an import that failed.
     html = ("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n"
             '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n'
             "<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n"
-            f'    <DT><A HREF="{href}" ICON="data:image/png;base64,{icon}">Clip to UH Homes</A>\n'
+            '    <DT><H3 PERSONAL_TOOLBAR_FOLDER="true">Bookmarks bar</H3>\n'
+            "    <DL><p>\n"
+            f'        <DT><A HREF="{href}" ICON="data:image/png;base64,{icon}">Clip to UH Homes</A>\n'
+            "    </DL><p>\n"
             "</DL><p>\n")
     return send_file(io.BytesIO(html.encode("utf-8")), as_attachment=True,
                      download_name="uh-clip-bookmark.html", mimetype="text/html")

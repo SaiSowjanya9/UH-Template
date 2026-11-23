@@ -311,6 +311,8 @@ class CatalogAppTests(AppTestCase):
         text = response.get_data(as_text=True)
         self.assertTrue(text.startswith("<!DOCTYPE NETSCAPE-Bookmark-file-1>"))
         self.assertIn('HREF="javascript:', text)
+        # imported onto the bar, not into Other bookmarks, where it reads as a failed import
+        self.assertIn('<H3 PERSONAL_TOOLBAR_FOLDER="true">', text)
         self.assertIn("uhCollect", text)                      # the scanner rides inside
         self.assertIn("Clip to UH Homes", text)
         href = text.split('HREF="', 1)[1].split('"', 1)[0]
