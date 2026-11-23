@@ -43,7 +43,7 @@ MIN_SIDE = 80                    # anything smaller is an icon, not an inspirati
 PALETTE_SIZE = 5
 # A plain browser user agent: many retail sites answer 403 to anything announcing itself
 # as a bot, and the clipper fetches one page a person pasted, throttled, not a crawl.
-# (Heavier bot walls - Akamai, Cloudflare challenges - still refuse; the extension covers those.)
+# (Heavier bot walls - Akamai, Cloudflare challenges - still refuse; the bookmarklet covers those.)
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 

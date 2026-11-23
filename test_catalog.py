@@ -1,5 +1,4 @@
 """The design catalog (the clipper): collections, clipping, permissions, AI fallbacks."""
-import base64
 import io
 import shutil
 import tempfile
@@ -169,7 +168,7 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(state["items"][0]["Collection ID"], response.json["collection"])
 
     def test_a_clip_can_land_straight_on_a_projects_spec_sheet(self):
-        """The extension's 'Also add to project': one clip saves the library item and writes
+        """A clip's 'Also add to project': one clip saves the library item and writes
         that project its own referencing line item in the same save."""
         cid = self.make_collection()
         with patch.object(catalog, "safe_fetch", return_value=(picture((40, 70, 110)), "image/jpeg", "https://example.com/p.jpg")):
@@ -289,46 +288,30 @@ class CatalogAppTests(AppTestCase):
             self.assertEqual(self.client.get(f"/api/catalog/images/{name}").status_code, 400)
         self.assertEqual(self.client.get(f"/api/catalog/images/{kept_item['image']}").status_code, 200)
 
-    def test_the_clipper_extension_downloads_as_a_zip_for_hosted_users(self):
-        import zipfile
-        response = self.client.get("/clipper-extension.zip")
-        self.assertEqual(response.status_code, 200)
-        names = zipfile.ZipFile(io.BytesIO(response.data)).namelist()
-        self.assertIn("clipper-extension/manifest.json", names)
-        self.assertIn("clipper-extension/popup.js", names)
-        self.assertTrue(all(name.startswith("clipper-extension/") for name in names))
-
     def test_the_bookmarklet_serves_the_shared_scanner_with_the_handoff(self):
         """A bot-walled page (403 to the server) is read in the browser instead: the
-        bookmarklet carries scan.js itself — the one deep reader — plus the postMessage
+        bookmarklet carries clip_scan.js itself — the one deep reader — plus the postMessage
         hand-off that delivers what it found to the app's /?clipwait=1 window."""
         response = self.client.get("/api/catalog/bookmarklet")
         self.assertEqual(response.status_code, 200)
         code = response.get_data(as_text=True)
-        scanner = (Path(__file__).parent / "clipper-extension" / "scan.js").read_text(encoding="utf-8")
+        scanner = (Path(__file__).parent / "clip_scan.js").read_text(encoding="utf-8")
         self.assertIn(scanner.strip(), code)         # the scanner itself, never a drifting copy
         self.assertIn("uh-clip-ready", code)         # the app window says it is listening
         self.assertIn("uh-clip-page", code)          # the page rides over in the answer
         self.assertIn("__UH_APP__", code)            # ui.js fills in its own origin
         self.assertIn("clipwait=1", code)
 
-    def test_the_clipper_token_authenticates_without_a_session_and_a_forged_one_does_not(self):
-        cid = self.make_collection()
-        token = self.post("/api/catalog/clipper-token", {}).json["token"]
-        raw = base64.b64encode(picture((60, 60, 200))).decode()
-        response = self.client.post("/api/catalog/clip",                      # no X-UH-Token at all
-                                    json={"collection": cid, "image_data": raw, "title": "Clipped remotely"},
-                                    headers={"X-UH-Clipper": token})
-        self.assertEqual(response.status_code, 200, response.json)
-        listing = self.client.get("/api/catalog/clipper/collections", headers={"X-UH-Clipper": token})
-        self.assertEqual(listing.status_code, 200)
-        self.assertEqual(listing.json["collections"][0]["count"], 1)
-        projects = self.client.get("/api/catalog/clipper/projects", headers={"X-UH-Clipper": token})
-        self.assertEqual(projects.status_code, 200)
-        self.assertIn("UH-101", [p["id"] for p in projects.json["projects"]])
-        forged = self.client.post("/api/catalog/clip", json={"collection": cid, "image_data": raw},
-                                  headers={"X-UH-Clipper": token[:-4] + "zzzz"})
-        self.assertEqual(forged.status_code, 403)              # falls through to the CSRF rule
+    def test_the_retired_browser_extension_stays_removed(self):
+        """The extension was retired for the bookmarklet: its download, its picker routes
+        and its token are gone, and the old token header no longer stands in for CSRF."""
+        self.assertEqual(self.client.get("/clipper-extension.zip").status_code, 404)
+        self.assertEqual(self.client.get("/api/catalog/clipper/collections").status_code, 404)
+        self.assertEqual(self.client.get("/api/catalog/clipper/projects").status_code, 404)
+        self.assertEqual(self.client.post("/api/catalog/clipper-token", json={}).status_code, 404)
+        response = self.client.post("/api/catalog/clip", json={"image_url": "https://example.com/p.jpg"},
+                                    headers={"X-UH-Clipper": "anything"})   # no X-UH-Token at all
+        self.assertEqual(response.status_code, 403)            # the CSRF rule decides alone
 
     def test_the_assistant_answers_locally_when_no_ai_key_is_configured(self):
         cid = self.make_collection()
@@ -373,7 +356,7 @@ class CatalogAppTests(AppTestCase):
 
 
 class HostedCatalogTests(unittest.TestCase):
-    """Hosted mode: one shared team catalog, and the clipper token's identity."""
+    """Hosted mode: one shared team catalog behind sign-in."""
 
     def setUp(self):
         import app
@@ -406,13 +389,6 @@ class HostedCatalogTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         return response.json
 
-    def test_the_clipper_extension_downloads_without_signing_in(self):
-        """The zip is static public code; a teammate setting up should not need a session first."""
-        import zipfile
-        response = self.client.get("/clipper-extension.zip")        # no sign_in()
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("clipper-extension/manifest.json", zipfile.ZipFile(io.BytesIO(response.data)).namelist())
-
     def test_every_signed_in_member_sees_and_edits_every_collection(self):
         """Privacy and sharing were removed: the catalog is one shared team workspace."""
         owner = self.sign_in("owner@uh.test")
@@ -440,27 +416,14 @@ class HostedCatalogTests(unittest.TestCase):
                                                      "Privacy": "Private"}})
         self.assertEqual(response.status_code, 400)
 
-    def test_the_clipper_token_carries_its_owner_into_hosted_saves(self):
-        owner = self.sign_in("owner@uh.test")
-        response = self.client.post("/api/catalog/collections", headers=owner,
-                                    json={"revision": self.state()["revision"], "values": {"Name": "Clips"}})
-        cid = response.json["collection"]
-        token = self.client.post("/api/catalog/clipper-token", headers=owner, json={}).json["token"]
-
+    def test_a_clip_needs_a_signed_in_session_and_the_old_token_header_is_ignored(self):
+        """The browser extension was retired: hosted, a clip reaches the workspace only
+        through a signed-in session, never through the old X-UH-Clipper header."""
         fresh = self.module.app.test_client()                  # no session at all
-        raw = base64.b64encode(picture((10, 120, 220))).decode()
-        response = fresh.post("/api/catalog/clip", json={"collection": cid, "image_data": raw, "title": "From the road"},
-                              headers={"X-UH-Clipper": token})
-        self.assertEqual(response.status_code, 200, response.json)
-        self.sign_in("owner@uh.test")
-        item = self.state()["catalog"]["items"][0]
-        self.assertEqual(item["Saved By"], "owner@uh.test")
-        no_token = fresh.post("/api/catalog/clip", json={"collection": cid, "image_data": raw})
-        self.assertEqual(no_token.status_code, 401)            # no session and no token
-        # the project list the extension's picker shows follows the same rule
-        self.assertEqual(fresh.get("/api/catalog/clipper/projects").status_code, 401)
-        self.assertEqual(fresh.get("/api/catalog/clipper/projects",
-                                   headers={"X-UH-Clipper": token}).status_code, 200)
+        response = fresh.post("/api/catalog/clip", json={"image_url": "https://example.com/p.jpg"},
+                              headers={"X-UH-Clipper": "anything"})
+        self.assertEqual(response.status_code, 401)            # no session, no way in
+        self.assertEqual(fresh.get("/clipper-extension.zip").status_code, 404)
 
 
 class AssignmentTests(AppTestCase):

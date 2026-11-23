@@ -1,7 +1,7 @@
 "use strict";
 
-// The deep page reader every clip path shares: the popup injects this file before reading
-// the page, and hover save rides on the same copy. It looks wherever vendors actually put
+// The deep page reader the bookmarklet carries: /api/catalog/bookmarklet serves this file
+// verbatim inside the hand-off wrapper. It looks wherever vendors actually put
 // their product details — structured data first, then meta tags and microdata, then the
 // visible spec tables, definition lists and labelled rows most stores hide the specifics
 // in, and finally the page's own text for a price — so a page with no structured data at

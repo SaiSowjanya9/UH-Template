@@ -7,10 +7,9 @@ import re
 import secrets
 import tempfile
 import threading
-import zipfile
 from pathlib import Path
 
-from flask import Flask, Request, g, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Request, jsonify, redirect, render_template, request, send_file, session, url_for
 from PIL import Image
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -76,36 +75,12 @@ store = open_store()
 TOKEN = secrets.token_urlsafe(32)
 EXPORT_LOCK = threading.Lock()
 THROTTLE = auth.Throttle()
-# Reachable without a session: the sign-in page and the assets and health check it needs,
-# plus the clipper download — static public code with no secrets or workspace data in it.
-OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz", "clipper_extension_zip"}
-# Reachable with a clipper token instead of a session: what the browser extension calls.
-# The token is signed with the app's secret and carries only the issuing user's email.
-CLIPPER_ENDPOINTS = {"catalog_clip", "clip_inspect", "clipper_collections", "clipper_projects"}
-CLIPPER_TOKEN_DAYS = 90
-
-
-def clipper_serializer():
-    from itsdangerous import URLSafeTimedSerializer
-    return URLSafeTimedSerializer(app.secret_key, salt="uh-clipper")
-
-
-def clipper_identity():
-    """The email inside a valid X-UH-Clipper header, '' for a local-mode token, else None."""
-    header = request.headers.get("X-UH-Clipper", "")
-    if not header or len(header) > 600:
-        return None
-    try:
-        data = clipper_serializer().loads(header, max_age=CLIPPER_TOKEN_DAYS * 86400)
-    except Exception:
-        return None
-    return str((data or {}).get("email", ""))
+# Reachable without a session: the sign-in page and the assets and health check it needs.
+OPEN_ENDPOINTS = {"login", "logout", "asset", "brand_asset", "favicon", "healthz"}
 
 
 def catalog_user():
-    """Who is acting: the clipper token's holder, the signed-in session, or nobody locally."""
-    if "clipper" in g:
-        return g.clipper
+    """Who is acting: the signed-in session, or nobody locally."""
     return (session.get("user") or {}).get("email", "") if REQUIRE_LOGIN else ""
 
 
@@ -124,13 +99,6 @@ def guard():
         return None                 # let Flask raise the stored 400/404 (e.g. an untrusted Host)
     if request.endpoint == "login":
         return None                 # the sign-in form carries its own token as a field
-    if request.endpoint in CLIPPER_ENDPOINTS:
-        email = clipper_identity()
-        if email is not None:
-            # The signed token is the credential, so no session or CSRF check applies; an
-            # invalid or missing token falls through to the normal session rules instead.
-            g.clipper = email
-            return None
     if REQUIRE_LOGIN and not session.get("user") and request.endpoint not in OPEN_ENDPOINTS:
         if request.path.startswith("/api/"):
             return jsonify(error="Your session has ended. Sign in again to continue."), 401
@@ -801,7 +769,7 @@ def clip_meta(source):
 
 def catalog_item_rows(wb, item, projects, extra):
     """One Selections row per chosen project for a catalog item — the copy-with-reference
-    the assign dialog and the clipper's 'add to project' both write."""
+    the assign dialog and a clip's 'projects' both write."""
     known = {p["Project ID"] for p in records(wb, "Projects")}
     chosen = list(dict.fromkeys(common.clean(p) for p in projects))
     if not chosen or any(p not in known for p in chosen):
@@ -820,8 +788,8 @@ def catalog_item_rows(wb, item, projects, extra):
 
 
 def clip_projects(data):
-    """The projects a clip asks to land on, cleaned: a list from the extension's JSON,
-    a comma-separated string from a form, nothing from a plain clip."""
+    """The projects a clip asks to land on, cleaned: a list from JSON, a comma-separated
+    string from a form, nothing from a plain clip."""
     projects = data.get("projects") or []
     if isinstance(projects, str):
         projects = projects.split(",")
@@ -831,8 +799,8 @@ def clip_projects(data):
 
 
 def finish_clip(raw, meta, data):
-    """Process, store and record one clipped image; shared by upload, URL clip and the
-    extension. `projects` sends the new item straight onto those projects' spec sheets
+    """Process, store and record one clipped image; shared by the upload and URL clip
+    paths. `projects` sends the new item straight onto those projects' spec sheets
     (one referencing Selections row each) in the same save."""
     processed = catalog.process_image(raw)
     user = catalog_user()
@@ -930,50 +898,17 @@ def clip_inspect():
 
 @app.post("/api/catalog/clip")
 def catalog_clip():
-    """Save one inspiration: an image the server downloads itself, or bytes the clipper sends."""
+    """Save one inspiration: an image the server downloads from the chosen address."""
     throttle_clips()
     data = request.get_json(silent=True) or {}
     meta = clip_meta(data)
-    if common.clean(data.get("image_data")):
-        import base64
-        try:
-            raw = base64.b64decode(str(data["image_data"])[:11_000_000], validate=True)
-        except Exception:
-            raise ValidationError("The clipped image data could not be read. Try saving the image again.") from None
-    elif common.clean(data.get("image_url")):
+    if common.clean(data.get("image_url")):
         raw = catalog.fetch_image(data["image_url"])
         if not meta.get("source_url"):
             meta["source_url"] = common.clean(data.get("image_url"))
     else:
         raise ValidationError("Clip an image: pick one from the page, paste an image address, or upload a file.")
     return finish_clip(raw, meta, data)
-
-
-@app.get("/api/catalog/clipper/collections")
-def clipper_collections():
-    """The collections this clipper may file into — what the extension's picker shows."""
-    user = catalog_user()
-    with store.lock:
-        wb, _ = store.snapshot()
-        collections, items, _ = catalog.visible_catalog(wb, user, REQUIRE_LOGIN)
-    counts = {}
-    for item in items:
-        counts[item["Collection ID"]] = counts.get(item["Collection ID"], 0) + 1
-    return jsonify(ok=True, collections=[{"id": c["Collection ID"], "name": c["Name"],
-                                          "count": counts.get(c["Collection ID"], 0)}
-                                         for c in collections])
-
-
-@app.get("/api/catalog/clipper/projects")
-def clipper_projects():
-    """The projects a clip may be sent straight into — what the extension's picker shows."""
-    with store.lock:
-        wb, _ = store.snapshot()
-        rows = records(wb, "Projects")
-    return jsonify(ok=True, projects=[
-        {"id": p["Project ID"],
-         "name": common.clean(p.get("Project Name")) or common.clean(p.get("Client Name")) or p["Project ID"]}
-        for p in rows if common.clean(p.get("Project ID"))])
 
 
 @app.get("/api/catalog/images/<name>")
@@ -1038,29 +973,6 @@ def catalog_similar():
     return jsonify(ok=True, item_ids=catalog.similar_items(item, items))
 
 
-@app.post("/api/catalog/clipper-token")
-def clipper_token():
-    """A signed token the browser extension and bookmarklet authenticate with. It carries
-    only the issuing user's email; Supabase keys never reach the extension."""
-    token = clipper_serializer().dumps({"email": catalog_user()})
-    return jsonify(ok=True, token=token, days=CLIPPER_TOKEN_DAYS)
-
-
-@app.get("/clipper-extension.zip")
-def clipper_extension_zip():
-    """The browser clipper as a download — a signed-in hosted user has no "folder beside
-    the app" to load unpacked, so the app serves its own copy. Only static extension
-    files go in; the token still comes from the dialog, never from the zip."""
-    folder = BASE / "clipper-extension"
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
-            archive.write(path, f"clipper-extension/{path.relative_to(folder).as_posix()}")
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=True, download_name="uh-clipper-extension.zip",
-                     mimetype="application/zip")
-
-
 BOOKMARKLET_WRAPPER = """(() => {
 const APP = "__UH_APP__";
 __UH_SCANNER__
@@ -1079,12 +991,12 @@ setTimeout(() => window.removeEventListener("message", answer), 120000);
 
 @app.get("/api/catalog/bookmarklet")
 def clipper_bookmarklet():
-    """The bookmarklet's code: the extension's own page scanner (scan.js, the single deep
+    """The bookmarklet's code: the clipper's page scanner (clip_scan.js, the single deep
     reader) wrapped in a hand-off that opens this app and posts it what the page offered.
     The page is read from inside the browser, where it is already open — so a site whose
     bot wall answers the server's fetch with a 403 clips exactly like any other. ui.js
     fills in __UH_APP__ with its own origin and turns this into the javascript: link."""
-    scanner = (BASE / "clipper-extension" / "scan.js").read_text(encoding="utf-8")
+    scanner = (BASE / "clip_scan.js").read_text(encoding="utf-8")
     return app.response_class(BOOKMARKLET_WRAPPER.replace("__UH_SCANNER__", scanner),
                               mimetype="text/javascript")
 

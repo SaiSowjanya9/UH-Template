@@ -1819,7 +1819,7 @@ function clipStepForward() {
   } else if (clipStep === 2) {
     if (clipTab === "page" && !clipCandidate) {
       fail(clipInspectFailed
-        ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or use the browser extension."
+        ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or clip it with the 🔶 Clip to UH Homes bookmark."
         : "Find images on the page, then pick the one to save.");
       return;
     }
@@ -1865,8 +1865,8 @@ async function inspectPage() {
         $("clip-candidates").hidden = true;
         $("clip-candidates").innerHTML = "";
         $("clip-page-note").textContent = `${error.message} This site blocks server reading, so paste no address here — `
-          + "clip it from inside your browser instead: click the ✂ Clip to UH Homes bookmarklet while on that page, "
-          + "or use the browser extension (both under Get the clipper). The images and details then arrive here by "
+          + "clip it from inside your browser instead: click the 🔶 Clip to UH Homes bookmark while on that page "
+          + "(set it up under Get the clipper). The images and details then arrive here by "
           + "themselves. A screenshot in the Upload tab, or the picture's own address in the Image address tab, also work.";
         $("clip-page-note").classList.add("form-error");
         $("clip-page-note").hidden = false;
@@ -1976,7 +1976,7 @@ async function saveClip() {
   catch (error) {
     // The save itself was refused — usually the site blocking the image download too.
     // Keep the dialog open and say where to go instead of losing the work to a toast.
-    fail(`${error.message} If the site is blocking the app, clip it with the browser extension (Get the clipper), `
+    fail(`${error.message} If the site is blocking the app, clip it with the 🔶 Clip to UH Homes bookmark (Get the clipper), `
        + "or save a screenshot of the picture and use the Upload tab.");
     return;
   } finally { setBusy(false); }
@@ -2399,16 +2399,14 @@ $("assistant-dialog").addEventListener("click", (event) => {
   const open = event.target.closest("[data-insp-open]");
   if (open) { $("assistant-dialog").close(); state.view = "catalog"; render(); openInspiration(open.dataset.inspOpen); }
 });
-// The bookmarklet carries the extension's own page scanner, served by the app so the two
-// never drift. It reads the page from inside the browser and posts the result here, so a
+// The bookmarklet carries the clipper's page scanner, served by the app so the two never
+// drift. It reads the page from inside the browser and posts the result here, so a
 // site whose bot wall 403s the server's fetch clips exactly like any other. The old
 // /?clip=<url> link stands in only until the real code arrives (or if it cannot).
 let bookmarkletHref = "";
 $("catalog-clipper-open").addEventListener("click", async () => {
   $("clipper-bookmarklet").setAttribute("href",
     bookmarkletHref || `javascript:void(window.open('${location.origin}/?clip='+encodeURIComponent(location.href),'_blank'))`);
-  $("clipper-token").value = "";
-  $("clipper-copy").hidden = true;
   $("clipper-dialog").showModal();
   if (!bookmarkletHref) {
     try {
@@ -2421,16 +2419,6 @@ $("catalog-clipper-open").addEventListener("click", async () => {
   }
 });
 $("clipper-bookmarklet").addEventListener("click", (event) => { event.preventDefault(); toast("Drag this link to your bookmarks bar instead of clicking it here."); });
-$("clipper-generate").addEventListener("click", () => action(async () => {
-  const result = await api("/api/catalog/clipper-token", {});
-  $("clipper-token").value = result.token;
-  $("clipper-copy").hidden = false;
-  toast("Token generated. Paste it into the extension's setup — it expires in 90 days.");
-}));
-$("clipper-copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText($("clipper-token").value); toast("Token copied."); }
-  catch { $("clipper-token").select(); toast("Press Ctrl+C to copy the selected token.", true); }
-});
 
 refresh().then(() => {
   // An old bookmarklet opens /?clip=<page>: land on the catalog with the server reading that page.
