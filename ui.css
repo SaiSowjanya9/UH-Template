@@ -403,25 +403,37 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .signin-form .button.full { margin:6px 0 0; padding:12px 16px; border-radius:7px; font-size:12px; }
 
 /* Design inspirations: the catalog of clipped images. Image-first cards, masonry gallery. */
-.collection-strip { display:grid; grid-template-columns:repeat(auto-fill,minmax(186px,1fr)); gap:12px; margin-bottom:19px; }
-.collection-card { border:1px solid var(--line); background:#fff; border-radius:8px; overflow:hidden; text-align:left; padding:0; display:flex; flex-direction:column; transition:transform .15s,box-shadow .15s; }
-.collection-card:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(46,42,31,.1); }
-.collection-card.selected { outline:2px solid var(--gold); outline-offset:-2px; }
-.collection-cover { height:92px; background:#f3eedd; display:grid; place-items:center; color:#b4a67d; font-size:26px; overflow:hidden; }
+.collection-strip { display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:14px; margin-bottom:20px; }
+.collection-card { border:1px solid #e6ddc4; background:#fff; border-radius:14px; overflow:hidden; text-align:left; padding:0; display:flex; flex-direction:column; transition:transform .15s,box-shadow .15s,border-color .15s; }
+.collection-card:hover { transform:translateY(-3px); box-shadow:0 12px 26px rgba(46,42,31,.12); border-color:#d4c598; }
+.collection-card.selected { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold),0 10px 24px rgba(46,42,31,.12); }
+.collection-cover { position:relative; height:104px; background:linear-gradient(135deg,#f6f0dd,#ede3c6); display:grid; place-items:center; color:#b4a67d; font-size:26px; overflow:hidden; }
+.collection-cover::after { content:""; position:absolute; inset:0; box-shadow:inset 0 -1px 0 rgba(140,116,66,.18); pointer-events:none; }
 .collection-cover img { width:100%; height:100%; object-fit:cover; display:block; }
-.collection-body { padding:10px 12px 12px; display:block; }
+.collection-body { padding:12px 14px 13px; display:block; }
 .collection-body strong { display:block; font-size:12px; font-weight:600; color:#4a3f24; line-height:1.45; }
 .collection-body small { display:block; margin-top:4px; font-size:11px; color:#988e72; }
 .collection-pills { display:flex; gap:5px; margin-top:7px; }
 .collection-pills:empty { display:none; }
-.all-card .collection-cover { background:#efe5cc; }
-.catalog-panel { overflow:visible; }
-.catalog-favs { border:1px solid var(--gold-line); background:var(--cream); }
-.catalog-favs.active { background:var(--gold); color:#fff; }
-.catalog-gallery { columns:5 200px; column-gap:14px; padding:17px; }
+.all-card { border-color:#d8c79c; }
+.all-card .collection-cover { background:radial-gradient(120% 140% at 50% 0%,#4a3f27,#2a251a); color:#d8b878; }
+.all-card .collection-body strong { font-family:Georgia,serif; font-weight:400; font-size:14px; color:#3c3115; }
+/* The gallery panel wears the studio's warm wash rather than the table chrome: the
+   search strip reads as an underline field and the masonry sits in breathing room. */
+.table-panel.catalog-panel { overflow:visible; background:#f7f2e4; border-color:#e4dac0; border-radius:16px; box-shadow:0 2px 14px rgba(93,78,45,.07); }
+.catalog-panel .filters { padding:18px 22px 6px; gap:14px; }
+.catalog-panel .search-field { color:#a5915f; }
+.catalog-panel .search-field>span { font-size:19px; }
+.catalog-panel .search-field input { font-size:13px; padding:10px 0; border-bottom:1px solid #d8cba4; }
+.catalog-panel .search-field input::placeholder { color:#b3a685; }
+.catalog-panel .search-field input:focus { border-bottom-color:var(--gold); }
+.catalog-panel .filters select { font-size:11px; color:#7d7050; background:#fdfbf4; border:1px solid #ddd2b0; border-radius:999px; padding:9px 14px; max-width:190px; }
+.catalog-favs { border:1px solid #ddd2b0; background:#fdfbf4; border-radius:999px; }
+.catalog-favs.active { background:var(--gold); color:#fff; border-color:var(--gold); }
+.catalog-gallery { columns:5 200px; column-gap:16px; padding:16px 22px 22px; }
 .catalog-gallery.empty { padding:0; }
-.insp-card { position:relative; break-inside:avoid; margin:0 0 14px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#fff; cursor:pointer; transition:box-shadow .15s; }
-.insp-card:hover { box-shadow:0 10px 26px rgba(46,42,31,.14); }
+.insp-card { position:relative; break-inside:avoid; margin:0 0 16px; border:1px solid #e6ddc4; border-radius:12px; overflow:hidden; background:#fff; cursor:pointer; transition:box-shadow .15s,border-color .15s; }
+.insp-card:hover { box-shadow:0 12px 28px rgba(46,42,31,.14); border-color:#d4c598; }
 .insp-card img { width:100%; display:block; background:#f6f2e6; min-height:60px; }
 .insp-card .insp-body { padding:9px 11px 11px; }
 .insp-card .insp-body strong { display:block; font-size:12px; font-weight:600; color:#4a3f24; line-height:1.45; }
@@ -430,6 +442,11 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .insp-card:hover .insp-fav,.insp-fav.active { opacity:1; }
 .insp-fav.active { color:#984b3c; }
 .insp-fav.standalone { position:static; opacity:1; background:var(--cream); border:1px solid var(--gold-line); }
+.catalog-panel .empty-state { padding:78px 20px 84px; }
+.catalog-panel .empty-state .empty-icon { font-size:24px; margin-bottom:18px; }
+.catalog-panel .empty-state h3 { font-size:24px; margin-bottom:10px; }
+.catalog-panel .empty-state p { max-width:430px; margin:0 auto 24px; font-size:12px; }
+.empty-actions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
 .insp-head-actions { display:flex; align-items:center; gap:8px; }
 .inspiration-dialog { width:min(1020px,calc(100vw - 32px)); }
 .insp-layout { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,4fr); gap:24px; }
@@ -489,19 +506,29 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .clipper-section { border-top:1px solid var(--line); padding-top:15px; margin-top:15px; }
 .clipper-section:first-of-type { border-top:0; padding-top:0; margin-top:0; }
 .clipper-section h3 { font-size:11px; letter-spacing:1.6px; text-transform:uppercase; color:var(--muted); }
-/* The catalog's action rail: one capsule instead of four stock buttons, by request.
-   Ghost segments share hairlines, each action wears its glyph in a gold medallion, and
-   Add inspiration closes the capsule as the one gold segment. */
-.catalog-actions { gap:0; background:#fff; border:1px solid #e0d8be; border-radius:999px; overflow:hidden; box-shadow:0 2px 10px rgba(93,78,45,.08); flex-wrap:nowrap; }
-#catalog-view .section-heading { flex-wrap:wrap; gap:14px; }   /* the capsule drops whole below the heading rather than clipping */
-.catalog-actions .button { border:0; border-radius:0; min-height:46px; padding:10px 18px 10px 12px; background:transparent; color:#6b5a33; }
-.catalog-actions .button + .button { border-left:1px solid #ece4cd; }
-.catalog-actions .button:hover:not(:disabled) { transform:none; background:var(--green-soft); }
-.catalog-actions .act-ico { width:26px; height:26px; border-radius:50%; background:#f4eee1; color:var(--green); display:grid; place-items:center; font-size:12px; line-height:1; }
-.catalog-actions .button.primary { background:var(--green); color:#fff; padding-right:22px; }
-.catalog-actions .button.primary:hover { background:#6e5736; }
-.catalog-actions .button.primary .act-ico { background:rgba(255,255,255,.18); color:#fff; }
-@media (max-width:800px) { .catalog-actions { flex-wrap:wrap; border-radius:18px; } .catalog-actions .button { flex:1 1 48%; } .catalog-actions .button + .button { border-left:0; } }
+/* The inspiration library's own identity: a dark studio masthead instead of a page
+   title, the UH mark watermarked inside it, and the action rail worn dark to match.
+   The whole layout was redesigned once more by request — nothing here reuses the
+   page-heading/table chrome the other views share. */
+.catalog-hero { position:relative; display:flex; align-items:center; justify-content:space-between; gap:26px; flex-wrap:wrap; margin:0 0 22px; padding:34px 36px; border-radius:16px; overflow:hidden; background:radial-gradient(120% 160% at 88% 0%, #4a3f27 0%, #322b1d 46%, #26211a 100%); }
+.catalog-hero::before { content:""; position:absolute; inset:9px; border:1px solid rgba(216,193,144,.28); border-radius:10px; pointer-events:none; }
+.catalog-hero-mark { position:absolute; right:38px; top:50%; transform:translateY(-50%); height:96px; width:auto; opacity:.16; pointer-events:none; }
+.catalog-hero .eyebrow { color:#c9a86e; margin-bottom:10px; }
+.catalog-hero h2 { margin:0 0 8px; font-size:30px; letter-spacing:-.4px; color:#f6efdc; }
+.catalog-hero h2 em { font-style:italic; color:#d8b878; }
+.catalog-hero p { margin:0; max-width:560px; color:#c6b992; font-size:12px; line-height:1.7; }
+/* The action rail lives inside the dark masthead, so the capsule wears the hero's
+   own colors: cream-outline segments with translucent medallions, and a cream end
+   cap instead of the site-wide gold button. */
+.catalog-actions { gap:0; background:rgba(246,239,220,.06); border:1px solid rgba(216,193,144,.5); border-radius:999px; overflow:hidden; box-shadow:0 2px 14px rgba(0,0,0,.28); flex-wrap:nowrap; }
+.catalog-actions .button { border:0; border-radius:0; min-height:46px; padding:10px 17px 10px 12px; background:transparent; color:#ecdfc0; }
+.catalog-actions .button + .button { border-left:1px solid rgba(216,193,144,.28); }
+.catalog-actions .button:hover:not(:disabled) { transform:none; background:rgba(246,239,220,.12); }
+.catalog-actions .act-ico { width:26px; height:26px; border-radius:50%; background:rgba(216,193,144,.16); color:#d8b878; display:grid; place-items:center; font-size:12px; line-height:1; }
+.catalog-actions .button.primary { background:#f0e6cd; color:#33291a; padding-right:21px; }
+.catalog-actions .button.primary:hover { background:#fdf6e4; }
+.catalog-actions .button.primary .act-ico { background:#33291a; color:#e8cf96; }
+@media (max-width:800px) { .catalog-hero { padding:26px 22px; } .catalog-hero-mark { height:70px; right:20px; } .catalog-actions { flex-wrap:wrap; border-radius:18px; } .catalog-actions .button { flex:1 1 48%; } .catalog-actions .button + .button { border-left:0; } }
 /* The drag-me bookmark is the one control in the app that is picked up rather than
    clicked, so it wears its own dress: a dark ticket on a dashed gold perimeter — the
    dashes say "cut me out", the grab cursor says how. Only the link's text follows it
