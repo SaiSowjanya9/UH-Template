@@ -157,6 +157,75 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(item["Qty / Unit"], "120 sq ft")
         self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
 
+    def test_several_pictures_from_one_page_each_become_their_own_inspiration(self):
+        """A page is rarely worth one picture only: every image picked is saved as its
+        own inspiration, sharing the details reviewed once, in a single save."""
+        cid = self.make_collection()
+        shots = [picture((30, 60, 90)), picture((120, 30, 40)), picture((200, 190, 170))]
+        fetched = [(raw, "image/jpeg", f"https://example.com/{n}.jpg") for n, raw in enumerate(shots)]
+        with patch.object(catalog, "safe_fetch", side_effect=fetched):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "title": "Daltile floor",
+                                  "image_urls": [f"https://example.com/{n}.jpg" for n in range(3)],
+                                  "source_url": "https://example.com/tile"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["saved"], 3)
+        self.assertEqual(response.json["refused"], 0)
+        items = [i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]
+        self.assertEqual(len(items), 3)
+        self.assertEqual({i["Title"] for i in items}, {"Daltile floor"})       # one review, three saves
+        self.assertEqual(len({i["Image Hash"] for i in items}), 3)             # three distinct pictures
+        self.assertEqual({i["Item ID"] for i in items},
+                         {entry["item"] for entry in response.json["items"]})
+        for item in items:
+            self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
+
+    def test_a_picture_a_site_withholds_does_not_lose_the_others(self):
+        """Sites hand over some images and refuse others. The ones that came through are
+        saved and the count says what was missed, rather than the whole clip failing."""
+        cid = self.make_collection()
+        def answer(url, *args, **kwargs):
+            if url.endswith("2.jpg"):
+                raise ValidationError("That site would not hand this over to the app.")
+            return (picture((10, 20, 30) if url.endswith("1.jpg") else (90, 90, 90)), "image/jpeg", url)
+        with patch.object(catalog, "safe_fetch", side_effect=answer):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "title": "Mixed page",
+                                  "image_urls": ["https://example.com/1.jpg", "https://example.com/2.jpg",
+                                                 "https://example.com/3.jpg"]})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual((response.json["saved"], response.json["refused"]), (2, 1))
+        self.assertEqual(len([i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]), 2)
+
+    def test_several_pictures_into_a_project_write_a_line_item_each(self):
+        """Clipping three pictures onto a project's spec sheet writes that project three
+        referencing rows — one per inspiration — in the same save."""
+        cid = self.make_collection()
+        shots = [(picture((n * 40, 20, 60)), "image/jpeg", f"https://example.com/{n}.jpg") for n in range(3)]
+        with patch.object(catalog, "safe_fetch", side_effect=shots):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "title": "Green tile",
+                                  "image_urls": [f"https://example.com/{n}.jpg" for n in range(3)],
+                                  "projects": ["UH-101"], "room": "Powder Room"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(list(response.json["rows"]), ["UH-101"])
+        self.assertEqual(len(response.json["rows"]["UH-101"]), 3)
+        saved = {entry["item"] for entry in response.json["items"]}
+        rows = [r for r in self.state()["selections"] if r.get("Catalog Item ID") in saved]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({r["Room / Area"] for r in rows}, {"Powder Room"})
+
+    def test_more_pictures_than_one_clip_allows_are_refused(self):
+        """A clip is a page's worth of pictures, not a crawl: the list is capped and the
+        refusal names the limit instead of quietly saving the first few."""
+        cid = self.make_collection()
+        response = self.post("/api/catalog/clip",
+                             {"collection": cid, "title": "Too many",
+                              "image_urls": [f"https://example.com/{n}.jpg" for n in range(40)]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("24", response.json["error"])
+        self.assertEqual(self.state()["catalog"]["items"], [])
+
     def test_clipping_can_create_the_collection_in_the_same_save(self):
         with patch.object(catalog, "safe_fetch", return_value=(picture(), "image/jpeg", "https://example.com/p.jpg")):
             response = self.post("/api/catalog/clip",

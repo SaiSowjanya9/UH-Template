@@ -482,9 +482,16 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .clip-url-row input { flex:1; border:1px solid #e3dac0; border-radius:4px; background:#fff; padding:10px 11px; font-size:13px; color:#4a4028; min-width:0; }
 .clip-candidates { display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:8px; max-height:264px; overflow-y:auto; padding:2px; }
 .clip-candidate-box { position:relative; }
-.clip-candidate { border:2px solid transparent; border-radius:6px; overflow:hidden; background:#f6f2e6; padding:0; height:96px; width:100%; display:block; }
+.clip-candidate { position:relative; border:2px solid transparent; border-radius:6px; overflow:hidden; background:#f6f2e6; padding:0; height:96px; width:100%; display:block; }
 .clip-candidate img { width:100%; height:100%; object-fit:cover; display:block; }
 .clip-candidate.selected { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold); }
+/* Several pictures can be kept from one page, so a tile shows its place in the order it
+   will be saved in rather than a plain highlight. */
+.clip-candidate-tick:empty { display:none; }
+.clip-candidate-tick { position:absolute; left:5px; bottom:5px; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:var(--gold); color:#fff; font-size:11px; font-weight:700; display:grid; place-items:center; box-shadow:0 1px 4px rgba(0,0,0,.3); }
+.clip-candidate.selected img { filter:saturate(1.05); }
+.clip-candidate-zoom { position:absolute; right:5px; bottom:5px; width:20px; height:20px; border:0; border-radius:50%; background:rgba(42,38,29,.82); color:#f6efdc; font-size:11px; line-height:1; padding:0; display:grid; place-items:center; cursor:zoom-in; box-shadow:0 1px 4px rgba(0,0,0,.3); }
+.clip-candidate-zoom:hover { background:#2a261d; }
 /* The × that removes a tile from the choices: red by request, unmissable on any image. */
 .clip-candidate-x { position:absolute; top:5px; right:5px; width:20px; height:20px; border:0; border-radius:50%; background:#b0432f; color:#fff; font-size:13px; line-height:1; padding:0; display:grid; place-items:center; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.3); }
 .clip-candidate-x:hover { background:#8f3524; }

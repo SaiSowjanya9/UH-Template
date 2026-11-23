@@ -787,6 +787,27 @@ def catalog_item_rows(wb, item, projects, extra):
     return rows
 
 
+CLIP_IMAGE_MAX = 24          # a page's worth of pictures, not a crawl of the whole site
+
+
+def clip_image_urls(data):
+    """The pictures one clip asks for: `image_urls` when several were picked out of a
+    page, `image_url` for the single address the Image address tab sends."""
+    urls = data.get("image_urls")
+    if urls is None:
+        urls = [data.get("image_url")] if common.clean(data.get("image_url")) else []
+    if isinstance(urls, str):
+        urls = [urls]
+    if not isinstance(urls, list):
+        raise ValidationError("Send the images as a list of addresses.")
+    urls = list(dict.fromkeys(common.clean(u) for u in urls if common.clean(u)))
+    if not urls:
+        raise ValidationError("Clip an image: pick one from the page, paste an image address, or upload a file.")
+    if len(urls) > CLIP_IMAGE_MAX:
+        raise ValidationError(f"Pick up to {CLIP_IMAGE_MAX} images at a time.")
+    return urls
+
+
 def clip_projects(data):
     """The projects a clip asks to land on, cleaned: a list from JSON, a comma-separated
     string from a form, nothing from a plain clip."""
@@ -798,11 +819,13 @@ def clip_projects(data):
     return [common.clean(p) for p in projects if common.clean(p)]
 
 
-def finish_clip(raw, meta, data):
-    """Process, store and record one clipped image; shared by the upload and URL clip
-    paths. `projects` sends the new item straight onto those projects' spec sheets
-    (one referencing Selections row each) in the same save."""
-    processed = catalog.process_image(raw)
+def finish_clip(raw, meta, data, refused=0):
+    """Process, store and record the clipped images; shared by the upload and URL clip
+    paths. A page usually offers several pictures worth keeping, so this takes one image
+    or a list and makes each its own saved inspiration, all in a single save. `projects`
+    sends every new item straight onto those projects' spec sheets (one referencing
+    Selections row each), so `rows` lists the rows written per project."""
+    processed = [catalog.process_image(one) for one in (raw if isinstance(raw, list) else [raw])]
     user = catalog_user()
     projects = clip_projects(data)
     room = common.clean(data.get("room"))[:200]
@@ -814,18 +837,28 @@ def finish_clip(raw, meta, data):
             _, created = catalog.save_collection(wb, {"values": {"Name": common.clean(data.get("new_collection"))}},
                                                  user, REQUIRE_LOGIN)
             collection_id = created
-        item_id, image_name, thumb_name, new_file = catalog.add_item(
-            wb, collection_id, processed, meta, user, REQUIRE_LOGIN)
-        rows = {}
-        if projects:
-            item = catalog.viewable_item(wb, item_id, user, REQUIRE_LOGIN)
-            rows = catalog_item_rows(wb, item, projects, {"Room / Area": room})
-        if new_file:
-            catalog.store_processed(store, processed)
-        note = f"catalog: clip {meta.get('title') or item_id}"
+        items, rows, pending = [], {}, []
+        for one in processed:
+            item_id, image_name, thumb_name, new_file = catalog.add_item(
+                wb, collection_id, one, meta, user, REQUIRE_LOGIN)
+            items.append({"item": item_id, "image": image_name, "thumb": thumb_name})
+            if projects:
+                item = catalog.viewable_item(wb, item_id, user, REQUIRE_LOGIN)
+                for project_id, row in catalog_item_rows(wb, item, projects, {"Room / Area": room}).items():
+                    rows.setdefault(project_id, []).append(row)
+            if new_file:
+                pending.append(one)
+        # the files are stored only once every picture has earned its place in the workbook,
+        # so a refusal halfway through leaves no image behind that nothing refers to
+        for one in pending:
+            catalog.store_processed(store, one)
+        note = f"catalog: clip {meta.get('title') or items[0]['item']}"
+        if len(items) > 1:
+            note += f" ({len(items)} images)"
         store.save(wb, revision, note + (f" into {len(rows)} project(s)" if rows else ""))
-    return jsonify(ok=True, item=item_id, collection=collection_id, new_collection=created,
-                   image=image_name, thumb=thumb_name, rows=rows)
+    return jsonify(ok=True, item=items[0]["item"], collection=collection_id, new_collection=created,
+                   image=items[0]["image"], thumb=items[0]["thumb"],
+                   items=items, saved=len(items), refused=refused, rows=rows)
 
 
 @app.post("/api/catalog/collections")
@@ -898,17 +931,24 @@ def clip_inspect():
 
 @app.post("/api/catalog/clip")
 def catalog_clip():
-    """Save one inspiration: an image the server downloads from the chosen address."""
+    """Save an inspiration per chosen picture: the images the server downloads from the
+    chosen addresses. One page often holds several worth keeping, so the dialog sends
+    every image that was picked and each becomes its own saved inspiration."""
     throttle_clips()
     data = request.get_json(silent=True) or {}
     meta = clip_meta(data)
-    if common.clean(data.get("image_url")):
-        raw = catalog.fetch_image(data["image_url"])
-        if not meta.get("source_url"):
-            meta["source_url"] = common.clean(data.get("image_url"))
-    else:
-        raise ValidationError("Clip an image: pick one from the page, paste an image address, or upload a file.")
-    return finish_clip(raw, meta, data)
+    urls = clip_image_urls(data)
+    raws, blocked = [], None
+    for url in urls:
+        try:
+            raws.append(catalog.fetch_image(url))
+        except ValidationError as error:
+            blocked = blocked or error      # one picture a site withholds must not lose the rest
+    if not raws:
+        raise blocked
+    if not meta.get("source_url"):
+        meta["source_url"] = urls[0]
+    return finish_clip(raws, meta, data, refused=len(urls) - len(raws))
 
 
 @app.get("/api/catalog/images/<name>")

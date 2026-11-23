@@ -1680,7 +1680,9 @@ document.addEventListener("click", (event) => {
 const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], approvals: [], ai: false, user: "", shared_accounts: false };
 let catCollectionId = "";          // "" = all inspirations
 let catFavsOnly = false;
-let clipTab = "page", clipCandidate = null, clipFile = null, clipInspected = null, clipInspectFailed = false;
+// A page is rarely worth one picture only, so the capture step keeps a list: every image
+// clicked is saved as its own inspiration, sharing the details reviewed in step 3.
+let clipTab = "page", clipPicks = [], clipFile = null, clipInspected = null, clipInspectFailed = false;
 
 const catImage = (name) => `/api/catalog/images/${encodeURIComponent(name || "")}`;
 const catItem = (id) => cat().items.find((i) => i["Item ID"] === id);
@@ -1785,12 +1787,18 @@ function setClipTab(tab) {
   updateClipChosen();
 }
 
+const clipCount = () => (clipTab === "page" ? clipPicks.length : 1);
+const pictures = (n) => `${n} picture${n === 1 ? "" : "s"}`;
+
 function updateClipChosen() {
+  const picked = clipPicks.length;
   $("clip-chosen").textContent = clipStep === 1 ? "Step 1 of 3 — choose where it files."
-    : clipStep === 3 ? "Step 3 of 3 — review the details, then save."
-    : clipTab === "page" ? (clipCandidate ? "Image selected from the page." : "Find images, then pick one to preview.")
+    : clipStep === 3 ? (clipCount() === 1 ? "Step 3 of 3 — review the details, then save."
+      : `Step 3 of 3 — these details go on all ${clipCount()} inspirations.`)
+    : clipTab === "page" ? (picked ? `${pictures(picked)} selected — click more, or Continue.` : "Find images, then click every picture you want.")
     : clipTab === "image" ? "The image at that address will be saved."
     : (clipFile ? `Ready to upload ${clipFile.name}.` : "Choose an image file to upload.");
+  $("clip-save").textContent = clipCount() > 1 ? `Save ${clipCount()} inspirations` : "Save inspiration";
 }
 
 // The clip dialog walks three steps: collection first, then capture, then review and save.
@@ -1817,10 +1825,10 @@ function clipStepForward() {
     if ($("clip-collection").value === "__new" && !$("clip-new-collection").value.trim()) { fail("Name the new collection first."); return; }
     setClipStep(2);
   } else if (clipStep === 2) {
-    if (clipTab === "page" && !clipCandidate) {
+    if (clipTab === "page" && !clipPicks.length) {
       fail(clipInspectFailed
         ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or clip it with the Clip to UH Homes bookmark."
-        : "Find images on the page, then pick the one to save.");
+        : "Click the pictures you want to save — one, or as many as you like.");
       return;
     }
     if (clipTab === "image" && !$("clip-image-url").value.trim()) { fail("Paste the image's address first."); return; }
@@ -1830,7 +1838,7 @@ function clipStepForward() {
 }
 
 function openClip(pageUrl) {
-  clipCandidate = null; clipFile = null; clipInspected = null; clipInspectFailed = false;
+  clipPicks = []; clipFile = null; clipInspected = null; clipInspectFailed = false;
   $("clip-page-note").classList.remove("form-error");
   for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size", "clip-link", "clip-qty"]) $(id).value = "";
   $("clip-file-name").textContent = "";
@@ -1861,7 +1869,7 @@ async function inspectPage() {
       } catch {
         // The site refused or could not be read. No error codes here — just the flow
         // that works for a page like this, inside the dialog where the person is looking.
-        clipInspected = null; clipCandidate = null; clipInspectFailed = true;
+        clipInspected = null; clipPicks = []; clipInspectFailed = true;
         $("clip-candidates").hidden = true;
         $("clip-candidates").innerHTML = "";
         $("clip-page-note").textContent = "This page prefers to be clipped with your Clip to UH Homes bookmark: "
@@ -1881,7 +1889,7 @@ async function inspectPage() {
 // What a read page looks like in the dialog, wherever the reading happened: the server's
 // inspect or the bookmarklet's in-browser scan both land here.
 function showInspected(result, how = "found on") {
-  clipInspected = result; clipCandidate = null; clipInspectFailed = false;
+  clipInspected = result; clipPicks = []; clipInspectFailed = false;
   $("clip-page-note").classList.remove("form-error");
   // Fill every default field the page offers, leaving anything already typed alone.
   for (const [id, key] of [["clip-title", "title"], ["clip-description", "description"], ["clip-price", "price"],
@@ -1890,29 +1898,39 @@ function showInspected(result, how = "found on") {
     if (!$(id).value) $(id).value = result[key] || "";
   }
   $("clip-page-note").textContent = result.images.length
-    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — pick the one to save, or × away the ones that don't belong.`
+    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — click every picture you want to keep (one or several), × away the rest, ⤢ to see one large.`
     : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
   $("clip-page-note").hidden = false;
   renderClipCandidates();
   updateClipChosen();
 }
 
-// The candidate grid. Each tile pairs the image (click to preview) with a × that removes
-// it from the choices — read pages bring banners and related products along, and clearing
-// them out leaves only the images worth comparing. Removing is this dialog's view only:
-// nothing is saved until one image is chosen and saved.
+// The candidate grid. Clicking a tile keeps that picture — as many as the page is worth,
+// each saved as its own inspiration — ⤢ opens it large, and × drops it from the choices,
+// since read pages bring banners and related products along. Both the keeping and the
+// removing live in this dialog only: nothing is written until Save.
 function renderClipCandidates() {
   const images = clipInspected?.images || [];
   $("clip-candidates").hidden = !images.length;
-  $("clip-candidates").innerHTML = images.map((img, index) => `<div class="clip-candidate-box">
-      <button type="button" class="clip-candidate" data-candidate="${index}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"></button>
+  $("clip-candidates").innerHTML = images.map((img, index) => {
+    const at = clipPicks.indexOf(img);
+    return `<div class="clip-candidate-box">
+      <button type="button" class="clip-candidate ${at < 0 ? "" : "selected"}" data-candidate="${index}" aria-pressed="${at >= 0}" title="${esc(img.alt || img.url)}"><img src="${esc(img.url)}" alt="${esc(img.alt || "Candidate image")}" loading="lazy" referrerpolicy="no-referrer"><span class="clip-candidate-tick" aria-hidden="true">${at < 0 ? "" : at + 1}</span></button>
+      <button type="button" class="clip-candidate-zoom" data-preview="${index}" title="See this image large" aria-label="See this image large">⤢</button>
       <button type="button" class="clip-candidate-x" data-dismiss="${index}" title="Remove this image from the choices" aria-label="Remove this image from the choices">×</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   $("clip-candidates").querySelectorAll("img").forEach((img) => img.addEventListener("error", () => { img.closest(".clip-candidate-box").hidden = true; }));
-  if (clipCandidate) {
-    $("clip-candidates").querySelectorAll(".clip-candidate")
-      .forEach((b) => b.classList.toggle("selected", images[Number(b.dataset.candidate)] === clipCandidate));
-  }
+}
+
+// Keep or drop one picture, by the object itself: the grid is re-rendered around it.
+function toggleClipPick(image) {
+  if (!image) return;
+  const at = clipPicks.indexOf(image);
+  if (at < 0) clipPicks.push(image); else clipPicks.splice(at, 1);
+  if (image.alt && !$("clip-title").value && clipPicks.length === 1) $("clip-title").value = image.alt;
+  renderClipCandidates();
+  updateClipChosen();
 }
 
 // A page handed over by the bookmarklet: everything its in-browser scan read, validated
@@ -1961,8 +1979,8 @@ async function saveClip() {
   } else {
     const body = { ...meta, collection, new_collection: newName };
     if (clipTab === "page") {
-      if (!clipCandidate) { fail("Find images on the page, then pick the one to save."); return; }
-      body.image_url = clipCandidate.url;
+      if (!clipPicks.length) { fail("Click the pictures you want to save — one, or as many as you like."); return; }
+      body.image_urls = clipPicks.map((image) => image.url);
       body.source_url = body.source_url || $("clip-page-url").value.trim();
       body.source_site = clipInspected?.site || "";
     } else {
@@ -1971,8 +1989,9 @@ async function saveClip() {
     }
     request = api("/api/catalog/clip", body);
   }
-  setBusy(true, "Saving the inspiration…");
-  try { await request; }
+  setBusy(true, clipCount() > 1 ? `Saving ${clipCount()} inspirations…` : "Saving the inspiration…");
+  let result;
+  try { result = await request; }
   catch (error) {
     // The save itself was refused — usually the site blocking the image download too.
     // Keep the dialog open and say where to go instead of losing the work to a toast.
@@ -1982,7 +2001,10 @@ async function saveClip() {
   } finally { setBusy(false); }
   $("clip-dialog").close();
   state.view = "catalog";
-  await action(async () => { await refresh(); toast("Inspiration saved to your collection."); });
+  // Some sites hand over one picture and withhold another; say so rather than quietly saving fewer.
+  const saved = Number(result?.saved) || 1, missed = Number(result?.refused) || 0;
+  const said = saved === 1 ? "Inspiration saved to your collection." : `${saved} inspirations saved to your collection.`;
+  await action(async () => { await refresh(); toast(missed ? `${said} ${pictures(missed)} could not be downloaded.` : said); });
 }
 
 // --- Inspiration detail ------------------------------------------------------
@@ -2302,7 +2324,7 @@ $("catalog-gallery").addEventListener("keydown", (event) => {
 document.querySelectorAll("[data-clip-tab]").forEach((button) => button.addEventListener("click", () => setClipTab(button.dataset.clipTab)));
 $("clip-inspect").addEventListener("click", inspectPage);
 $("clip-page-url").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); inspectPage(); } });
-// A clicked thumbnail opens the lightbox; "Use this image" is what actually selects it.
+// A tile's ⤢ opens the lightbox; "Keep this image" adds that picture to the save list.
 let clipPreview = -1;
 
 function showClipPreview(index) {
@@ -2321,24 +2343,25 @@ $("clip-candidates").addEventListener("click", (event) => {
   const cross = event.target.closest("[data-dismiss]");
   if (cross && clipInspected) {
     const [removed] = clipInspected.images.splice(Number(cross.dataset.dismiss), 1);
-    if (clipCandidate === removed) { clipCandidate = null; updateClipChosen(); }
+    const kept = clipPicks.indexOf(removed);
+    if (kept >= 0) clipPicks.splice(kept, 1);     // a dropped picture cannot stay on the save list
     renderClipCandidates();
+    updateClipChosen();
     if (!clipInspected.images.length) {
       $("clip-page-note").textContent = "Every image was removed — Find images (or the bookmarklet) brings them back.";
       $("clip-page-note").hidden = false;
     }
     return;
   }
+  const zoom = event.target.closest("[data-preview]");
+  if (zoom) { showClipPreview(Number(zoom.dataset.preview)); return; }
   const button = event.target.closest("[data-candidate]");
-  if (button) showClipPreview(Number(button.dataset.candidate));
+  if (button) toggleClipPick(clipInspected?.images[Number(button.dataset.candidate)]);
 });
 $("clip-lightbox-use").addEventListener("click", () => {
-  clipCandidate = clipInspected?.images[clipPreview] || null;
-  $("clip-candidates").querySelectorAll(".clip-candidate").forEach((b) => b.classList.toggle("selected", Number(b.dataset.candidate) === clipPreview));
-  if (clipCandidate?.alt && !$("clip-title").value) $("clip-title").value = clipCandidate.alt;
-  updateClipChosen();
+  const image = clipInspected?.images[clipPreview];
+  if (image && clipPicks.indexOf(image) < 0) toggleClipPick(image);
   $("clip-lightbox").close();
-  if (clipStep === 2 && clipCandidate) clipStepForward();   // the image is chosen — on to review
 });
 $("clip-lightbox-prev").addEventListener("click", () => showClipPreview(clipPreview - 1));
 $("clip-lightbox-next").addEventListener("click", () => showClipPreview(clipPreview + 1));
