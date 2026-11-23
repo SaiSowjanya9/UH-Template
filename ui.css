@@ -539,15 +539,15 @@ tr.drop-after td { box-shadow:inset 0 -2px 0 var(--gold); }
 .catalog-actions .button.primary:hover { background:#fdf6e4; }
 .catalog-actions .button.primary .act-ico { background:#33291a; color:#e8cf96; }
 @media (max-width:800px) { .catalog-hero { padding:26px 22px; } .catalog-hero-mark { height:70px; right:20px; } .catalog-actions { flex-wrap:wrap; border-radius:18px; } .catalog-actions .button { flex:1 1 48%; } .catalog-actions .button + .button { border-left:0; } }
-/* The drag-me bookmark is the one control in the app that is picked up rather than
-   clicked, so it wears its own dress: a dark ticket on a dashed gold perimeter — the
-   dashes say "cut me out", the grab cursor says how. Only the link's text follows it
-   into the bookmarks bar, so the anchor holds nothing but the symbol and the name. */
+/* The clipper download wears its own dress — a dark ticket on a dashed gold perimeter,
+   the dashes saying "cut me out" — but it is clicked, never dragged: dragging it onto
+   the bar only bookmarks this download page, globe and all. Hence the plain pointer
+   and the hint beside it. */
 .bookmarklet-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-.bookmarklet-pill { display:inline-flex; align-items:center; gap:10px; padding:11px 20px; background:linear-gradient(135deg,#2a261d 0%,#453a26 100%); color:#f3e9d2; border:1.5px dashed var(--gold); border-radius:999px; font-weight:600; font-size:13px; letter-spacing:.5px; text-decoration:none; cursor:grab; box-shadow:0 3px 12px rgba(42,38,29,.28); }
+.bookmarklet-pill { display:inline-flex; align-items:center; gap:10px; padding:11px 20px; background:linear-gradient(135deg,#2a261d 0%,#453a26 100%); color:#f3e9d2; border:1.5px dashed var(--gold); border-radius:999px; font-weight:600; font-size:13px; letter-spacing:.5px; text-decoration:none; cursor:pointer; box-shadow:0 3px 12px rgba(42,38,29,.28); -webkit-user-drag:none; user-select:none; }
 .bookmarklet-pill:hover { transform:translateY(-1px); box-shadow:0 5px 16px rgba(42,38,29,.38); color:#fff; }
-.bookmarklet-pill:active { cursor:grabbing; }
 .bookmarklet-mark { height:16px; width:auto; }
+.bookmarklet-hint { font-size:11px; color:var(--muted); letter-spacing:.5px; text-transform:uppercase; }
 .clipper-steps { margin:14px 0 0; padding-left:18px; color:var(--muted); font-size:12px; line-height:1.8; }
 .clipper-steps b { color:#6b5a33; }
 @media (max-width:860px) { .insp-layout { grid-template-columns:1fr; } .inspiration-dialog { padding:20px; } }

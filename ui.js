@@ -2427,6 +2427,13 @@ $("assistant-dialog").addEventListener("click", (event) => {
 // the page from inside the browser and posts the result here, so a site whose bot wall
 // 403s the server's fetch clips exactly like any other.
 $("catalog-clipper-open").addEventListener("click", () => $("clipper-dialog").showModal());
+// Dragging the download onto the bar bookmarks this page instead of the clipper, so the
+// link refuses to be dragged and says what to do with the file it just saved.
+$("clipper-download").addEventListener("dragstart", (event) => {
+  event.preventDefault();
+  toast("Click this to download the file, then import it — step 1 below.", true);
+});
+$("clipper-download").addEventListener("click", () => toast("Downloaded. Now import it: Ctrl+Shift+O → ⋮ menu → Import bookmarks."));
 
 refresh().then(() => {
   // An old bookmarklet opens /?clip=<page>: land on the catalog with the server reading that page.
