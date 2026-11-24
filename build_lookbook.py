@@ -437,20 +437,38 @@ def group_sections(rows, hidden=()):
 SPEC_GROUPS = ("Room / Area", "Section")
 
 
+def is_details_row(row):
+    """A row carrying the home's own figures rather than a line item.
+
+    The figures answer to the project, so a `PROJECT` heading in either grouping column
+    marks them: areas and porch counts are no more a category than they are a room, and
+    grouping the sheet by category used to file them away as ordinary line items under
+    whatever category they happened to carry.
+    """
+    return any(is_details_group(row.get(field)) for field in SPEC_GROUPS)
+
+
 def spec_groups(rows, group="Room / Area", hidden=(), room_order=()):
     """Rows under the heading the spec sheet is grouped by on screen.
 
-    When *room_order* is given and the grouping is by room, the headings print in that
-    order.  Unknown rooms sort after the listed ones, keeping their line-item order
-    among themselves.  The line items inside each room stay in workspace order.
+    The home's own figures lead the sheet as their own `PROJECT` group whichever way it
+    is grouped, and never appear among the line items.  When *room_order* is given and
+    the grouping is by room, the headings print in that order.  Unknown rooms sort after
+    the listed ones, keeping their line-item order among themselves.  The line items
+    inside each room stay in workspace order.
     """
     if group not in SPEC_GROUPS:
         raise ValueError(f"Group the spec sheet by one of: {', '.join(SPEC_GROUPS)}.")
-    if group in hidden:
-        return OrderedDict([("", list(rows))])
-    placeholder = "Other" if group == "Section" else "Unassigned"
+    details = [row for row in rows if is_details_row(row)]
+    lines = [row for row in rows if not is_details_row(row)]
     groups = OrderedDict()
-    for row in rows:
+    if details:
+        groups[DETAILS_GROUP] = details
+    if group in hidden:
+        groups[""] = lines
+        return groups
+    placeholder = "Other" if group == "Section" else "Unassigned"
+    for row in lines:
         groups.setdefault(clean(row.get(group)) or placeholder, []).append(row)
     if room_order and group == "Room / Area":
         order = list(room_order)

@@ -15,7 +15,13 @@ const groupLabel = () => (state.specGroup === "Section" ? "category" : "room");
 // A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 // not line items, so it is drawn like the client details box above the cards instead of as
 // a table, matching the spec-sheet exports (DETAILS_GROUP in build_lookbook.py).
-const isDetailsGroup = (name) => String(name || "").trim().toUpperCase() === "PROJECT";
+const DETAILS_GROUP = "PROJECT";
+const isDetailsGroup = (name) => String(name || "").trim().toUpperCase() === DETAILS_GROUP;
+// Those figures answer to the project rather than to a room or a category, so a PROJECT
+// heading in either column names them and they lead the sheet as their own card whichever
+// chip is active - grouping by category used to scatter them among the line items.
+const SPEC_GROUP_FIELDS = ["Room / Area", "Section"];
+const isDetailsRow = (row) => SPEC_GROUP_FIELDS.some((field) => isDetailsGroup(row[field]));
 const isBulkGroup = (name) => { const n = String(name || "").trim(); return n === "Entire Home" || n === "Whole House"; };
 // A room is not a record of its own: it is on the sheet because line items name it. So a room
 // added from the toolbar is held here - the project and field it belongs to, with the heading
@@ -359,8 +365,12 @@ const lineTotal = (row) => (Number(row["Unit Price"]) || 0) * (Number(row.Qty) |
 function specGroups(rows) {
   const key = state.specGroup, placeholder = specPlaceholder();
   const groups = new Map();
-  for (const row of rows) groups.set(row[key] || placeholder, []);
-  for (const row of rows) groups.get(row[key] || placeholder).push(row);
+  // The home's own figures are their own card under either chip, and never a line item
+  // in a room or a category; everything else is grouped by the column the chip names.
+  const details = rows.filter(isDetailsRow), lines = rows.filter((row) => !isDetailsRow(row));
+  if (details.length) groups.set(DETAILS_GROUP, details);
+  for (const row of lines) groups.set(row[key] || placeholder, []);
+  for (const row of lines) groups.get(row[key] || placeholder).push(row);
   // A heading held in the browser has no line items yet, so it joins the sheet as an empty group;
   // once a line item names it, the workspace is what puts it on screen. A card somebody dragged
   // into place remembers the heading it follows - null says it leads the sheet - and a held

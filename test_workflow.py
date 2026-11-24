@@ -660,6 +660,48 @@ class AppTests(unittest.TestCase):
         for row in rows[:3]:
             self.assertIn(row["Item"].upper(), word, row["Item"])
 
+    def test_the_project_figures_lead_the_sheet_grouped_by_category_too(self):
+        """A home's areas and porch counts are no more a category than they are a room.
+
+        Grouped by category they were filed among the line items under whatever category
+        they happened to carry, so that download had no details box at all - the figures
+        read as a few nameless rows in somebody else's table. They lead the sheet as their
+        own box under either grouping now, and the line items keep their table.
+        """
+        from pypdf import PdfReader
+        pid = self.state()["projects"][0]["Project ID"]
+        rows = [r for r in self.state()["selections"] if r["Project ID"] == pid]
+        named = {rows[0]["_row"]: "Conditioned area, first floor", rows[1]["_row"]: "Open terrace"}
+        category = self.state()["sections"][0]
+        wb, revision = self.store.snapshot()
+        sheet = common.Sheet(wb["Selections"])
+        for row, data in sheet.rows():
+            if row in named:
+                sheet.set(row, "Room / Area", "PROJECT")
+                sheet.set(row, "Section", category)     # a category it must not be filed under
+                sheet.set(row, "Item", named[row])
+        self.store.save(wb, revision)
+
+        for query in ("", "&group=Section"):
+            grouped = f"grouped by {'category' if query else 'room'}"
+            pdf = self.client.get(f"/api/selections/pdf?project={pid}{query}")
+            self.assertEqual(pdf.status_code, 200, grouped)
+            printed = {
+                "PDF": " ".join(" ".join(page.extract_text()
+                                         for page in PdfReader(io.BytesIO(pdf.data)).pages).split()),
+                "Word": " ".join(docx_text(
+                    self.client.get(f"/api/selections/docx?project={pid}{query}").data).split()),
+            }
+            for copy, text in printed.items():
+                self.assertIn("CONDITIONED AREA, FIRST FLOOR", text,
+                              f"the {copy} sheet {grouped} lost the figures box")
+                self.assertNotIn("Conditioned area, first floor", text,
+                                 f"a figure prints as a line item on the {copy} sheet {grouped}")
+                self.assertIn("MANUFACTURER", text,
+                              f"the line items lost their table on the {copy} sheet {grouped}")
+                self.assertLess(text.index("CONDITIONED AREA"), text.index("MANUFACTURER"),
+                                f"the figures do not lead the {copy} sheet {grouped}")
+
     def test_spec_exports_keep_the_order_the_view_shows(self):
         """A download must read top to bottom like the screen, which is workspace order.
 

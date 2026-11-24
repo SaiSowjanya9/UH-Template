@@ -438,6 +438,15 @@ class BrowserTests(unittest.TestCase):
                         name = box.locator(".spec-detail .detail-name").first
                         expect(name).to_have_value("Conditioned area, first floor")
 
+                        # the figures answer to the project, so they stay one box leading the
+                        # sheet when it is grouped by category rather than by room
+                        page.locator('#spec-view .chip[data-group="Section"]').click()
+                        expect(page.locator(".spec-card-head h3").first).to_have_text("PROJECT")
+                        expect(card.locator(".spec-details-box .spec-detail")).to_have_count(2)
+                        expect(card.locator(".spec-table")).to_have_count(0)
+                        page.locator('#spec-view .chip[data-group="Room / Area"]').click()
+                        expect(box.locator(".spec-detail")).to_have_count(2)
+
                         # an edit in the box saves like any spec cell
                         name.fill("Heated area")
                         name.blur()
