@@ -84,23 +84,30 @@ COVER_NAME = re.compile(r"^cover-[A-Za-z0-9_-]{1,50}\.(png|jpg)$")
 # sheets so they inherit validation, revision conflicts and backups like every other record.
 # Image bytes never enter the workbook: they live beside it (./catalog locally, catalog/ in
 # the hosted bucket) under hash-derived names the Image File / Thumb File cells point at.
+# One product is one inspiration, however many pictures of it were clipped: Image File /
+# Thumb File / Image Hash are its cover, and Image Files / Thumb Files list every picture
+# in order, cover first, so an item saved before a second picture was possible still reads
+# back as the one-picture item it is.
 CATALOG_COLLECTION_SHEET = "Catalog Collections"
 CATALOG_ITEM_SHEET = "Catalog Items"
 CATALOG_COMMENT_SHEET = "Catalog Comments"
 CATALOG_SHEETS = {
     CATALOG_COLLECTION_SHEET: ["Collection ID", "Name", "Description", "Cover Image",
                                "Owner", "Created", "Updated"],
-    CATALOG_ITEM_SHEET: ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags",
+    CATALOG_ITEM_SHEET: ["Item ID", "Collection ID", "Title", "Description", "Notes",
                          "Category", "Source URL", "Source Site", "Image File", "Thumb File",
-                         "Image Hash", "Colors", "Materials", "Favorite", "Approval",
+                         "Image Files", "Thumb Files",
+                         "Image Hash", "Colors", "Favorite", "Approval",
                          "Saved By", "Saved On", "Updated", "Price", "Brand",
                          "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"],
     CATALOG_COMMENT_SHEET: ["Comment ID", "Item ID", "Author", "Comment", "Created"],
 }
-# The retired per-collection visibility feature: its columns are removed when seen, so a
-# workspace saved before the removal reads back like one saved after. Catalog sheets carry
-# no validations or hyperlinks, so deleting a column shifts nothing that needs rebuilding.
-RETIRED_CATALOG_FIELDS = {CATALOG_COLLECTION_SHEET: ["Privacy", "Shared With"]}
+# Retired catalog columns: per-collection visibility, and the Tags and Materials an
+# inspiration used to carry. They are removed when seen, so a workspace saved before the
+# removal reads back like one saved after. Catalog sheets carry no validations or
+# hyperlinks, so deleting a column shifts nothing that needs rebuilding.
+RETIRED_CATALOG_FIELDS = {CATALOG_COLLECTION_SHEET: ["Privacy", "Shared With"],
+                          CATALOG_ITEM_SHEET: ["Tags", "Materials"]}
 CATALOG_IMAGE_NAME = re.compile(r"^cat-[0-9a-f]{16}(-thumb)?\.(png|jpg)$")
 LINK_COLOR = "0563C1"           # Excel's own hyperlink blue
 # Numeric input columns: (maximum, message)

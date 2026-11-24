@@ -1435,8 +1435,8 @@ class BrowserTests(unittest.TestCase):
         its ticket is a javascript: link carrying the page scanner itself. Clicking that
         code on a product page reads the page inside the browser - no server fetch of the
         page at all, so a bot-walled store clips like any other - and hands its pictures
-        and its details to the clip dialog, where several pictures are picked at once and
-        saved as an inspiration each."""
+        and its details to the clip dialog, where both pictures are picked at once and
+        saved as the one inspiration they are two views of."""
         with tempfile.TemporaryDirectory() as folder:
             workspace = Path(folder) / "clipper.xlsx"
             shutil.copy2(app.common.WORKSPACE, workspace)
@@ -1505,11 +1505,22 @@ class BrowserTests(unittest.TestCase):
                         tiles.nth(1).click()
                         expect(clipped.locator("#clip-chosen")).to_contain_text("2 pictures selected")
                         clipped.locator("#clip-next").click()
-                        expect(clipped.locator("#clip-save")).to_have_text("Save 2 inspirations")
+                        expect(clipped.locator("#clip-save")).to_have_text("Save inspiration (2 pictures)")
                         clipped.locator("#clip-save").click()
                         expect(clipped.locator("#clip-dialog")).not_to_be_visible(timeout=30000)
-                        expect(clipped.locator("#toast")).to_contain_text("2 inspirations saved")
-                        expect(clipped.locator('.insp-card:has-text("Brass Bridge Faucet")')).to_have_count(2)
+                        expect(clipped.locator("#toast")).to_contain_text("Inspiration saved with 2 pictures")
+                        # one product, one card - and the second picture waiting inside it
+                        card = clipped.locator('.insp-card:has-text("Brass Bridge Faucet")')
+                        expect(card).to_have_count(1)
+                        expect(card.locator(".insp-count")).to_have_text("2 pictures")
+                        clipped.screenshot(path=str(output / "clipped-gallery.png"))
+                        card.click()
+                        expect(clipped.locator(".insp-strip-shot")).to_have_count(2)
+                        main = clipped.locator("#insp-main-image")
+                        cover = main.get_attribute("src")
+                        clipped.locator(".insp-strip-shot").nth(1).click()
+                        expect(main).not_to_have_attribute("src", cover)
+                        clipped.screenshot(path=str(output / "clipped-inspiration.png"))
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:

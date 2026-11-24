@@ -5,11 +5,11 @@
 // their product details — structured data first, then meta tags and microdata, then the
 // visible spec tables, definition lists and labelled rows most stores hide the specifics
 // in, and finally the page's own text for a price — so a page with no structured data at
-// all still hands over its brand, SKU, dimensions, materials and price.
+// all still hands over its brand, SKU, dimensions and price.
 window.__uhCollect = () => {
   const clean = (text) => String(text || "").replace(/\s+/g, " ").trim();
   const meta = (name) => clean(document.querySelector(`meta[property="${name}"], meta[name="${name}"]`)?.content);
-  const LIMITS = { price: 50, brand: 200, model: 100, finish: 200, size: 200, materials: 500, description: 2000 };
+  const LIMITS = { price: 50, brand: 200, model: 100, finish: 200, size: 200, description: 2000 };
   const product = {};
   const found = (field, value) => {
     value = clean(value);
@@ -32,7 +32,6 @@ window.__uhCollect = () => {
       found("model", clean(node.sku || node.mpn) || nameOf(node.model));
       found("finish", nameOf(node.color));
       found("size", nameOf(node.size));
-      found("materials", [].concat(node.material || []).map(nameOf).filter(Boolean).join(", "));
       found("description", typeof node.description === "string" ? node.description : "");
     }
     Object.values(node).forEach(walk);
@@ -51,7 +50,6 @@ window.__uhCollect = () => {
   found("model", micro("sku") || micro("mpn") || micro("model"));
   found("finish", meta("product:color") || micro("color"));
   found("size", meta("product:size") || micro("size"));
-  found("materials", meta("product:material") || micro("material"));
 
   // 3. Labelled rows: spec tables, definition lists, "Label: value" list entries and
   // Twitter's label/data meta pairs. Hidden rows count too — specs live behind tabs.
@@ -60,7 +58,6 @@ window.__uhCollect = () => {
     if (/^(sku|mpn|upc|model|(model|item|part|style|article)\s*(#|no\.?|number))$/.test(label)) return "model";
     if (/^(colou?r|finish|finish\s*\/\s*colou?r|colou?r\s*\/\s*finish)$/.test(label)) return "finish";
     if (/^(dimensions?|measurements|size|(overall|assembled|product)\s*(size|dimensions?))$/.test(label)) return "size";
-    if (/^(materials?|composition|construction|fabric)$/.test(label)) return "materials";
     if (/^((our|sale|your|list|regular|current)\s+)?price$/.test(label)) return "price";
     return "";
   };
@@ -140,6 +137,6 @@ window.__uhCollect = () => {
            site: meta("og:site_name") || location.hostname.replace(/^www\./, ""),
            description,
            price: product.price || "", brand: product.brand || "", model: product.model || "",
-           finish: product.finish || "", size: product.size || "", materials: product.materials || "",
+           finish: product.finish || "", size: product.size || "",
            images: images.slice(0, 60) };
 };

@@ -1735,11 +1735,12 @@ document.addEventListener("click", (event) => {
 // Collections and items arrive with /api/state, so the 2.5s poll keeps them fresh;
 // image bytes are stored by the app and served from /api/catalog/images, never hotlinked.
 // ---------------------------------------------------------------------------
-const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], approvals: [], ai: false, user: "", shared_accounts: false };
+const cat = () => state.data?.catalog || { collections: [], items: [], comments: [], categories: [], approvals: [], user: "", shared_accounts: false };
 let catCollectionId = "";          // "" = all inspirations
 let catFavsOnly = false;
-// A page is rarely worth one picture only, so the capture step keeps a list: every image
-// clicked is saved as its own inspiration, sharing the details reviewed in step 3.
+// A product page shows the same item from several angles, so the capture step keeps a
+// list: every image clicked joins one inspiration, the first of them its cover, and they
+// share the details reviewed in step 3.
 let clipTab = "page", clipPicks = [], clipFile = null, clipInspected = null, clipInspectFailed = false;
 
 const catImage = (name) => `/api/catalog/images/${encodeURIComponent(name || "")}`;
@@ -1747,7 +1748,15 @@ const catItem = (id) => cat().items.find((i) => i["Item ID"] === id);
 const catCollection = (id) => cat().collections.find((c) => c["Collection ID"] === id);
 const catCollections = () => [...cat().collections].sort((a, b) => String(b.Updated || "").localeCompare(String(a.Updated || "")));
 const catItems = () => [...cat().items].sort((a, b) => String(b["Saved On"] || "").localeCompare(String(a["Saved On"] || "")));
-const itemThumb = (i) => catImage(i["Thumb File"] || i["Image File"]);
+// An item's pictures, cover first. One saved before an inspiration could hold several —
+// and every upload — names only the cover, so the lists fall back to that pair.
+const nameList = (value) => String(value || "").split(",").map((part) => part.trim()).filter(Boolean);
+function itemPictures(item) {
+  const images = nameList(item["Image Files"]), thumbs = nameList(item["Thumb Files"]);
+  if (!images.length) return [{ image: item["Image File"] || "", thumb: item["Thumb File"] || item["Image File"] || "" }];
+  return images.map((name, at) => ({ image: name, thumb: thumbs[at] || name }));
+}
+const itemThumb = (i) => catImage(itemPictures(i)[0].thumb);
 const collectionItems = (id) => catItems().filter((i) => i["Collection ID"] === id);
 const coverFor = (c) => {
   if (c["Cover Image"]) return catImage(c["Cover Image"]);
@@ -1777,12 +1786,16 @@ function renderCatalog() {
   const rows = catItems().filter((i) => (!catCollectionId || i["Collection ID"] === catCollectionId)
     && (!category || i.Category === category)
     && (!catFavsOnly || i.Favorite === "Yes")
-    && (!query || [i.Title, i.Description, i.Notes, i.Tags, i.Category, i.Materials, i["Source Site"]].join(" ").toLowerCase().includes(query)));
-  $("catalog-gallery").innerHTML = rows.map((i) => `<article class="insp-card" data-insp="${esc(i["Item ID"])}" tabindex="0" role="button" aria-label="Open ${esc(i.Title || "inspiration")}">
+    && (!query || [i.Title, i.Description, i.Notes, i.Category, i["Source Site"]].join(" ").toLowerCase().includes(query)));
+  $("catalog-gallery").innerHTML = rows.map((i) => {
+    const shots = itemPictures(i).length;
+    return `<article class="insp-card" data-insp="${esc(i["Item ID"])}" tabindex="0" role="button" aria-label="Open ${esc(i.Title || "inspiration")}">
       <img src="${esc(itemThumb(i))}" alt="${esc(i.Title || "Saved inspiration")}" loading="lazy">
+      ${shots > 1 ? `<span class="insp-count">${pictures(shots)}</span>` : ""}
       <button class="insp-fav ${i.Favorite === "Yes" ? "active" : ""}" data-fav="${esc(i["Item ID"])}" aria-label="${i.Favorite === "Yes" ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${i.Favorite === "Yes"}">♥</button>
       <div class="insp-body"><strong>${esc(i.Title || "Untitled inspiration")}</strong><small>${[i.Category, i["Source Site"]].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</small></div>
-    </article>`).join("");
+    </article>`;
+  }).join("");
   $("catalog-empty").hidden = rows.length > 0;
   $("catalog-gallery").classList.toggle("empty", !rows.length);
 }
@@ -1852,11 +1865,11 @@ function updateClipChosen() {
   const picked = clipPicks.length;
   $("clip-chosen").textContent = clipStep === 1 ? "Step 1 of 3 — choose where it files."
     : clipStep === 3 ? (clipCount() === 1 ? "Step 3 of 3 — review the details, then save."
-      : `Step 3 of 3 — these details go on all ${clipCount()} inspirations.`)
-    : clipTab === "page" ? (picked ? `${pictures(picked)} selected — click more, or Continue.` : "Find images, then click every picture you want.")
+      : `Step 3 of 3 — one inspiration with ${pictures(clipCount())}, saved under these details.`)
+    : clipTab === "page" ? (picked ? `${pictures(picked)} selected — the first is the cover. Click more, or Continue.` : "Find images, then click every picture of this product.")
     : clipTab === "image" ? "The image at that address will be saved."
     : (clipFile ? `Ready to upload ${clipFile.name}.` : "Choose an image file to upload.");
-  $("clip-save").textContent = clipCount() > 1 ? `Save ${clipCount()} inspirations` : "Save inspiration";
+  $("clip-save").textContent = clipCount() > 1 ? `Save inspiration (${pictures(clipCount())})` : "Save inspiration";
 }
 
 // The clip dialog walks three steps: collection first, then capture, then review and save.
@@ -1886,7 +1899,7 @@ function clipStepForward() {
     if (clipTab === "page" && !clipPicks.length) {
       fail(clipInspectFailed
         ? "That page could not be read, so there are no images to pick here. Switch to the Image address or Upload tab, or clip it with the Clip to UH Homes bookmark."
-        : "Click the pictures you want to save — one, or as many as you like.");
+        : "Click the pictures of this product — one, or as many as show it. They save as one inspiration.");
       return;
     }
     if (clipTab === "image" && !$("clip-image-url").value.trim()) { fail("Paste the image's address first."); return; }
@@ -1898,7 +1911,7 @@ function clipStepForward() {
 function openClip(pageUrl) {
   clipPicks = []; clipFile = null; clipInspected = null; clipInspectFailed = false;
   $("clip-page-note").classList.remove("form-error");
-  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-tags", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size", "clip-link", "clip-qty"]) $(id).value = "";
+  for (const id of ["clip-page-url", "clip-image-url", "clip-title", "clip-notes", "clip-description", "clip-new-collection", "clip-price", "clip-brand", "clip-model", "clip-finish", "clip-size", "clip-link", "clip-qty"]) $(id).value = "";
   $("clip-file-name").textContent = "";
   $("clip-candidates").hidden = true;
   $("clip-candidates").innerHTML = "";
@@ -1956,17 +1969,18 @@ function showInspected(result, how = "found on") {
     if (!$(id).value) $(id).value = result[key] || "";
   }
   $("clip-page-note").textContent = result.images.length
-    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — click every picture you want to keep (one or several), × away the rest, ⤢ to see one large.`
+    ? `${result.images.length} image${result.images.length === 1 ? "" : "s"} ${how} ${result.site || "the page"} — click every picture of this product (one or several; they become one inspiration, the first its cover), × away the rest, ⤢ to see one large.`
     : "No images could be read from that page. Try the Image address tab with a direct link to the picture.";
   $("clip-page-note").hidden = false;
   renderClipCandidates();
   updateClipChosen();
 }
 
-// The candidate grid. Clicking a tile keeps that picture — as many as the page is worth,
-// each saved as its own inspiration — ⤢ opens it large, and × drops it from the choices,
-// since read pages bring banners and related products along. Both the keeping and the
-// removing live in this dialog only: nothing is written until Save.
+// The candidate grid. Clicking a tile keeps that picture — as many as show the product,
+// all of them saved as one inspiration in the order they were clicked — ⤢ opens it large,
+// and × drops it from the choices, since read pages bring banners and related products
+// along. Both the keeping and the removing live in this dialog only: nothing is written
+// until Save.
 function renderClipCandidates() {
   const images = clipInspected?.images || [];
   $("clip-candidates").hidden = !images.length;
@@ -1999,7 +2013,7 @@ function openClipFromPage(page) {
                    description: text(page.description, 2000), price: text(page.price, 50),
                    brand: text(page.brand, 200), model: text(page.model, 100),
                    finish: text(page.finish, 200), size: text(page.size, 200),
-                   materials: text(page.materials, 500), source_url: text(page.url, 2000),
+                   source_url: text(page.url, 2000),
                    images: (Array.isArray(page.images) ? page.images : []).slice(0, 60)
                      .map((img) => ({ url: text(img && img.url, 2000), alt: text(img && img.alt, 200) }))
                      .filter((img) => /^https?:/.test(img.url)) };
@@ -2018,8 +2032,7 @@ async function saveClip() {
   $("clip-error").hidden = true;
   if (!collection && !newName) { fail("Choose a collection, or name a new one."); return; }
   const meta = { title: $("clip-title").value.trim(), description: $("clip-description").value.trim(),
-                 notes: $("clip-notes").value.trim(), tags: $("clip-tags").value.trim(),
-                 category: $("clip-category").value, materials: clipInspected?.materials || "",
+                 notes: $("clip-notes").value.trim(), category: $("clip-category").value,
                  price: $("clip-price").value.trim(), brand: $("clip-brand").value.trim(),
                  model: $("clip-model").value.trim(), finish: $("clip-finish").value.trim(),
                  size: $("clip-size").value.trim(), qty_unit: $("clip-qty").value.trim(),
@@ -2037,7 +2050,7 @@ async function saveClip() {
   } else {
     const body = { ...meta, collection, new_collection: newName };
     if (clipTab === "page") {
-      if (!clipPicks.length) { fail("Click the pictures you want to save — one, or as many as you like."); return; }
+      if (!clipPicks.length) { fail("Click the pictures of this product — one, or as many as show it."); return; }
       body.image_urls = clipPicks.map((image) => image.url);
       body.source_url = body.source_url || $("clip-page-url").value.trim();
       body.source_site = clipInspected?.site || "";
@@ -2047,7 +2060,7 @@ async function saveClip() {
     }
     request = api("/api/catalog/clip", body);
   }
-  setBusy(true, clipCount() > 1 ? `Saving ${clipCount()} inspirations…` : "Saving the inspiration…");
+  setBusy(true, clipCount() > 1 ? `Saving the inspiration and its ${clipCount()} pictures…` : "Saving the inspiration…");
   let result;
   try { result = await request; }
   catch (error) {
@@ -2060,13 +2073,13 @@ async function saveClip() {
   $("clip-dialog").close();
   state.view = "catalog";
   // Some sites hand over one picture and withhold another; say so rather than quietly saving fewer.
-  const saved = Number(result?.saved) || 1, missed = Number(result?.refused) || 0;
-  const said = saved === 1 ? "Inspiration saved to your collection." : `${saved} inspirations saved to your collection.`;
+  const saved = (result?.images || []).length || 1, missed = Number(result?.refused) || 0;
+  const said = saved === 1 ? "Inspiration saved to your collection." : `Inspiration saved with ${pictures(saved)}.`;
   await action(async () => { await refresh(); toast(missed ? `${said} ${pictures(missed)} could not be downloaded.` : said); });
 }
 
 // --- Inspiration detail ------------------------------------------------------
-let inspOpen = null;
+let inspOpen = null, inspPicture = 0;      // which of the item's pictures is shown large
 
 function inspirationHTML(item) {
   const collection = catCollection(item["Collection ID"]);
@@ -2080,14 +2093,18 @@ function inspirationHTML(item) {
   const source = item["Source URL"];
   const usedIn = [...new Set((state.data?.selections || []).filter((r) => r["Catalog Item ID"] === item["Item ID"]).map((r) => r["Project ID"]))];
   const usedNames = usedIn.map((id) => state.data.projects.find((p) => p["Project ID"] === id)?.["Project Name"] || id);
+  const shots = itemPictures(item);
+  inspPicture = Math.min(Math.max(inspPicture, 0), shots.length - 1);
+  const shown = shots[inspPicture];
   return `<div class="dialog-heading"><div><div class="eyebrow">${esc(collection?.Name || "Inspiration")}</div><h2>${esc(item.Title || "Untitled inspiration")}</h2></div>
       <div class="insp-head-actions"><button type="button" class="insp-fav standalone ${item.Favorite === "Yes" ? "active" : ""}" data-insp-fav aria-pressed="${item.Favorite === "Yes"}" aria-label="Favorite">♥</button><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div></div>
     <div class="insp-layout">
       <div class="insp-media">
-        <a href="${esc(catImage(item["Image File"]))}" target="_blank" rel="noopener"><img src="${esc(catImage(item["Image File"]))}" alt="${esc(item.Title || "Saved inspiration")}"></a>
+        <a id="insp-full" href="${esc(catImage(shown.image))}" target="_blank" rel="noopener"><img id="insp-main-image" src="${esc(catImage(shown.image))}" alt="${esc(item.Title || "Saved inspiration")}"></a>
+        ${shots.length > 1 ? `<div class="insp-strip" role="group" aria-label="Pictures of this item">${shots.map((shot, at) => `<button type="button" class="insp-strip-shot ${at === inspPicture ? "current" : ""}" data-insp-picture="${at}" aria-label="Picture ${at + 1} of ${shots.length}${at === 0 ? " (cover)" : ""}"><img src="${esc(catImage(shot.thumb))}" alt="" loading="lazy"></button>`).join("")}</div>` : ""}
         ${colors.length ? `<div class="insp-colors" aria-label="Color palette">${colors.map((c) => `<span class="color-dot" style="background:${esc(c)}" title="${esc(c)}"></span>`).join("")}</div>` : ""}
         <p class="insp-meta">${[item["Source Site"], item["Saved By"] ? `saved by ${item["Saved By"]}` : "", item["Saved On"] ? `on ${String(item["Saved On"]).slice(0, 10)}` : ""].filter(Boolean).map(esc).join(" · ") || "Saved to your inspirations"}</p>
-        <div class="insp-links">${source ? `<a class="button secondary" href="${esc(source)}" target="_blank" rel="noopener noreferrer">Open original ↗</a>` : ""}<a class="button secondary" href="${esc(catImage(item["Image File"]))}?download=1">Download</a>${editable ? '<button type="button" class="button secondary" data-insp-cover>Use as collection cover</button>' : ""}<button type="button" class="button secondary" data-insp-assign>+ Add to projects</button></div>
+        <div class="insp-links">${source ? `<a class="button secondary" href="${esc(source)}" target="_blank" rel="noopener noreferrer">Open original ↗</a>` : ""}<a id="insp-download" class="button secondary" href="${esc(catImage(shown.image))}?download=1">Download</a>${editable ? '<button type="button" class="button secondary" data-insp-cover>Use as collection cover</button>' : ""}<button type="button" class="button secondary" data-insp-assign>+ Add to projects</button></div>
         <p class="insp-meta insp-projects">${usedIn.length ? `In ${usedIn.length} project${usedIn.length === 1 ? "" : "s"}: ${usedNames.map(esc).join(", ")}` : "Not in any project yet — add it to one to make it a line item."}</p>
       </div>
       <div class="insp-side">
@@ -2099,18 +2116,12 @@ function inspirationHTML(item) {
           <label class="field">Size / Config<input id="insp-size" type="text" maxlength="200" value="${esc(item["Size / Configuration"] || "")}" ${off}></label>
           <label class="field form-span">Link (product page)<input id="insp-link" type="url" maxlength="2000" value="${esc(item["Source URL"] || "")}" ${off}></label>
           <label class="field">Qty / Unit<input id="insp-qty" type="text" maxlength="60" value="${esc(item["Qty / Unit"] || "")}" ${off}></label>
-          <label class="field">Unit Price (as clipped)<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
+          <label class="field">Unit Price<input id="insp-price" type="text" maxlength="50" value="${esc(item.Price || "")}" ${off}></label>
           <label class="field">Category<select id="insp-category" ${off}>${["", ...cat().categories].map((c) => `<option value="${esc(c)}" ${item.Category === c ? "selected" : ""}>${esc(c || "—")}</option>`).join("")}</select></label>
           <label class="field">Collection<select id="insp-collection" ${off}>${catCollections().map((c) => `<option value="${esc(c["Collection ID"])}" ${c["Collection ID"] === item["Collection ID"] ? "selected" : ""}>${esc(c.Name)}</option>`).join("")}</select></label>
           <label class="field">Feedback<select id="insp-approval" ${off}>${approvals.map((a) => `<option value="${esc(a)}" ${item.Approval === a ? "selected" : ""}>${esc(a || "—")}</option>`).join("")}</select></label>
-          <label class="field">Tags<input id="insp-tags" type="text" maxlength="500" value="${esc(item.Tags || "")}" ${off}></label>
           <label class="field form-span">Description<textarea id="insp-description" maxlength="2000" ${off}>${esc(item.Description || "")}</textarea></label>
           <label class="field form-span">My notes<textarea id="insp-notes" maxlength="2000" ${off}>${esc(item.Notes || "")}</textarea></label>
-          <label class="field form-span">Materials<input id="insp-materials" type="text" maxlength="500" value="${esc(item.Materials || "")}" ${off}></label>
-        </div>
-        <div class="insp-ai">
-          <button type="button" class="button secondary" data-insp-analyze>✶ ${cat().ai ? "Analyze with AI" : "Suggest category & materials"}</button>
-          <div id="insp-ai-result" class="insp-ai-result" hidden></div>
         </div>
         <section class="insp-similar-wrap"><h3>Similar saved designs</h3><div id="insp-similar" class="insp-similar"><span class="muted">Looking…</span></div></section>
         <section class="insp-comments-wrap"><h3>Comments</h3>
@@ -2122,10 +2133,25 @@ function inspirationHTML(item) {
     </div>`;
 }
 
+// Swapping the large picture rewrites only the picture, never the dialog: the fields may
+// hold edits that have not been saved yet, and the similar-designs strip is fetched once.
+function showInspPicture(at) {
+  const item = catItem(inspOpen);
+  const shots = item ? itemPictures(item) : [];
+  if (!shots.length || !$("insp-main-image")) return;
+  inspPicture = Math.min(Math.max(at, 0), shots.length - 1);
+  $("insp-main-image").src = catImage(shots[inspPicture].image);
+  $("insp-full").href = catImage(shots[inspPicture].image);
+  $("insp-download").href = `${catImage(shots[inspPicture].image)}?download=1`;
+  $("inspiration-body").querySelectorAll("[data-insp-picture]").forEach((shot) =>
+    shot.classList.toggle("current", Number(shot.dataset.inspPicture) === inspPicture));
+}
+
 async function openInspiration(id) {
   const item = catItem(id);
   if (!item) return;
   inspOpen = id;
+  inspPicture = 0;
   $("inspiration-body").innerHTML = inspirationHTML(item);
   $("inspiration-dialog").showModal();
   try {
@@ -2143,8 +2169,7 @@ async function saveInspiration() {
   await action(async () => {
     const values = { Title: $("insp-title").value.trim(), Category: $("insp-category").value,
                      "Collection ID": $("insp-collection").value, Approval: $("insp-approval").value,
-                     Tags: $("insp-tags").value.trim(), Description: $("insp-description").value.trim(),
-                     Notes: $("insp-notes").value.trim(), Materials: $("insp-materials").value.trim(),
+                     Description: $("insp-description").value.trim(), Notes: $("insp-notes").value.trim(),
                      Price: $("insp-price").value.trim(), Brand: $("insp-brand").value.trim(),
                      "Model #": $("insp-model").value.trim(), "Finish / Color": $("insp-finish").value.trim(),
                      "Size / Configuration": $("insp-size").value.trim(), "Qty / Unit": $("insp-qty").value.trim(),
@@ -2166,44 +2191,6 @@ async function toggleFavorite(id, fromDialog) {
   });
 }
 
-async function analyzeInspiration() {
-  const item = catItem(inspOpen);
-  if (!item) return;
-  await action(async () => {
-    const box = $("insp-ai-result");
-    box.hidden = false;
-    box.innerHTML = '<span class="muted">Analyzing the image…</span>';
-    try {
-      const result = await api(`/api/catalog/items/${encodeURIComponent(item["Item ID"])}/analyze`, {});
-      const parts = [];
-      if (result.category) parts.push(`<div><dt>Category</dt><dd>${esc(result.category)}</dd></div>`);
-      if (result.style) parts.push(`<div><dt>Style</dt><dd>${esc(result.style)}</dd></div>`);
-      if (result.description) parts.push(`<div><dt>Description</dt><dd>${esc(result.description)}</dd></div>`);
-      if (result.materials?.length) parts.push(`<div><dt>Materials</dt><dd>${esc(result.materials.join(", "))}</dd></div>`);
-      if (result.tags?.length) parts.push(`<div><dt>Tags</dt><dd>${esc(result.tags.join(", "))}</dd></div>`);
-      box.innerHTML = parts.length
-        ? `<p class="muted">${result.source === "ai" ? "AI suggestions — review before applying." : "Suggested from your saved details (connect an AI key for image analysis)."}</p><dl class="insp-ai-grid">${parts.join("")}</dl><button type="button" class="button secondary" data-insp-apply>Apply suggestions</button>`
-        : '<p class="muted">Nothing could be suggested for this image yet.</p>';
-      box.dataset.result = JSON.stringify(result);
-    } catch (error) {
-      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
-      throw error;
-    }
-  });
-}
-
-function applyAiSuggestions() {
-  const box = $("insp-ai-result");
-  let result;
-  try { result = JSON.parse(box.dataset.result || "{}"); } catch { return; }
-  if (result.category) $("insp-category").value = result.category;
-  if (result.description && !$("insp-description").value.trim()) $("insp-description").value = result.description;
-  if (result.materials?.length) $("insp-materials").value = [...new Set([...$("insp-materials").value.split(",").map((m) => m.trim()).filter(Boolean), ...result.materials])].join(", ");
-  const extra = [...(result.tags || []), ...(result.style ? [result.style] : [])];
-  if (extra.length) $("insp-tags").value = [...new Set([...$("insp-tags").value.split(",").map((t) => t.trim()).filter(Boolean), ...extra])].join(", ");
-  toast("Suggestions applied — review the fields, then press Save changes.");
-}
-
 async function deleteInspiration() {
   const item = catItem(inspOpen);
   if (!item) return;
@@ -2220,9 +2207,10 @@ async function setCollectionCover() {
   const item = catItem(inspOpen);
   const collection = item && catCollection(item["Collection ID"]);
   if (!collection) return;
+  const shown = itemPictures(item)[inspPicture] || itemPictures(item)[0];
   await action(async () => {
     await persist("/api/catalog/collections", { values: { "Collection ID": collection["Collection ID"], Name: collection.Name,
-      Description: collection.Description || "", "Cover Image": item["Thumb File"] || item["Image File"] } });
+      Description: collection.Description || "", "Cover Image": shown.thumb || shown.image } });
     await refresh();
     toast(`“${item.Title || "This image"}” is now the cover of ${collection.Name}.`);
   });
@@ -2273,7 +2261,7 @@ let pickerSelected = new Set();
 
 function renderPicker() {
   const term = $("picker-search").value.trim().toLowerCase();
-  const items = catItems().filter((i) => !term || ["Title", "Tags", "Materials", "Brand", "Category", "Description"]
+  const items = catItems().filter((i) => !term || ["Title", "Brand", "Category", "Description"]
     .some((f) => String(i[f] || "").toLowerCase().includes(term)));
   const used = new Set(state.data.selections.filter((r) => r["Project ID"] === state.project && r["Catalog Item ID"]).map((r) => r["Catalog Item ID"]));
   $("picker-grid").innerHTML = items.map((i) => `<button type="button" class="picker-card ${pickerSelected.has(i["Item ID"]) ? "selected" : ""}" data-pick="${esc(i["Item ID"])}"><img src="${esc(itemThumb(i))}" alt="${esc(i.Title || "Saved item")}" loading="lazy"><span class="picker-name">${esc(i.Title || "Untitled")}</span><span class="picker-sub">${[i.Brand, i.Price].filter(Boolean).map(esc).join(" · ")}</span>${used.has(i["Item ID"]) ? '<span class="picker-used">In this project</span>' : ""}</button>`).join("")
@@ -2445,11 +2433,11 @@ $("clip-save").addEventListener("click", saveClip);
 $("inspiration-dialog").addEventListener("click", (event) => {
   const open = event.target.closest("[data-insp-open]");
   if (open) { openInspiration(open.dataset.inspOpen); return; }
+  const shot = event.target.closest("[data-insp-picture]");
+  if (shot) { showInspPicture(Number(shot.dataset.inspPicture)); return; }
   if (event.target.closest("[data-insp-fav]")) toggleFavorite(inspOpen, true);
   else if (event.target.closest("[data-insp-save]")) saveInspiration();
   else if (event.target.closest("[data-insp-delete]")) deleteInspiration();
-  else if (event.target.closest("[data-insp-analyze]")) analyzeInspiration();
-  else if (event.target.closest("[data-insp-apply]")) applyAiSuggestions();
   else if (event.target.closest("[data-insp-cover]")) setCollectionCover();
   else if (event.target.closest("[data-insp-assign]")) openAssign(inspOpen);
   else if (event.target.closest("[data-comment-add]")) addComment();

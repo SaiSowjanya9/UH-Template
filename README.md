@@ -115,22 +115,22 @@ Postgres rows is what would lift that.
 
 ## Design Inspiration Catalog
 
-The **Catalog** tab is a built-in design clipping and inspiration library. Browse the internet, find a kitchen, bathroom, flooring or lighting design you like, and save it into your UH Homes account — organized into collections, with AI-assisted categorization and team collaboration.
+The **Catalog** tab is a built-in design clipping and inspiration library. Browse the internet, find a kitchen, bathroom, flooring or lighting design you like, and save it into your UH Homes account — organized into collections, with keyword categorization and team collaboration.
 
 **What you can do:**
 
 - **Collections** — create named groups (Kitchen Inspirations, Bathroom Designs, etc.) with cover images, descriptions, privacy settings and sharing.
-- **Save inspirations** — upload images from your computer, paste an image URL, or paste a webpage URL and pick from the images found on it. A page is rarely worth one picture only: click as many as you like (each tile shows its place in the order, × drops the ones that don't belong, ⤢ shows one large) and every picture becomes its own inspiration, sharing the details you review once. Every image is downloaded, validated, optimized and stored in UH Homes storage; external URLs are metadata, not the stored asset. Product pages with structured data also fill in the price and brand automatically.
-- **Organize** — edit, move between collections, tag, add notes, favorite, comment, and set approval status. Search and filter across everything you have saved.
+- **Save inspirations** — upload images from your computer, paste an image URL, or paste a webpage URL and pick from the images found on it. A product page shows the same item from several angles, so click as many pictures of it as you like (each tile shows its place in the order, × drops the ones that don't belong, ⤢ shows one large): they are saved as **one** inspiration, the first picture its cover and the rest a strip under it, sharing the details you review once. The card in the gallery says how many pictures it holds, and adding that inspiration to a project writes one line item, not one per picture. Every image is downloaded, validated, optimized and stored in UH Homes storage; external URLs are metadata, not the stored asset. Product pages with structured data also fill in the price and brand automatically.
+- **Organize** — edit, move between collections, add notes, favorite, comment, and set approval status. Search and filter across everything you have saved.
 - **Assign to projects** — the catalog is the master library: one clipped item can be added to any number of projects. **+ Add to projects** on an inspiration (or **❖ From catalog** on the Selection tracker) creates that project its own line item — title, section, product link, quantity and price prefilled from the clip, referenced by Catalog Item ID. Each project's line item keeps its own quantity, room, notes and client status: removing it never deletes the catalog record, and later catalog edits never rewrite a project's rows.
-- **AI features** — when `ANTHROPIC_API_KEY` is set in `.env`, the Catalog can auto-categorize images, describe designs, recognize materials, and answer natural-language questions about your saved inspirations. Without the key, a local keyword/color fallback handles categorization, palette extraction and basic search.
+- **Ask about your saved designs** — when `UH_AI_KEY` is set in `.env`, the assistant answers natural-language questions about the inspirations you have saved, reading their titles, categories, notes and palettes. Without the key it answers by plain word matching over the same fields. Pictures are never sent anywhere to be analyzed: categories come from keyword rules and palettes from Pillow.
 - **Collaboration** — share collections with teammates (read-only or edit), leave comments, and track approval status. Privacy is per-collection; local mode is single-user.
 - **Bookmarklet** — the clipper is one bookmark, nothing to install: open **Get the clipper** in the Catalog tab and drag the **Clip to UH Homes** ticket onto your bookmarks bar (`Ctrl+Shift+B`, or `⌘⇧B` on a Mac, shows the bar if it is hidden). The browser draws its own globe beside it — only the name travels with a `javascript:` bookmark. Clicking it on any product page reads the page from inside your browser (so sites that block the app's server still clip fine) and opens the Catalog's clip dialog with the images and details ready to review.
 
 **Setup:**
 
 1. The Catalog works out of the box — no extra configuration needed for basic use.
-2. For AI features, add `ANTHROPIC_API_KEY` to `.env` (see `.env.example`).
+2. For the saved-designs assistant, add `UH_AI_KEY` to `.env` (see `.env.example`).
 3. For clipping from other sites, drag the bookmark out of the Catalog tab's **Get the clipper** dialog onto your bookmarks bar — that is the whole setup.
 
 **Storage:** Catalog metadata lives in additional workbook sheets (managed through `WorkspaceStore` like everything else). Image files are stored in the backend's object storage — `catalog_images/` locally, the Supabase Storage bucket when hosted. Thumbnails and duplicate detection by content hash keep storage efficient.

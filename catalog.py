@@ -7,11 +7,11 @@ never hotlinked — optimised with Pillow, stored beside the workspace under a h
 name, and deduplicated by that hash.
 
 Everything fetched from the outside world goes through safe_fetch, which refuses private
-addresses (SSRF), re-checks every redirect, and caps the body size. AI analysis is optional:
-with UH_AI_KEY set it asks Anthropic's vision API, and without it falls back to local
-keyword rules and the Pillow colour palette. AI output is presented as suggestions only.
+addresses (SSRF), re-checks every redirect, and caps the body size. The saved-designs
+assistant is optional: with UH_AI_KEY set it asks Anthropic about the items' own text, and
+without it falls back to plain word matching. Its answers are suggestions only, and no
+image is ever sent anywhere for analysis.
 """
-import base64
 import datetime as dt
 import hashlib
 import io
@@ -53,14 +53,14 @@ COMMENT_SHEET = CATALOG_COMMENT_SHEET
 
 COLLECTION_FIELDS = ["Collection ID", "Name", "Description", "Cover Image",
                      "Owner", "Created", "Updated"]
-ITEM_FIELDS = ["Item ID", "Collection ID", "Title", "Description", "Notes", "Tags", "Category",
-               "Source URL", "Source Site", "Image File", "Thumb File", "Image Hash", "Colors",
-               "Materials", "Favorite", "Approval", "Saved By", "Saved On", "Updated",
+ITEM_FIELDS = ["Item ID", "Collection ID", "Title", "Description", "Notes", "Category",
+               "Source URL", "Source Site", "Image File", "Thumb File", "Image Files", "Thumb Files",
+               "Image Hash", "Colors", "Favorite", "Approval", "Saved By", "Saved On", "Updated",
                "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"]
 COMMENT_FIELDS = ["Comment ID", "Item ID", "Author", "Comment", "Created"]
 # The fields an editor may write directly; everything else is derived or stamped here.
-ITEM_EDIT_FIELDS = ["Title", "Description", "Notes", "Tags", "Category", "Source URL",
-                    "Source Site", "Materials", "Favorite", "Approval", "Collection ID",
+ITEM_EDIT_FIELDS = ["Title", "Description", "Notes", "Category", "Source URL",
+                    "Source Site", "Favorite", "Approval", "Collection ID",
                     "Price", "Brand", "Model #", "Finish / Color", "Size / Configuration", "Qty / Unit"]
 
 CATEGORIES = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Flooring & Tiles",
@@ -81,11 +81,6 @@ CATEGORY_KEYWORDS = {
     "Landscaping": ["landscap", "garden", "patio", "backyard", "pool", "outdoor", "deck", "pergola"],
     "Furniture & Decor": ["furniture", "armchair", "dining table", "decor", "rug", "mirror", "shelf"],
 }
-
-MATERIAL_WORDS = ["marble", "quartz", "granite", "quartzite", "hardwood", "oak", "walnut", "maple",
-                  "ceramic", "porcelain", "terrazzo", "concrete", "brass", "bronze", "copper",
-                  "stainless", "matte black", "chrome", "nickel", "glass", "leather", "linen",
-                  "rattan", "stone", "slate", "travertine", "limestone", "brick", "stucco", "velvet"]
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +113,34 @@ def comment_records(wb):
 
 def find(rows, key, value):
     return next((row for row in rows if row.get(key) == value), None)
+
+
+# One product is one inspiration, however many pictures of it were clipped. The row names
+# its cover in Image File / Thumb File and every picture, cover first, in the Image Files /
+# Thumb Files lists; an item saved before several pictures were possible carries only the
+# cover, so these two readers fall back to it rather than reading as having no picture.
+def name_list(value):
+    return [part.strip() for part in clean(value).split(",") if part.strip()]
+
+
+def item_pictures(item):
+    """Every picture of one inspiration, cover first, as (image file, thumb file) pairs."""
+    images, thumbs = name_list(item.get("Image Files")), name_list(item.get("Thumb Files"))
+    if not images:
+        images, thumbs = [clean(item.get("Image File"))], [clean(item.get("Thumb File"))]
+    return [(name, thumbs[n] if n < len(thumbs) else name)
+            for n, name in enumerate(images) if name]
+
+
+def item_files(item):
+    """Every stored file an inspiration points at — both sizes of each of its pictures."""
+    return list(dict.fromkeys(name for pair in item_pictures(item) for name in pair if name))
+
+
+def picture_names(processed):
+    """The two stored names of one processed picture. Both are derived from the image's
+    own hash, so identical bytes are stored once and shared by every item holding them."""
+    return f"cat-{processed['hash']}{processed['ext']}", f"cat-{processed['hash']}-thumb.jpg"
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +225,8 @@ def delete_item_row(wb, item):
     """Remove one inspiration row; returns the image files nothing references any more."""
     from workspace_store import delete_record
     others = [i for i in item_records(wb) if i["_row"] != item["_row"]]
-    orphaned = []
-    for field in ("Image File", "Thumb File"):
-        name = clean(item.get(field))
-        if name and not any(clean(o.get(f)) == name for o in others for f in ("Image File", "Thumb File")):
-            orphaned.append(name)
+    held = {name for other in others for name in item_files(other)}
+    orphaned = [name for name in item_files(item) if name not in held]
     for comment in sorted((c for c in comment_records(wb) if c["Item ID"] == item["Item ID"]),
                           key=lambda c: c["_row"], reverse=True):
         delete_record(wb, COMMENT_SHEET, comment["_row"])
@@ -244,40 +264,60 @@ def save_item(wb, data, user, require_login):
     return (f"catalog: update inspiration {values.get('Title') or item['Title'] or item['Item ID']}", None)
 
 
-def add_item(wb, collection_id, processed, meta, user, require_login):
-    """A processed image plus its metadata becomes one saved inspiration."""
+def add_item(wb, collection_id, pictures, meta, user, require_login):
+    """One clip becomes one saved inspiration carrying every picture that was picked.
+
+    A product page shows the same item from several angles, so the pictures belong on one
+    record rather than on one record each. The first is the cover. Returns the new item's
+    id, its pictures as (image file, thumb file) pairs, and the ones whose bytes are not
+    stored yet — the caller writes those once the workbook has accepted the row.
+    """
     collection = editable_collection(wb, collection_id, user, require_login)
     rows = item_records(wb)
-    image_name = f"cat-{processed['hash']}{processed['ext']}"
-    thumb_name = f"cat-{processed['hash']}-thumb.jpg"
-    duplicate = next((i for i in rows if i["Image Hash"] == processed["hash"]
-                      and i["Collection ID"] == collection["Collection ID"]), None)
+    chosen, seen = [], []
+    for one in pictures:
+        image_name, thumb_name = picture_names(one)
+        if image_name in seen:          # the same picture picked twice is still one picture
+            continue
+        seen.append(image_name)
+        chosen.append((one, image_name, thumb_name))
+    if not chosen:
+        raise ValidationError("Clip an image: pick one from the page, paste an image address, or upload a file.")
+    # Saving a product whose every picture is already filed here is the clip happening
+    # twice; a clip that adds a picture to what is held is a different product shot.
+    duplicate = next((i for i in rows if i["Collection ID"] == collection["Collection ID"]
+                      and set(seen) <= set(item_files(i))), None)
     if duplicate:
-        raise ValidationError(f"This image is already in that collection as “{duplicate['Title'] or 'Untitled'}”.")
-    stored = any(i["Image Hash"] == processed["hash"] for i in rows)
+        raise ValidationError(f"{'This image is' if len(seen) == 1 else 'These images are'} already in "
+                              f"that collection as “{duplicate['Title'] or 'Untitled'}”.")
+    held = {name for other in rows for name in item_files(other)}
+    unstored = [one for one, image_name, _ in chosen if image_name not in held]
+    processed, image_name, thumb_name = chosen[0]
     title = clean(meta.get("title"))[:200]
     category = clean(meta.get("category"))
     if category and category not in CATEGORIES:
         raise ValidationError(f"Category must be one of: {', '.join(CATEGORIES)}.")
     if not category:
         category = keyword_category(" ".join([title, clean(meta.get("description")),
-                                              clean(meta.get("tags")), clean(meta.get("source_url"))]))
+                                              clean(meta.get("source_url"))]))
     item_id = new_id("ins", (i["Item ID"] for i in rows))
     sheet = Sheet(wb[ITEM_SHEET])
     put(sheet, next_row(sheet), {
         "Item ID": item_id, "Collection ID": collection["Collection ID"], "Title": title,
         "Description": clean(meta.get("description"))[:2000], "Notes": clean(meta.get("notes"))[:2000],
-        "Tags": clean(meta.get("tags"))[:500], "Category": category,
+        "Category": category,
         "Source URL": clean(meta.get("source_url"))[:2000], "Source Site": clean(meta.get("source_site"))[:200],
         "Image File": image_name, "Thumb File": thumb_name, "Image Hash": processed["hash"],
-        "Colors": ", ".join(processed["colors"]), "Materials": clean(meta.get("materials"))[:500],
+        "Image Files": ", ".join(name for _, name, _ in chosen),
+        "Thumb Files": ", ".join(name for _, _, name in chosen),
+        "Colors": ", ".join(processed["colors"]),
         "Favorite": "", "Approval": "", "Saved By": (user or ""), "Saved On": stamp(), "Updated": stamp(),
         "Price": clean(meta.get("price"))[:50], "Brand": clean(meta.get("brand"))[:200],
         "Model #": clean(meta.get("model"))[:100], "Finish / Color": clean(meta.get("finish"))[:200],
         "Size / Configuration": clean(meta.get("size"))[:200], "Qty / Unit": clean(meta.get("qty_unit"))[:60],
     })
     touch_collection(wb, collection["Collection ID"])
-    return item_id, image_name, thumb_name, not stored
+    return item_id, [(image, thumb) for _, image, thumb in chosen], unstored
 
 
 def viewable_item(wb, item_id, user, require_login):
@@ -485,7 +525,7 @@ def product_info(meta, ld_scripts, micro=None):
     def name_of(node):
         return clean(node.get("name") if isinstance(node, dict) else node)
 
-    info = {"title": "", "price": "", "brand": "", "model": "", "finish": "", "size": "", "materials": ""}
+    info = {"title": "", "price": "", "brand": "", "model": "", "finish": "", "size": ""}
     currency, images = "", []
     for product in ld_products(ld_scripts):
         offers = product.get("offers")
@@ -498,10 +538,6 @@ def product_info(meta, ld_scripts, micro=None):
         info["model"] = info["model"] or clean(product.get("sku") or product.get("mpn")) or name_of(product.get("model"))
         info["finish"] = info["finish"] or name_of(product.get("color"))
         info["size"] = info["size"] or name_of(product.get("size"))
-        if not info["materials"]:
-            material = product.get("material")
-            parts = material if isinstance(material, list) else [material]
-            info["materials"] = ", ".join(filter(None, (name_of(p) for p in parts)))
         image = product.get("image")
         for entry in (image if isinstance(image, list) else [image]):
             if isinstance(entry, dict):
@@ -511,20 +547,19 @@ def product_info(meta, ld_scripts, micro=None):
     fallbacks = {"price": ("product:price:amount", "og:price:amount"),
                  "brand": ("product:brand", "og:brand"),
                  "model": ("product:retailer_part_no", "product:mfr_part_no"),
-                 "finish": ("product:color",), "size": ("product:size",),
-                 "materials": ("product:material",)}
+                 "finish": ("product:color",), "size": ("product:size",)}
     for key, names in fallbacks.items():
         info[key] = info[key] or clean(next((meta[n] for n in names if meta.get(n)), ""))
     # Microdata (itemprop) is the last resort, for pages with neither JSON-LD nor og tags.
     micro_keys = {"price": ("price", "lowprice"), "brand": ("brand",), "model": ("sku", "mpn", "model"),
-                  "finish": ("color",), "size": ("size",), "materials": ("material",)}
+                  "finish": ("color",), "size": ("size",)}
     for key, names in micro_keys.items():
         info[key] = info[key] or clean(next((micro[n] for n in names if micro.get(n)), ""))
     currency = currency or clean(meta.get("product:price:currency") or meta.get("og:price:currency")
                                  or micro.get("pricecurrency"))
     if info["price"] and currency and currency.upper() not in info["price"].upper():
         info["price"] = f"{info['price']} {currency.upper()}"
-    limits = {"title": 200, "price": 50, "brand": 200, "model": 100, "finish": 200, "size": 200, "materials": 500}
+    limits = {"title": 200, "price": 50, "brand": 200, "model": 100, "finish": 200, "size": 200}
     return {**{key: value[:limits[key]] for key, value in info.items()}, "_images": images}
 
 
@@ -649,15 +684,14 @@ def palette(image):
 
 
 def store_processed(store, processed):
-    image_name = f"cat-{processed['hash']}{processed['ext']}"
-    thumb_name = f"cat-{processed['hash']}-thumb.jpg"
+    image_name, thumb_name = picture_names(processed)
     store.store_catalog_image(image_name, processed["image"], processed["mime"])
     store.store_catalog_image(thumb_name, processed["thumb"], "image/jpeg")
     return image_name, thumb_name
 
 
 # ---------------------------------------------------------------------------
-# Local intelligence: keyword category, material words, text search and similarity.
+# Local intelligence: keyword category, text search and similarity.
 # These carry the feature without any key, and back the AI up when it is unsure.
 # ---------------------------------------------------------------------------
 
@@ -671,14 +705,9 @@ def keyword_category(text):
     return best
 
 
-def keyword_materials(text):
-    text = clean(text).lower()
-    return [word for word in MATERIAL_WORDS if word in text]
-
-
 def item_text(item):
     return " ".join(clean(item.get(field)) for field in
-                    ("Title", "Description", "Notes", "Tags", "Category", "Materials", "Source Site")).lower()
+                    ("Title", "Description", "Notes", "Category", "Source Site")).lower()
 
 
 def search_items(question, items):
@@ -696,7 +725,7 @@ def search_items(question, items):
 
 
 def similar_items(item, items, limit=8):
-    """Visually and thematically close inspirations from the same saved catalog."""
+    """Inspirations close to this one by category and palette, from the same saved catalog."""
     def color_bits(value):
         out = []
         for part in clean(value).split(","):
@@ -708,7 +737,6 @@ def similar_items(item, items, limit=8):
                     pass
         return out
 
-    base_tags = {t.strip().lower() for t in clean(item.get("Tags")).split(",") if t.strip()}
     base_colors = color_bits(item.get("Colors"))
     scored = []
     for other in items:
@@ -717,10 +745,6 @@ def similar_items(item, items, limit=8):
         score = 0
         if other.get("Category") and other["Category"] == item.get("Category"):
             score += 3
-        tags = {t.strip().lower() for t in clean(other.get("Tags")).split(",") if t.strip()}
-        score += 2 * len(base_tags & tags)
-        materials = set(keyword_materials(item.get("Materials", ""))) & set(keyword_materials(other.get("Materials", "")))
-        score += 2 * len(materials)
         colors = color_bits(other.get("Colors"))
         if base_colors and colors:
             nearest = min(sum(abs(a - b) for a, b in zip(c1, c2)) for c1 in base_colors for c2 in colors)
@@ -735,23 +759,14 @@ def similar_items(item, items, limit=8):
 
 
 # ---------------------------------------------------------------------------
-# AI, through Anthropic's vision API. Optional: everything above works without it.
+# AI, through Anthropic's text API, for the assistant alone. Optional: everything above
+# works without it, and no image is ever sent — there is deliberately no image analysis.
 # The key stays server-side and never reaches a log, an error or the browser.
 # ---------------------------------------------------------------------------
 
 AI_URL = "https://api.anthropic.com/v1/messages"
 AI_VERSION = "2023-06-01"
 AI_TIMEOUT = (5, 60)
-
-ANALYZE_PROMPT = (
-    "You are helping organize a home-design inspiration library. Look at this interior/exterior "
-    "design image and answer with a single JSON object, nothing else, with these keys: "
-    f"\"category\" (exactly one of: {', '.join(CATEGORIES)}), "
-    "\"description\" (one or two sentences describing the design), "
-    "\"materials\" (array of visible materials such as marble, quartz, hardwood, ceramic tile, brass), "
-    "\"tags\" (array of 3-8 short lowercase style/feature tags), "
-    "\"style\" (a short style name such as modern, transitional, farmhouse)."
-)
 
 
 def ai_settings():
@@ -788,30 +803,6 @@ def parse_ai_json(text):
         raise ValidationError("The AI answer could not be read. Try again.") from None
 
 
-def analyze_image(raw, mime, config):
-    """Suggestions for one image: category, description, materials, tags and style."""
-    data = base64.standard_b64encode(raw).decode("ascii")
-    text = ai_request(config, [{"role": "user", "content": [
-        {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}},
-        {"type": "text", "text": ANALYZE_PROMPT}]}])
-    parsed = parse_ai_json(text)
-    category = clean(parsed.get("category"))
-    tags = [clean(t).lower() for t in parsed.get("tags") or [] if clean(t)][:8]
-    materials = [clean(m).lower() for m in parsed.get("materials") or [] if clean(m)][:10]
-    return {"category": category if category in CATEGORIES else "Other",
-            "description": clean(parsed.get("description"))[:2000],
-            "materials": materials, "tags": tags,
-            "style": clean(parsed.get("style"))[:60], "source": "ai"}
-
-
-def local_analysis(item):
-    """What the app can say without a key: the stored palette plus keyword rules."""
-    text = item_text(item)
-    return {"category": keyword_category(text) or clean(item.get("Category")) or "Other",
-            "description": "", "materials": keyword_materials(text),
-            "tags": [], "style": "", "source": "local"}
-
-
 def assistant_answer(question, items, config):
     """Answer a question about the saved inspirations, naming the items it means."""
     question = clean(question)
@@ -827,8 +818,7 @@ def assistant_answer(question, items, config):
     lines = []
     for item in items[:300]:
         lines.append(json.dumps({"id": item["Item ID"], "title": item.get("Title", "")[:80],
-                                 "category": item.get("Category", ""), "tags": item.get("Tags", "")[:120],
-                                 "materials": item.get("Materials", "")[:120], "colors": item.get("Colors", ""),
+                                 "category": item.get("Category", ""), "colors": item.get("Colors", ""),
                                  "collection": item.get("Collection ID", ""), "notes": item.get("Notes", "")[:120]},
                                 ensure_ascii=False))
     prompt = ("Here is a home-design inspiration library, one JSON object per line:\n" + "\n".join(lines) +

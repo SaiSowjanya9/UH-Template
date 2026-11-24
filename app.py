@@ -242,7 +242,7 @@ def state():
                        export_columns=EXPORT_COLUMNS,
                        catalog={"collections": collections, "items": items, "comments": comments,
                                 "categories": catalog.CATEGORIES,
-                                "approvals": catalog.APPROVALS, "ai": bool(catalog.ai_settings()),
+                                "approvals": catalog.APPROVALS,
                                 "user": user, "shared_accounts": REQUIRE_LOGIN},
                        revision=revision,
                        workspace=store.name, branding=json.loads((BASE / "lookbook_config.json").read_text()))
@@ -752,8 +752,8 @@ def import_spec_csv():
 # ---------------------------------------------------------------------------
 
 CLIP_THROTTLE = auth.Throttle(limit=120, window=900)
-CLIP_META_FIELDS = ["title", "description", "notes", "tags", "category",
-                    "source_url", "source_site", "materials", "price", "brand",
+CLIP_META_FIELDS = ["title", "description", "notes", "category",
+                    "source_url", "source_site", "price", "brand",
                     "model", "finish", "size", "qty_unit"]
 CATALOG_IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg"}
 
@@ -797,12 +797,13 @@ def catalog_item_rows(wb, item, projects, extra):
     return rows
 
 
-CLIP_IMAGE_MAX = 24          # a page's worth of pictures, not a crawl of the whole site
+CLIP_IMAGE_MAX = 24          # one product's worth of pictures, not a crawl of the whole site
 
 
 def clip_image_urls(data):
-    """The pictures one clip asks for: `image_urls` when several were picked out of a
-    page, `image_url` for the single address the Image address tab sends."""
+    """The pictures one clip asks for — all of them end up on a single inspiration:
+    `image_urls` when several were picked out of a page, `image_url` for the single
+    address the Image address tab sends."""
     urls = data.get("image_urls")
     if urls is None:
         urls = [data.get("image_url")] if common.clean(data.get("image_url")) else []
@@ -830,11 +831,11 @@ def clip_projects(data):
 
 
 def finish_clip(raw, meta, data, refused=0):
-    """Process, store and record the clipped images; shared by the upload and URL clip
-    paths. A page usually offers several pictures worth keeping, so this takes one image
-    or a list and makes each its own saved inspiration, all in a single save. `projects`
-    sends every new item straight onto those projects' spec sheets (one referencing
-    Selections row each), so `rows` lists the rows written per project."""
+    """Process, store and record the clipped pictures; shared by the upload and URL clip
+    paths. A product page shows one item from several angles, so this takes one image or a
+    list and saves them as a single inspiration — the first picture its cover — in one
+    save. `projects` sends that item straight onto those projects' spec sheets (one
+    referencing Selections row each), so `rows` names the row written per project."""
     processed = [catalog.process_image(one) for one in (raw if isinstance(raw, list) else [raw])]
     user = catalog_user()
     projects = clip_projects(data)
@@ -847,28 +848,23 @@ def finish_clip(raw, meta, data, refused=0):
             _, created = catalog.save_collection(wb, {"values": {"Name": common.clean(data.get("new_collection"))}},
                                                  user, REQUIRE_LOGIN)
             collection_id = created
-        items, rows, pending = [], {}, []
-        for one in processed:
-            item_id, image_name, thumb_name, new_file = catalog.add_item(
-                wb, collection_id, one, meta, user, REQUIRE_LOGIN)
-            items.append({"item": item_id, "image": image_name, "thumb": thumb_name})
-            if projects:
-                item = catalog.viewable_item(wb, item_id, user, REQUIRE_LOGIN)
-                for project_id, row in catalog_item_rows(wb, item, projects, {"Room / Area": room}).items():
-                    rows.setdefault(project_id, []).append(row)
-            if new_file:
-                pending.append(one)
+        item_id, pictures, pending = catalog.add_item(wb, collection_id, processed, meta, user, REQUIRE_LOGIN)
+        rows = {}
+        if projects:
+            item = catalog.viewable_item(wb, item_id, user, REQUIRE_LOGIN)
+            rows = catalog_item_rows(wb, item, projects, {"Room / Area": room})
         # the files are stored only once every picture has earned its place in the workbook,
         # so a refusal halfway through leaves no image behind that nothing refers to
         for one in pending:
             catalog.store_processed(store, one)
-        note = f"catalog: clip {meta.get('title') or items[0]['item']}"
-        if len(items) > 1:
-            note += f" ({len(items)} images)"
+        note = f"catalog: clip {meta.get('title') or item_id}"
+        if len(pictures) > 1:
+            note += f" ({len(pictures)} pictures)"
         store.save(wb, revision, note + (f" into {len(rows)} project(s)" if rows else ""))
-    return jsonify(ok=True, item=items[0]["item"], collection=collection_id, new_collection=created,
-                   image=items[0]["image"], thumb=items[0]["thumb"],
-                   items=items, saved=len(items), refused=refused, rows=rows)
+    return jsonify(ok=True, item=item_id, collection=collection_id, new_collection=created,
+                   image=pictures[0][0], thumb=pictures[0][1],
+                   images=[{"image": image, "thumb": thumb} for image, thumb in pictures],
+                   refused=refused, rows=rows)
 
 
 @app.post("/api/catalog/collections")
@@ -941,9 +937,9 @@ def clip_inspect():
 
 @app.post("/api/catalog/clip")
 def catalog_clip():
-    """Save an inspiration per chosen picture: the images the server downloads from the
-    chosen addresses. One page often holds several worth keeping, so the dialog sends
-    every image that was picked and each becomes its own saved inspiration."""
+    """Save one inspiration from the pictures the server downloads from the chosen
+    addresses. A product page holds several pictures of the same item, so the dialog sends
+    every image that was picked and they are saved together, the first as the cover."""
     throttle_clips()
     data = request.get_json(silent=True) or {}
     meta = clip_meta(data)
@@ -982,24 +978,6 @@ def save_catalog_comment():
     return jsonify(ok=True)
 
 
-@app.post("/api/catalog/items/<item_id>/analyze")
-def analyze_catalog_item(item_id):
-    """AI suggestions for one inspiration — or the local palette-and-keywords fallback."""
-    throttle_clips()
-    with store.lock:
-        wb, _ = store.snapshot()
-        _, items, _ = catalog.visible_catalog(wb, catalog_user(), REQUIRE_LOGIN)
-    item = catalog.find(items, "Item ID", item_id)
-    if not item:
-        raise ValidationError("This inspiration no longer exists. Refresh the page.")
-    config = catalog.ai_settings()
-    if not config:
-        return jsonify(ok=True, **catalog.local_analysis(item))
-    name = item["Image File"]
-    raw = store.read_catalog_image(name)
-    return jsonify(ok=True, **catalog.analyze_image(raw, CATALOG_IMAGE_MIME.get(Path(name).suffix, "image/jpeg"), config))
-
-
 @app.post("/api/catalog/assistant")
 def catalog_assistant():
     """Questions about the saved inspirations, answered as suggestions — never specifications."""
@@ -1013,7 +991,7 @@ def catalog_assistant():
 
 @app.get("/api/catalog/similar")
 def catalog_similar():
-    """Saved inspirations close to this one, by category, tags, materials and palette."""
+    """Saved inspirations close to this one, by category and palette."""
     with store.lock:
         wb, _ = store.snapshot()
         _, items, _ = catalog.visible_catalog(wb, catalog_user(), REQUIRE_LOGIN)

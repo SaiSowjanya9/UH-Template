@@ -82,7 +82,7 @@
         <div id="collection-strip" class="collection-strip"></div>
         <div class="table-panel catalog-panel">
           <div class="filters">
-            <label class="search-field"><span aria-hidden="true">⌕</span><input id="catalog-search" type="search" aria-label="Search inspirations" placeholder="Search titles, tags, materials, notes…"></label>
+            <label class="search-field"><span aria-hidden="true">⌕</span><input id="catalog-search" type="search" aria-label="Search inspirations" placeholder="Search titles, notes, descriptions…"></label>
             <select id="catalog-category" aria-label="Filter by category"><option value="">All categories</option></select>
             <button id="catalog-favs" class="chip catalog-favs" aria-pressed="false">♥ Favorites</button>
           </div>
@@ -182,7 +182,6 @@
         <label class="field">Qty / Unit<input id="clip-qty" type="text" maxlength="60" placeholder="1 EA"></label>
         <label class="field">Unit Price (as shown on the page)<input id="clip-price" type="text" maxlength="50" placeholder="$1,299.00"></label>
         <label class="field">Category<select id="clip-category"><option value="">Choose automatically</option></select></label>
-        <label class="field">Tags (comma separated)<input id="clip-tags" type="text" maxlength="500" placeholder="modern, white oak, brass"></label>
         <label class="field">Notes<input id="clip-notes" type="text" maxlength="2000" placeholder="Why you saved this"></label>
         <label class="field form-span">Description<textarea id="clip-description" maxlength="2000"></textarea></label>
       </div>
@@ -231,7 +230,7 @@
 
   <dialog id="catalog-picker-dialog" class="catalog-picker-dialog">
     <div class="dialog-heading"><div><div class="eyebrow">CATALOG</div><h2 id="picker-title">Add from catalog</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close dialog">×</button></div>
-    <label class="search-field"><span aria-hidden="true">⌕</span><input id="picker-search" type="search" placeholder="Search titles, tags, brands, materials…" aria-label="Search catalog"></label>
+    <label class="search-field"><span aria-hidden="true">⌕</span><input id="picker-search" type="search" placeholder="Search titles, brands, categories…" aria-label="Search catalog"></label>
     <div id="picker-grid" class="picker-grid"></div>
     <p class="form-note">Each added item becomes this project's own line item, referencing the catalog record it came from. Removing it later never deletes the catalog item.</p>
     <p id="picker-error" class="form-error" role="alert" hidden></p>

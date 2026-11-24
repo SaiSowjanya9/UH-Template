@@ -108,7 +108,7 @@ class CatalogAppTests(AppTestCase):
 
     def test_an_upload_becomes_an_inspiration_with_palette_thumbnail_and_category(self):
         cid = self.make_collection()
-        response = self.upload(cid, title="Marble kitchen island", tags="modern, brass")
+        response = self.upload(cid, title="Marble kitchen island")
         self.assertEqual(response.status_code, 200, response.json)
         item = next(i for i in self.state()["catalog"]["items"] if i["Item ID"] == response.json["item"])
         self.assertEqual(item["Title"], "Marble kitchen island")
@@ -157,9 +157,9 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(item["Qty / Unit"], "120 sq ft")
         self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
 
-    def test_several_pictures_from_one_page_each_become_their_own_inspiration(self):
-        """A page is rarely worth one picture only: every image picked is saved as its
-        own inspiration, sharing the details reviewed once, in a single save."""
+    def test_several_pictures_from_one_page_become_one_inspiration(self):
+        """A product page shows the same item from several angles, so every picture picked
+        lands on one inspiration — the first its cover — not an inspiration each."""
         cid = self.make_collection()
         shots = [picture((30, 60, 90)), picture((120, 30, 40)), picture((200, 190, 170))]
         fetched = [(raw, "image/jpeg", f"https://example.com/{n}.jpg") for n, raw in enumerate(shots)]
@@ -169,16 +169,32 @@ class CatalogAppTests(AppTestCase):
                                   "image_urls": [f"https://example.com/{n}.jpg" for n in range(3)],
                                   "source_url": "https://example.com/tile"})
         self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(response.json["saved"], 3)
+        self.assertEqual(len(response.json["images"]), 3)
         self.assertEqual(response.json["refused"], 0)
         items = [i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]
-        self.assertEqual(len(items), 3)
-        self.assertEqual({i["Title"] for i in items}, {"Daltile floor"})       # one review, three saves
-        self.assertEqual(len({i["Image Hash"] for i in items}), 3)             # three distinct pictures
-        self.assertEqual({i["Item ID"] for i in items},
-                         {entry["item"] for entry in response.json["items"]})
-        for item in items:
-            self.assertEqual(self.client.get(f"/api/catalog/images/{item['Image File']}").status_code, 200)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["Title"], "Daltile floor")
+        images, thumbs = catalog.name_list(item["Image Files"]), catalog.name_list(item["Thumb Files"])
+        self.assertEqual(len(set(images)), 3)                                  # three distinct pictures
+        self.assertEqual((item["Image File"], item["Thumb File"]), (images[0], thumbs[0]))
+        self.assertEqual([entry["image"] for entry in response.json["images"]], images)
+        for name in images + thumbs:
+            self.assertEqual(self.client.get(f"/api/catalog/images/{name}").status_code, 200)
+
+    def test_the_same_picture_picked_twice_is_saved_once(self):
+        """Two tiles can carry the same file. The inspiration keeps one of it rather than
+        listing the picture twice under its own cover."""
+        cid = self.make_collection()
+        raw = picture((70, 110, 95))
+        with patch.object(catalog, "safe_fetch", side_effect=lambda url, *a, **k: (raw, "image/jpeg", url)):
+            response = self.post("/api/catalog/clip",
+                                 {"collection": cid, "title": "Same shot twice",
+                                  "image_urls": ["https://example.com/a.jpg", "https://example.com/b.jpg"]})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(len(response.json["images"]), 1)
+        item = next(i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid)
+        self.assertEqual(len(catalog.name_list(item["Image Files"])), 1)
 
     def test_a_picture_a_site_withholds_does_not_lose_the_others(self):
         """Sites hand over some images and refuse others. The ones that came through are
@@ -194,12 +210,14 @@ class CatalogAppTests(AppTestCase):
                                   "image_urls": ["https://example.com/1.jpg", "https://example.com/2.jpg",
                                                  "https://example.com/3.jpg"]})
         self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual((response.json["saved"], response.json["refused"]), (2, 1))
-        self.assertEqual(len([i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]), 2)
+        self.assertEqual((len(response.json["images"]), response.json["refused"]), (2, 1))
+        items = [i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(len(catalog.name_list(items[0]["Image Files"])), 2)
 
-    def test_several_pictures_into_a_project_write_a_line_item_each(self):
-        """Clipping three pictures onto a project's spec sheet writes that project three
-        referencing rows — one per inspiration — in the same save."""
+    def test_several_pictures_of_one_product_write_one_line_item(self):
+        """Clipping three pictures of one product onto a project's spec sheet writes that
+        project a single referencing row — the pictures are angles, not three products."""
         cid = self.make_collection()
         shots = [(picture((n * 40, 20, 60)), "image/jpeg", f"https://example.com/{n}.jpg") for n in range(3)]
         with patch.object(catalog, "safe_fetch", side_effect=shots):
@@ -209,11 +227,10 @@ class CatalogAppTests(AppTestCase):
                                   "projects": ["UH-101"], "room": "Powder Room"})
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(list(response.json["rows"]), ["UH-101"])
-        self.assertEqual(len(response.json["rows"]["UH-101"]), 3)
-        saved = {entry["item"] for entry in response.json["items"]}
-        rows = [r for r in self.state()["selections"] if r.get("Catalog Item ID") in saved]
-        self.assertEqual(len(rows), 3)
-        self.assertEqual({r["Room / Area"] for r in rows}, {"Powder Room"})
+        rows = [r for r in self.state()["selections"] if r.get("Catalog Item ID") == response.json["item"]]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["Room / Area"], "Powder Room")
+        self.assertEqual(rows[0]["Item"], "Green tile")
 
     def test_more_pictures_than_one_clip_allows_are_refused(self):
         """A clip is a page's worth of pictures, not a crawl: the list is capped and the
@@ -307,7 +324,7 @@ class CatalogAppTests(AppTestCase):
         item_id = self.upload(cid, title="Herringbone floor").json["item"]
         response = self.post("/api/catalog/items", {"item": item_id, "values": {
             "Title": "Herringbone oak floor", "Category": "Flooring & Tiles",
-            "Collection ID": other, "Favorite": "Yes", "Tags": "herringbone, oak"}})
+            "Collection ID": other, "Favorite": "Yes"}})
         self.assertEqual(response.status_code, 200, response.json)
         item = next(i for i in self.state()["catalog"]["items"] if i["Item ID"] == item_id)
         self.assertEqual(item["Collection ID"], other)
@@ -318,6 +335,41 @@ class CatalogAppTests(AppTestCase):
         self.assertEqual(self.state()["catalog"]["items"], [])
         for name in files:                                     # orphaned files are removed with the row
             self.assertEqual(self.client.get(f"/api/catalog/images/{name}").status_code, 400)
+
+    def test_deleting_an_inspiration_removes_every_picture_it_held(self):
+        """An inspiration owns all of its pictures, so deleting it takes each of them —
+        not only the cover — with it."""
+        cid = self.make_collection()
+        shots = [(picture((n * 60 + 10, 40, 80)), "image/jpeg", f"https://example.com/{n}.jpg") for n in range(3)]
+        with patch.object(catalog, "safe_fetch", side_effect=shots):
+            created = self.post("/api/catalog/clip",
+                                {"collection": cid, "title": "Three angles",
+                                 "image_urls": [f"https://example.com/{n}.jpg" for n in range(3)]}).json
+        files = [name for entry in created["images"] for name in (entry["image"], entry["thumb"])]
+        response = self.post("/api/catalog/items", {"item": created["item"], "delete": True})
+        self.assertEqual(response.status_code, 200, response.json)
+        for name in files:
+            self.assertEqual(self.client.get(f"/api/catalog/images/{name}").status_code, 400)
+
+    def test_clipping_the_same_product_again_is_refused_but_a_new_angle_is_not(self):
+        """Every picture already filed here means the clip happened twice; one the
+        collection has not seen means this clip shows the product differently."""
+        cid = self.make_collection()
+        shots = {f"https://example.com/{n}.jpg": picture((n * 50 + 20, 90, 120)) for n in range(3)}
+        def answer(url, *args, **kwargs):
+            return (shots[url], "image/jpeg", url)
+        with patch.object(catalog, "safe_fetch", side_effect=answer):
+            first = self.post("/api/catalog/clip", {"collection": cid, "title": "Bridge faucet",
+                                                    "image_urls": list(shots)[:2]})
+            self.assertEqual(first.status_code, 200, first.json)
+            again = self.post("/api/catalog/clip", {"collection": cid, "title": "Bridge faucet again",
+                                                    "image_urls": list(shots)[:2]})
+            self.assertEqual(again.status_code, 400)
+            self.assertIn("already", again.json["error"])
+            wider = self.post("/api/catalog/clip", {"collection": cid, "title": "Bridge faucet, wider",
+                                                    "image_urls": list(shots)})
+            self.assertEqual(wider.status_code, 200, wider.json)
+        self.assertEqual(len([i for i in self.state()["catalog"]["items"] if i["Collection ID"] == cid]), 2)
 
     def test_an_unknown_category_is_refused(self):
         cid = self.make_collection()
@@ -391,8 +443,8 @@ class CatalogAppTests(AppTestCase):
 
     def test_the_assistant_answers_locally_when_no_ai_key_is_configured(self):
         cid = self.make_collection()
-        self.upload(cid, title="Marble kitchen island", tags="marble, modern")
-        self.upload(cid, raw=picture((99, 99, 99)), title="Cedar pergola", tags="outdoor")
+        self.upload(cid, title="Marble kitchen island")
+        self.upload(cid, raw=picture((99, 99, 99)), title="Cedar pergola")
         response = self.post("/api/catalog/assistant", {"question": "find my marble kitchen ideas"})
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(response.json["source"], "local")
@@ -400,20 +452,42 @@ class CatalogAppTests(AppTestCase):
         marble = next(i for i in items if "Marble" in i["Title"])
         self.assertIn(marble["Item ID"], response.json["item_ids"])
 
-    def test_analyze_without_a_key_suggests_from_keywords_and_is_labelled_local(self):
+    def test_the_retired_image_analysis_stays_removed(self):
+        """Nothing analyses a picture any more: the suggestion button, its route and the
+        vision call are gone, so an image is never sent anywhere to be described."""
         cid = self.make_collection()
         item_id = self.upload(cid, title="Quartz bathroom vanity").json["item"]
         response = self.client.post(f"/api/catalog/items/{item_id}/analyze", json={}, headers=self.headers)
-        self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(response.json["source"], "local")
-        self.assertEqual(response.json["category"], "Bathroom")
-        self.assertIn("quartz", response.json["materials"])
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(hasattr(catalog, "analyze_image"))
+        self.assertFalse(hasattr(catalog, "local_analysis"))
+        self.assertNotIn("ai", self.state()["catalog"])
 
-    def test_similar_designs_rank_shared_category_and_tags_first(self):
+    def test_the_retired_tag_and_material_fields_are_refused_and_dropped(self):
+        """Tags and Materials were removed from the inspiration: a client cannot write
+        them back, and a workspace that still carries the columns loses them on load."""
         cid = self.make_collection()
-        a = self.upload(cid, raw=picture((200, 50, 50)), title="Kitchen one", tags="brass, modern").json["item"]
-        b = self.upload(cid, raw=picture((210, 60, 60)), title="Kitchen two", tags="brass").json["item"]
-        c = self.upload(cid, raw=picture((5, 5, 5)), title="Dark cedar pergola garden", tags="outdoor").json["item"]
+        item_id = self.upload(cid, title="Herringbone floor").json["item"]
+        for field in ("Tags", "Materials"):
+            response = self.post("/api/catalog/items", {"item": item_id, "values": {field: "oak"}})
+            self.assertEqual(response.status_code, 400, field)
+        wb, revision = self.store.snapshot()
+        sheet = wb["Catalog Items"]
+        column = sheet.max_column + 1
+        sheet.cell(1, column, "Tags")
+        sheet.cell(2, column, "left over from an older save")
+        self.store.save(wb, revision)
+        after, _ = self.store.snapshot()
+        self.assertNotIn("Tags", {c.value for c in after["Catalog Items"][1]})
+        item = next(i for i in self.state()["catalog"]["items"] if i["Item ID"] == item_id)
+        self.assertNotIn("Tags", item)
+        self.assertNotIn("Materials", item)
+
+    def test_similar_designs_rank_shared_category_and_palette_first(self):
+        cid = self.make_collection()
+        a = self.upload(cid, raw=picture((200, 50, 50)), title="Kitchen one").json["item"]
+        b = self.upload(cid, raw=picture((210, 60, 60)), title="Kitchen two").json["item"]
+        c = self.upload(cid, raw=picture((5, 5, 5)), title="Dark cedar pergola garden").json["item"]
         response = self.client.get(f"/api/catalog/similar?item={a}")
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(response.json["item_ids"][0], b)
@@ -642,7 +716,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(page["model"], "63075-BL")
         self.assertEqual(page["finish"], "Matte Black")
         self.assertEqual(page["size"], "Single handle, 16 in")
-        self.assertEqual(page["materials"], "brass, stainless steel")
+        self.assertNotIn("materials", page)        # the page's material is read by nothing now
         urls = [img["url"] for img in page["images"]]
         # the product's own photos are offered as candidates, however the page nested them
         self.assertIn("https://cdn.example.com/odin-main.jpg", urls)
@@ -655,7 +729,6 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(page["model"], "G10-W3030")
         self.assertEqual(page["finish"], "Painted White")
         self.assertEqual(page["size"], "30 x 30 in")
-        self.assertEqual(page["materials"], "plywood")
 
     def test_the_spec_fields_fall_back_to_meta_tags(self):
         page = catalog.parse_page(META_PRICE_HTML, "https://example.com/tile")
@@ -664,7 +737,6 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(page["model"], "CT-8x8-OLE")
         self.assertEqual(page["finish"], "Terracotta")
         self.assertEqual(page["size"], "8x8 in")
-        self.assertEqual(page["materials"], "cement")
 
     def test_price_number_reads_the_amount_out_of_clipped_text(self):
         self.assertEqual(catalog.price_number("$1,299.00 USD"), 1299.0)
@@ -672,11 +744,10 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(catalog.price_number("Call for pricing"))
         self.assertIsNone(catalog.price_number(""))
 
-    def test_keyword_category_and_materials(self):
+    def test_keyword_category(self):
         self.assertEqual(catalog.keyword_category("A waterfall kitchen island with brass pulls"), "Kitchen")
         self.assertEqual(catalog.keyword_category("stucco facade with a standing-seam roof"), "Exterior")
         self.assertEqual(catalog.keyword_category("nothing relevant"), "")
-        self.assertEqual(catalog.keyword_materials("Honed marble over white oak"), ["marble", "oak"])
 
 
 
