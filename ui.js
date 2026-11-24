@@ -2480,18 +2480,34 @@ $("assistant-dialog").addEventListener("click", (event) => {
   const open = event.target.closest("[data-insp-open]");
   if (open) { $("assistant-dialog").close(); state.view = "catalog"; render(); openInspiration(open.dataset.inspOpen); }
 });
-// The clipper is the one downloadable bookmark file: it carries the page scanner and the
-// UH icon, which a bookmark only keeps when it is imported rather than dragged. It reads
+// The clipper is one bookmark, dragged from this dialog onto the bookmarks bar. It
+// carries the clipper's page scanner, served by the app so the two never drift: it reads
 // the page from inside the browser and posts the result here, so a site whose bot wall
-// 403s the server's fetch clips exactly like any other.
-$("catalog-clipper-open").addEventListener("click", () => $("clipper-dialog").showModal());
-// Dragging the download onto the bar bookmarks this page instead of the clipper, so the
-// link refuses to be dragged and says what to do with the file it just saved.
-$("clipper-download").addEventListener("dragstart", (event) => {
-  event.preventDefault();
-  toast("Click this to download the file, then import it — step 1 below.", true);
+// 403s the server's fetch clips exactly like any other. The old /?clip=<url> link stands
+// in only until the real code arrives (or if it cannot).
+let bookmarkletHref = "";
+$("catalog-clipper-open").addEventListener("click", async () => {
+  $("clipper-bookmarklet").setAttribute("href",
+    bookmarkletHref || `javascript:void(window.open('${location.origin}/?clip='+encodeURIComponent(location.href),'_blank'))`);
+  $("clipper-dialog").showModal();
+  if (!bookmarkletHref) {
+    try {
+      const response = await fetch("/api/catalog/bookmarklet");
+      if (!response.ok) return;
+      const code = (await response.text()).replaceAll("__UH_APP__", location.origin);
+      bookmarkletHref = `javascript:${encodeURIComponent(code)}`;
+      $("clipper-bookmarklet").setAttribute("href", bookmarkletHref);
+    } catch { /* the stand-in link above still works for sites the server can read */ }
+  }
 });
-$("clipper-download").addEventListener("click", () => toast("Downloaded. Now import it: Ctrl+Shift+O → ⋮ menu → Import bookmarks."));
+$("clipper-bookmarklet").addEventListener("click", (event) => { event.preventDefault(); toast("Drag this ticket onto your bookmarks bar instead of clicking it here."); });
+// A bookmark is dragged once and kept for good, so it must never be the stand-in: until
+// the scanner's code is in hand the ticket refuses to be picked up and says to try again.
+$("clipper-bookmarklet").addEventListener("dragstart", (event) => {
+  if (bookmarkletHref) return;
+  event.preventDefault();
+  toast("The clipper is still loading — drag it again in a moment.", true);
+});
 
 refresh().then(() => {
   // An old bookmarklet opens /?clip=<page>: land on the catalog with the server reading that page.

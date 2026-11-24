@@ -371,34 +371,12 @@ class CatalogAppTests(AppTestCase):
         self.assertIn("__UH_APP__", code)            # ui.js fills in its own origin
         self.assertIn("clipwait=1", code)
 
-    def test_the_bookmark_file_carries_the_uh_icon_and_the_scanner(self):
-        """A dragged javascript: bookmark wears the browser's own globe, but Chrome and
-        Edge keep a bookmarks file's ICON on import — this file is how the bookmarks bar
-        gets the real UH gold symbol."""
-        response = self.client.get("/clip-bookmark.html")
-        self.assertEqual(response.status_code, 200)
-        text = response.get_data(as_text=True)
-        self.assertTrue(text.startswith("<!DOCTYPE NETSCAPE-Bookmark-file-1>"))
-        self.assertIn('HREF="javascript:', text)
-        # imported onto the bar, not into Other bookmarks, where it reads as a failed import
-        self.assertIn('<H3 PERSONAL_TOOLBAR_FOLDER="true">', text)
-        self.assertIn("uhCollect", text)                      # the scanner rides inside
-        self.assertIn("Clip to UH Homes", text)
-        href = text.split('HREF="', 1)[1].split('"', 1)[0]
-        self.assertNotIn("&", href)                           # quoted, so the attribute stays whole
-        import base64
-        icon = text.split('ICON="data:image/png;base64,', 1)[1].split('"', 1)[0]
-        raw = base64.b64decode(icon)
-        self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
-        # a favicon, not the bare symbol: a bookmarks bar paints it near 16px, where the
-        # mark's own hairline strokes vanish, so it rides on the brand's dark tile
-        drawn = Image.open(io.BytesIO(raw)).convert("RGBA")
-        self.assertEqual(drawn.size, (32, 32))
-        middle = drawn.getpixel((16, 16))
-        self.assertEqual(middle[3], 255)                          # opaque through the middle
-        pixels = [drawn.getpixel((x, y)) for y in range(32) for x in range(32)]
-        self.assertTrue(any(p[3] == 255 and max(p[:3]) < 70 for p in pixels), "no dark tile")
-        self.assertTrue(any(p[0] > 150 and p[1] > 110 and p[2] < 130 for p in pixels), "no gold mark")
+    def test_the_importable_bookmark_file_stays_removed(self):
+        """The clipper is the bookmarklet dragged out of the dialog, by request. The
+        downloadable bookmarks file that carried the UH icon through Chrome's importer is
+        gone: an import that lands in a folder somewhere reads as a clipper that did not
+        install, and the dragged ticket is one step that always works."""
+        self.assertEqual(self.client.get("/clip-bookmark.html").status_code, 404)
 
     def test_the_retired_browser_extension_stays_removed(self):
         """The extension was retired for the bookmarklet: its download, its picker routes

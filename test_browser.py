@@ -1,3 +1,4 @@
+import io
 import re
 import shutil
 import tempfile
@@ -5,7 +6,9 @@ import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote
 
+from PIL import Image
 from werkzeug.serving import make_server
 
 import app
@@ -21,6 +24,41 @@ def settle_layout(page):
     """The shell's margin-left transitions for 180ms after a viewport change, so an
     immediate measurement still reports the desktop layout."""
     expect(page.locator(".app-shell")).to_have_css("margin-left", "0px")
+
+
+PRODUCT_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<title>Example Supply</title>
+<meta property="og:title" content="Brass Bridge Faucet">
+<meta property="og:site_name" content="Example Supply">
+<meta property="og:image" content="/hero.jpg">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Brass Bridge Faucet",
+ "brand":{"@type":"Brand","name":"Kohler"},"sku":"K-596-VS","color":"Unlacquered Brass",
+ "offers":{"@type":"Offer","price":"1299.00","priceCurrency":"USD"}}
+</script></head><body>
+<h1>Brass Bridge Faucet</h1>
+<img src="/hero.jpg" alt="Faucet over a marble counter" width="400" height="300">
+<img src="/detail.jpg" alt="Spout detail" width="400" height="300">
+<button type="button" id="clip-it">Clip this page</button>
+</body></html>"""
+
+
+def product_site(colors):
+    """The shop the clipper reads: one product page, and a different picture behind each
+    address - two identical pictures in one collection are refused as duplicates."""
+    pictures = {}
+    for path, color in colors.items():
+        buffer = io.BytesIO()
+        Image.new("RGB", (640, 480), color).save(buffer, "JPEG")
+        pictures[path] = buffer.getvalue()
+
+    def site(environ, start_response):
+        raw = pictures.get(environ["PATH_INFO"])
+        body, kind = (raw, "image/jpeg") if raw else (PRODUCT_PAGE.encode("utf-8"), "text/html; charset=utf-8")
+        start_response("200 OK", [("Content-Type", kind), ("Content-Length", str(len(body)))])
+        return [body]
+
+    return site
 
 
 def expect_cells_holding(page, *values):
@@ -1391,6 +1429,96 @@ class BrowserTests(unittest.TestCase):
                     server.shutdown()
                     thread.join(timeout=5)
                     server.server_close()
+
+    def test_the_clipper_is_dragged_from_the_dialog_and_clips_a_whole_page(self):
+        """The clipper is one bookmark, dragged out of the dialog onto the bookmarks bar:
+        its ticket is a javascript: link carrying the page scanner itself. Clicking that
+        code on a product page reads the page inside the browser - no server fetch of the
+        page at all, so a bot-walled store clips like any other - and hands its pictures
+        and its details to the clip dialog, where several pictures are picked at once and
+        saved as an inspiration each."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "clipper.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            shop = make_server("127.0.0.1", 0, product_site({"/hero.jpg": (168, 132, 74),
+                                                             "/detail.jpg": (41, 58, 86)}), threaded=True)
+            shop_thread = threading.Thread(target=shop.serve_forever, daemon=True)
+            shop_thread.start()
+            # the shop answers on loopback, which the clipper's SSRF guard refuses by design
+            with patch.object(app, "store", WorkspaceStore(workspace)), \
+                 patch.object(app.catalog, "check_address", lambda host: None):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    origin = f"http://127.0.0.1:{server.server_port}"
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+                        errors = []
+                        context.on("page", lambda opened: opened.on("pageerror", lambda error: errors.append(str(error))))
+                        page = context.new_page()
+                        page.goto(origin)
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="catalog"]').click()
+                        expect(page.locator("#catalog-view")).to_be_visible()
+                        page.locator("#catalog-clipper-open").click()
+                        ticket = page.locator("#clipper-bookmarklet")
+                        expect(ticket).to_be_visible()
+                        # the ticket holds the real clipper, not the stand-in link: the scanner itself
+                        page.wait_for_function("() => (document.getElementById('clipper-bookmarklet')"
+                                               ".getAttribute('href') || '').includes('uhCollect')")
+                        href = ticket.get_attribute("href")
+                        self.assertTrue(href.startswith("javascript:"), href[:40])
+                        code = unquote(href[len("javascript:"):])
+                        self.assertIn(origin, code)             # the app's own address, filled in
+                        output = app.BASE / "output"
+                        output.mkdir(exist_ok=True)
+                        page.screenshot(path=str(output / "clipper-dialog.png"))
+                        # it is picked up, not pressed: clicking it here says so instead of running it
+                        ticket.click()
+                        expect(page.locator("#toast")).to_contain_text("Drag this ticket")
+                        page.keyboard.press("Escape")
+
+                        shop_page = context.new_page()
+                        shop_page.goto(f"http://127.0.0.1:{shop.server_port}/faucet")
+                        shop_page.evaluate("(code) => document.getElementById('clip-it')"
+                                           ".addEventListener('click', () => new Function(code)())", code)
+                        with context.expect_page() as opened:
+                            shop_page.locator("#clip-it").click()   # a real click, so the window opens
+                        clipped = opened.value
+                        clipped.wait_for_load_state()
+                        expect(clipped.locator("#clip-dialog")).to_be_visible(timeout=20000)
+                        expect(clipped.locator("#clip-page-note")).to_contain_text("read from your browser")
+                        # details the server never fetched: the browser read them off the page
+                        expect(clipped.locator("#clip-brand")).to_have_value("Kohler")
+                        expect(clipped.locator("#clip-model")).to_have_value("K-596-VS")
+                        expect(clipped.locator("#clip-finish")).to_have_value("Unlacquered Brass")
+                        expect(clipped.locator("#clip-price")).to_have_value("1299.00 USD")
+                        expect(clipped.locator("#clip-title")).to_have_value("Brass Bridge Faucet")
+                        clipped.locator("#clip-collection").select_option("__new")
+                        clipped.locator("#clip-new-collection").fill("Faucets")
+                        clipped.locator("#clip-next").click()
+                        tiles = clipped.locator(".clip-candidate")
+                        expect(tiles).to_have_count(2)
+                        tiles.nth(0).click()
+                        tiles.nth(1).click()
+                        expect(clipped.locator("#clip-chosen")).to_contain_text("2 pictures selected")
+                        clipped.locator("#clip-next").click()
+                        expect(clipped.locator("#clip-save")).to_have_text("Save 2 inspirations")
+                        clipped.locator("#clip-save").click()
+                        expect(clipped.locator("#clip-dialog")).not_to_be_visible(timeout=30000)
+                        expect(clipped.locator("#toast")).to_contain_text("2 inspirations saved")
+                        expect(clipped.locator('.insp-card:has-text("Brass Bridge Faucet")')).to_have_count(2)
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+                    shop.shutdown()
+                    shop_thread.join(timeout=5)
+                    shop.server_close()
 
 
 if __name__ == "__main__":

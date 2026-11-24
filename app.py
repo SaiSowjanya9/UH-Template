@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 
 from flask import Flask, Request, jsonify, redirect, render_template, request, send_file, session, url_for
-from PIL import Image, ImageDraw
+from PIL import Image
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -1049,56 +1049,6 @@ def clipper_bookmarklet():
     scanner = (BASE / "clip_scan.js").read_text(encoding="utf-8")
     return app.response_class(BOOKMARKLET_WRAPPER.replace("__UH_SCANNER__", scanner),
                               mimetype="text/javascript")
-
-
-BOOKMARK_ICON = 32        # what a bookmarks bar actually draws, give or take a pixel
-
-
-def bookmark_icon():
-    """The icon the bookmark file carries. The symbol's own PNG sits small inside a lot
-    of transparency, and a bookmarks bar paints it around 16px, where three hairline
-    strokes read as scratches rather than a mark. So it is trimmed to its ink, scaled to
-    fill the square and set on the brand's dark tile, which stays legible that small."""
-    mark = Image.open(BASE / "brand_assets" / "uh-icon.png").convert("RGBA")
-    mark = mark.crop(mark.split()[3].getbbox() or (0, 0, mark.width, mark.height))
-    room = BOOKMARK_ICON - 8
-    scale = min(room / mark.width, room / mark.height)
-    mark = mark.resize((max(1, round(mark.width * scale)), max(1, round(mark.height * scale))), Image.LANCZOS)
-    tile = Image.new("RGBA", (BOOKMARK_ICON, BOOKMARK_ICON), (0, 0, 0, 0))
-    ImageDraw.Draw(tile).rounded_rectangle((0, 0, BOOKMARK_ICON - 1, BOOKMARK_ICON - 1), radius=7,
-                                           fill=(42, 38, 29, 255))
-    tile.alpha_composite(mark, ((BOOKMARK_ICON - mark.width) // 2, (BOOKMARK_ICON - mark.height) // 2))
-    out = io.BytesIO()
-    tile.save(out, "PNG")
-    return out.getvalue()
-
-
-@app.get("/clip-bookmark.html")
-def clip_bookmark_file():
-    """The bookmarklet as a ready-to-import bookmarks file carrying the UH gold icon.
-    A dragged javascript: bookmark always wears the browser's own globe — no page can
-    set it — but Chrome and Edge honor a bookmarks file's ICON attribute on import, so
-    importing this file puts a Clip to UH Homes in the bar wearing the UH mark."""
-    import base64
-    from urllib.parse import quote
-    scanner = (BASE / "clip_scan.js").read_text(encoding="utf-8")
-    code = BOOKMARKLET_WRAPPER.replace("__UH_SCANNER__", scanner) \
-                              .replace("__UH_APP__", request.host_url.rstrip("/"))
-    href = "javascript:" + quote(code, safe="!'()*-._~")      # quotes and & are encoded, so the attribute stays whole
-    icon = base64.b64encode(bookmark_icon()).decode()
-    # The entry sits inside a PERSONAL_TOOLBAR_FOLDER folder on purpose: Chrome's importer
-    # reads that flag to decide whether an entry belongs to the bookmarks bar or to Other
-    # bookmarks, and an import that lands out of sight reads as an import that failed.
-    html = ("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n"
-            '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n'
-            "<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n"
-            '    <DT><H3 PERSONAL_TOOLBAR_FOLDER="true">Bookmarks bar</H3>\n'
-            "    <DL><p>\n"
-            f'        <DT><A HREF="{href}" ICON="data:image/png;base64,{icon}">Clip to UH Homes</A>\n'
-            "    </DL><p>\n"
-            "</DL><p>\n")
-    return send_file(io.BytesIO(html.encode("utf-8")), as_attachment=True,
-                     download_name="uh-clip-bookmark.html", mimetype="text/html")
 
 
 def check_exposure():
