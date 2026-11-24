@@ -1252,6 +1252,51 @@ class ScheduleTests(unittest.TestCase):
                     self.assertIn("Water Purification System", self.text(pdf),
                                   "a prose value wraps while other columns hold spare room")
 
+    def test_a_spec_sheet_field_holds_its_value_inside_its_box(self):
+        """Every cell of the PDF is typed into, and a form field is a box rather than a
+        column: a reader clips the characters that reach past its edge, and the copy
+        drawn underneath for print and extraction spills straight across the cell next
+        to it - a finish name read half inside its own box and half over the column
+        beside it. A value too long for its box wraps and the box grows to hold the
+        lines, in both orientations and however narrow the column is.
+        """
+        import build_lookbook
+        from pypdf import PdfReader
+        from reportlab.pdfbase import pdfmetrics
+        finish = ("Stainless steel, transitional handle with brushed brass trim, "
+                  "matching toe kick and a factory applied anti-smudge coating")
+        rows = self.rows(2, **{"Room / Area": "Kitchen", "Finish / Color": finish,
+                               "Manufacturer": "Sub-Zero", "Model #": "DEC3050R"})
+        for name in build_lookbook.SPEC_ORIENTATIONS:
+            with tempfile.TemporaryDirectory() as folder:
+                pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
+                                                Path(folder), orientation=name)
+                fields = [annotation.get_object() for page in PdfReader(str(pdf)).pages
+                          for annotation in page.get("/Annots", [])
+                          if annotation.get_object().get("/FT") == "/Tx"]
+                text = " ".join(self.text(pdf).split())
+            self.assertTrue(fields, f"the {name} sheet has no editable cells")
+            wrapped = 0
+            for field in fields:
+                x0, y0, x1, y1 = (float(edge) for edge in field["/Rect"])
+                lines = str(field.get("/V", "")).split("\n")
+                wrapped += len(lines) > 1
+                # typing into a box wraps inside it too, rather than running off the side
+                self.assertTrue(int(field.get("/Ff", 0)) & 1 << 12,
+                                f"a box on the {name} sheet does not wrap what is typed into it")
+                for line in lines:
+                    self.assertLessEqual(
+                        pdfmetrics.stringWidth(line, build_lookbook.SPEC_FORM_FONT, 9),
+                        x1 - x0 - build_lookbook.SPEC_FIELD_INSET + 0.01,
+                        f"{line!r} prints past the edge of its box on the {name} sheet")
+                self.assertGreaterEqual(
+                    y1 - y0 + 0.01,
+                    build_lookbook.SPEC_FIELD_H
+                    + (len(lines) - 1) * build_lookbook.SPEC_FIELD_LEADING * 9,
+                    f"a box on the {name} sheet is shorter than the lines it holds")
+            self.assertTrue(wrapped, f"the long finish name did not wrap on the {name} sheet")
+            self.assertIn(finish, text, f"the finish name lost words on the {name} sheet")
+
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
         """The gaps between columns are secondary structure, so they are the lightest rule on
         the sheet - half a row rule - and both ends close on a horizontal rule instead of

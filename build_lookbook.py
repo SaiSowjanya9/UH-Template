@@ -149,7 +149,15 @@ SPEC_HEADING_TRACK = 1.2
 # so typed text uses Helvetica while every label and heading keeps the brand font.
 SPEC_FORM_FONT = "Helvetica"
 SPEC_FORM_BORDER = Color(0.78, 0.74, 0.65)
-SPEC_FIELD_H = 15
+SPEC_FIELD_H = 15                    # a box holding one line
+SPEC_FIELD_BW = 0.5                  # the hairline it is drawn with
+# A reader lays a field's text out inside that border rather than against it: it starts
+# the text four border widths in and clips at two, so that much of the box never holds a
+# character. The box is drawn that much wider than its cell instead, half either side, so
+# what a field can hold is exactly the room spec_widths measured the column for - rather
+# than every column on the page paying for the border its cells are drawn with.
+SPEC_FIELD_INSET = 6 * SPEC_FIELD_BW
+SPEC_FIELD_LEADING = 1.2             # the leading a reader gives a field's own lines
 # Typographic punctuation → WinAnsi-safe equivalents for form field values.
 SPEC_SAFE_CHARS = {0x2013: "-", 0x2014: "-", 0x2018: "'", 0x2019: "'", 0x201C: '"',
                    0x201D: '"', 0x2026: "...", 0x00A0: " "}
@@ -160,41 +168,81 @@ def spec_form_text(value):
     return clean(value).translate(SPEC_SAFE_CHARS).encode("latin-1", "replace").decode("latin-1")
 
 
-class SpecFieldCell(Flowable):
-    """An editable single-line text field inside a spec-sheet table cell.
+def spec_field_lines(value, room, size=9):
+    """A value broken into the lines a field with that much room holds, wrapped at spaces.
 
-    The cell draws its value as visible text (for print and PDF extractors) and
-    overlays a transparent editable form field so a PDF reader lets the user edit it.
+    A field is a box, not a column: a reader clips whatever reaches past its edge and
+    the copy drawn under it spills across the cell beside it, so a finish name reads
+    half inside its box and half over the one next door. Wrapping here instead lets
+    the box grow and keeps every character where it belongs. A single word wider than
+    the whole box is cut where it stops fitting, which the column widths make a last
+    resort rather than a habit.
+    """
+    fits = lambda text: pdfmetrics.stringWidth(text, SPEC_FORM_FONT, size) <= room
+    words = value.split()
+    if not words or room < size:      # no value, or no room to lay one out in
+        return [" ".join(words)] if words else []
+    lines = []
+    for word in words:
+        while word and not fits(word):
+            cut = next((i for i in range(1, len(word)) if not fits(word[:i + 1])), len(word))
+            lines.append(word[:cut])
+            word = word[cut:]
+        if not word:
+            continue
+        if lines and fits(f"{lines[-1]} {word}"):
+            lines[-1] = f"{lines[-1]} {word}"
+        else:
+            lines.append(word)
+    return lines
+
+
+class SpecFieldCell(Flowable):
+    """An editable text field holding one cell's value, as wide as the cell's text.
+
+    The value is wrapped to the box and the box is as tall as the lines it holds, so
+    nothing printed on the sheet is cut off at a field's edge or spilled past it. The
+    same lines are drawn on the page as well as carried by the field, at the positions
+    a reader lays its own text out in, so the two coincide instead of reading as one
+    blurred double - and the sheet still prints and extracts its values wherever form
+    fields are not rendered at all.
     """
 
-    def __init__(self, name, value, width, height=SPEC_FIELD_H, size=9):
+    def __init__(self, name, value, room, size=9):
         super().__init__()
-        self.name = name
-        self.value = spec_form_text(value)
-        self.width, self.height = width, height
-        self.size = size
+        self.name, self.width, self.size = name, room, size
+        self.lines = spec_field_lines(spec_form_text(value), room, size)
+        self.value = "\n".join(self.lines)
+        self.height = SPEC_FIELD_H + (max(len(self.lines), 1) - 1) * SPEC_FIELD_LEADING * size
 
     def wrap(self, *_):
         return self.width, self.height
 
     def draw(self):
-        # Draw visible text so print and pypdf text extraction always show the value.
-        if self.value:
+        # The box reaches half the border's own inset either side of the cell's text, so
+        # the first character sits where a printed one would and the last one still fits.
+        left = -SPEC_FIELD_INSET / 2
+        if self.lines:
             self.canv.saveState()
             self.canv.setFont(SPEC_FORM_FONT, self.size)
             self.canv.setFillColor(C["body"])
-            self.canv.drawString(1, (self.height - self.size) / 2, self.value)
+            top = self.height - self.size - 2 * SPEC_FIELD_BW
+            for index, line in enumerate(self.lines):
+                self.canv.drawString(left + 4 * SPEC_FIELD_BW,
+                                     top - index * SPEC_FIELD_LEADING * self.size, line)
             self.canv.restoreState()
-        # Overlay the editable form field (transparent fill so the drawn text shows
-        # through until the user clicks in and types).
+        # The editable field over it, transparent so the drawn text shows through until a
+        # reader renders the field itself. Every field is multiline, not only the ones that
+        # opened wrapped: it is what lays a printed value's lines back out as they were, and
+        # what wraps a longer one somebody types in rather than running it off the side.
         self.canv.acroForm.textfield(
-            name=self.name, value=self.value, x=0, y=0,
-            width=self.width, height=self.height,
+            name=self.name, value=self.value, x=left, y=0,
+            width=self.width + SPEC_FIELD_INSET, height=self.height,
             fontName=SPEC_FORM_FONT, fontSize=self.size,
             textColor=C["body"], fillColor=None,
-            borderColor=SPEC_FORM_BORDER, borderWidth=0.5,
+            borderColor=SPEC_FORM_BORDER, borderWidth=SPEC_FIELD_BW,
             forceBorder=True, relative=True,
-            fieldFlags="doNotSpellCheck")
+            fieldFlags="doNotSpellCheck multiline")
 
 
 def spec_heading(column):
@@ -1065,7 +1113,7 @@ def _spec_field_name(row_index, column):
     return f"r{row_index}_{slug}"
 
 
-def spec_cell(row, column, hidden, row_index=0, field_w=0):
+def spec_cell(row, column, hidden, row_index=0, room=0):
     """One spec-sheet cell as an editable form field.
 
     Product Link stays a clickable link rather than a field, because it is a URL
@@ -1080,7 +1128,7 @@ def spec_cell(row, column, hidden, row_index=0, field_w=0):
                          f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>',
                          SPEC_CELL_STYLE)
     return SpecFieldCell(_spec_field_name(row_index, column),
-                         spec_value(row, column), field_w)
+                         spec_value(row, column), room)
 
 
 def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
@@ -1107,12 +1155,13 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     room-grouped sheet. It is skipped when the sheet is grouped by Section - the
     heading already says it - and when the Category column was left out of the export.
     """
-    # The field widths are the column widths minus padding on both sides.
-    field_widths = [max(w - 2 * pad_x, 10) for w in widths]
+    # The room a field has for text: the column less its padding, which is the width
+    # every value on the sheet was measured against.
+    field_rooms = [max(w - 2 * pad_x, 10) for w in widths]
     data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row_idx, row in enumerate(items):
         cells = [spec_cell(row, column, hidden, row_index=row.get("_row", row_idx),
-                           field_w=field_widths[col_idx])
+                           room=field_rooms[col_idx])
                  for col_idx, (column, _) in enumerate(columns)]
         notes = []
         if show_section and clean(row.get("Section")):
@@ -1126,12 +1175,12 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     # A single Notes row at the end of the section for the customer to add data.
     safe_tag = re.sub(r"[^a-z0-9]+", "_", (section_tag or "all").lower()).strip("_")
     notes_row = [SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', col.lower()).strip('_')}",
-                               "", fw)
-                 for (col, _), fw in zip(columns, field_widths)]
+                               "", room)
+                 for (col, _), room in zip(columns, field_rooms)]
     # Label the first cell of the notes row so the customer knows it is for notes.
     first_col = columns[0][0] if columns else "Item"
     notes_row[0] = SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', first_col.lower()).strip('_')}",
-                                 "Notes", field_widths[0])
+                                 "Notes", field_rooms[0])
     data.append(notes_row)
     return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
