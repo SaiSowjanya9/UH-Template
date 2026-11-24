@@ -183,7 +183,6 @@ SPEC_FORM_FONT = "Helvetica"
 # every value and over it, so a printer that left the fields out printed the boxes and not
 # one value.
 SPEC_FIELD_BOX = Color(1, 1, 1)
-SPEC_FIELD_H = 15                    # a box holding one line
 SPEC_FIELD_BW = 0.5                  # the hairline it is laid out to, white on white
 # A reader lays a field's text out inside that border rather than against it: it starts
 # the text four border widths in and clips at two, so that much of the box never holds a
@@ -191,7 +190,21 @@ SPEC_FIELD_BW = 0.5                  # the hairline it is laid out to, white on 
 # what a field can hold is exactly the room spec_widths measured the column for - rather
 # than every column on the page paying for the border its cells are drawn with.
 SPEC_FIELD_INSET = 6 * SPEC_FIELD_BW
-SPEC_FIELD_LEADING = 1.2             # the leading a reader gives a field's own lines
+SPEC_FIELD_LEADING = 1.2             # the leading reportlab lays a field's own lines on
+SPEC_FIELD_DESCENT = 0.22            # and the room it leaves below the last line's baseline
+# A reader steps its own lines on the same leading: measured in Edge (PDFium, and so Chrome),
+# a field of 9pt Helvetica puts 10.79pt between the capitals of one line and the next, which
+# is that 1.2 to within a rounding. So a box of whole lines is whole lines in a reader too,
+# and one line of slack is what hands it an edge to slice a line along.
+# Every box on the editable copy opens with this many lines in it, whatever its value needs.
+# A field cannot grow once the file is written - a reader wraps what is typed into it and
+# then clips it at the box's edge, so a sentence typed into a cell cut off after its first
+# line and the rest was there to scroll to and nowhere to see. Three lines is the room asked
+# for: a value runs on to a second line and a third inside the column it belongs to, at the
+# sheet's own size rather than shrunk to fit - auto-sized fields fit a long value by shrinking
+# it to about 5pt, and blow a short one up to 14. It is the working copy that pays for the
+# room: the locked copy keeps every box at its own lines and stays the dense one to print.
+SPEC_FIELD_MIN_LINES = 3
 # Typographic punctuation → WinAnsi-safe equivalents for form field values.
 SPEC_SAFE_CHARS = {0x2013: "-", 0x2014: "-", 0x2018: "'", 0x2019: "'", 0x201C: '"',
                    0x201D: '"', 0x2026: "...", 0x00A0: " "}
@@ -200,6 +213,24 @@ SPEC_SAFE_CHARS = {0x2013: "-", 0x2014: "-", 0x2018: "'", 0x2019: "'", 0x201C: '
 def spec_form_text(value):
     """A value a spec-sheet PDF form field can hold."""
     return clean(value).translate(SPEC_SAFE_CHARS).encode("latin-1", "replace").decode("latin-1")
+
+
+def spec_field_height(lines, size=9):
+    """The room a field needs for that many lines and no part of one more.
+
+    A box taller than its lines does not read as spare room, it reads as a sliced line: a
+    reader lays a field's text out from the top of the box and clips it at the edge, so at
+    15pt a 9pt line left the capitals of the line below standing above that edge, and a
+    sentence typed into a cell came out as one line and the top third of the next.
+
+    The box is its lines - the first a font size below the top, the rest a leading apart,
+    the descender of the last one inside - and nothing over. Slack is what a reader slices
+    a line along: the old 15pt box left a 9pt line 3pt of room it could not fill, so the
+    line below stood a third of the way into it and was cut off at the edge. A reader steps
+    its lines on the same leading, so whole lines here are whole lines on screen.
+    """
+    return (size * (1 + SPEC_FIELD_DESCENT + (max(lines, 1) - 1) * SPEC_FIELD_LEADING)
+            + 2 * SPEC_FIELD_BW)
 
 
 def spec_field_lines(value, room, size=9):
@@ -251,7 +282,18 @@ class SpecFieldCell(Flowable):
         self.name, self.width, self.size, self.fillable = name, room, size, fillable
         self.lines = spec_field_lines(spec_form_text(value), room, size)
         self.value = "\n".join(self.lines)
-        self.height = SPEC_FIELD_H + (max(len(self.lines), 1) - 1) * SPEC_FIELD_LEADING * size
+        self.hold(1)
+
+    def hold(self, lines):
+        """Offer room for that many lines - its own, its row's deepest, or a field's own.
+
+        A row is as deep as its deepest cell either way, so every other field in it can
+        have the same room for nothing. The editable copy then opens every box at
+        SPEC_FIELD_MIN_LINES whatever its value needs, because a reader cannot grow one:
+        the lines a sentence wraps on to have to be in the box before it is typed.
+        """
+        self.height = spec_field_height(
+            max(lines, len(self.lines), SPEC_FIELD_MIN_LINES if self.fillable else 1), self.size)
 
     def wrap(self, *_):
         return self.width, self.height
@@ -1260,6 +1302,13 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
         cells = [spec_cell(row, column, hidden, row_index=row.get("_row", row_idx),
                            room=field_rooms[col_idx], fillable=fillable)
                  for col_idx, (column, _) in enumerate(columns)]
+        # Every box in the row offers what the deepest value in it needs: the row is that
+        # deep whatever happens, so the room costs the sheet nothing and a cell beside a
+        # wrapped finish has the same lines to be typed on.
+        boxes = [cell for cell in cells if isinstance(cell, SpecFieldCell)]
+        deepest = max((len(box.lines) for box in boxes), default=1)
+        for box in boxes:
+            box.hold(deepest)
         notes = []
         if show_section and clean(row.get("Section")):
             notes.append(clean(row["Section"]))

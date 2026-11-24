@@ -792,9 +792,10 @@ class AppTests(unittest.TestCase):
         reader will let anybody change, and the editable copy whose cells are typed into
         and saved. Locked is what a download means, because a reader paints its own pale
         blue over every form field it finds and nothing in the file can turn that off -
-        a sheet to read has to carry no fields at all. The two are the same page to read,
-        and the editable one says so in its name so the working copy is not the one sent
-        out. Word and the CSV have no such choice.
+        a sheet to read has to carry no fields at all. Both carry every line item, and the
+        editable one says what it is in its name, because it no longer looks like the copy
+        to send: its cells open three lines deep so a value can be typed on to a second and
+        a third, which the locked copy spends no paper on. Word and the CSV have no choice.
         """
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
@@ -826,7 +827,11 @@ class AppTests(unittest.TestCase):
             response, fields, form, text = sheet(query)
             self.assertTrue(fields, f"the editable copy has no cells to type into: {query}")
             self.assertIn("Editable", response.headers["Content-Disposition"], query)
-        self.assertEqual(sheet("&copy=editable")[3], locked_text)   # the copies read the same
+            # the room to type is the only difference: the same line items, and more pages
+            # to hold them, so the two copies no longer break their pages in the same places
+            for item in items:
+                self.assertIn(item, text, f"{item} is missing from the editable copy ({query})")
+        self.assertGreaterEqual(len(sheet("&copy=editable")[3]), len(locked_text))
 
         # a copy the builder does not know is refused, never quietly sent out editable
         self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&copy=readonly").status_code, 400)
@@ -1374,6 +1379,10 @@ class ScheduleTests(unittest.TestCase):
         beside it. A value too long for its box wraps and the box grows to hold the
         lines, in both orientations and however narrow the column is. The locked copy
         draws the very same lines; only the fields over them are missing.
+
+        Every box is a whole number of lines deep, and as deep as the deepest value in its
+        own row: a row is that deep whatever happens, so the room is free, and a box that
+        ends part way through a line hands a reader an edge to slice the next one on.
         """
         import build_lookbook
         from pypdf import PdfReader
@@ -1404,11 +1413,15 @@ class ScheduleTests(unittest.TestCase):
                         pdfmetrics.stringWidth(line, build_lookbook.SPEC_FORM_FONT, 9),
                         x1 - x0 - build_lookbook.SPEC_FIELD_INSET + 0.01,
                         f"{line!r} prints past the edge of its box on the {name} sheet")
-                self.assertGreaterEqual(
-                    y1 - y0 + 0.01,
-                    build_lookbook.SPEC_FIELD_H
-                    + (len(lines) - 1) * build_lookbook.SPEC_FIELD_LEADING * 9,
-                    f"a box on the {name} sheet is shorter than the lines it holds")
+                # A box is a whole number of lines deep - its own lines, or the deepest in
+                # its row - because a reader lays a field's text out from the top and the
+                # box's edge slices whatever line it falls through: a value typed in longer
+                # than its box came out as one line and the top third of the next.
+                held = max(len(lines), 1)
+                rooms = [build_lookbook.spec_field_height(count) for count in range(held, 12)]
+                self.assertTrue(any(abs(y1 - y0 - room) < 0.01 for room in rooms),
+                                f"a box on the {name} sheet holds {held} line(s) in "
+                                f"{round(y1 - y0, 2)}pt, which is not a whole number of them")
             self.assertTrue(wrapped, f"the long finish name did not wrap on the {name} sheet")
             self.assertIn(finish, text, f"the finish name lost words on the {name} sheet")
 
