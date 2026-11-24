@@ -296,6 +296,12 @@ body.resizing-column { cursor:col-resize; user-select:none; }
 .spec-table tr:hover td { background:#fdfcf8; }
 .spec-table th.num,.spec-table td.num { text-align:right; }
 .cell { width:100%; border:1px solid transparent; background:none; border-radius:4px; padding:8px 9px; font-family:Arial,Helvetica,sans-serif; font-size:13px; color:var(--ink); }
+/* A value longer than its column wraps and its box grows with it, the way the printed
+   sheet wraps a cell, instead of scrolling out of sight behind the column's edge: one
+   line tall while that is all the words need. An address has no spaces to wrap at, so
+   it is allowed to break anywhere rather than reach past the box. field-sizing gives
+   the height where it is supported; fitCells measures it where it is not. */
+textarea.cell { display:block; field-sizing:content; resize:none; overflow:hidden; line-height:1.25; overflow-wrap:anywhere; }
 .cell:hover { border-color:#eee6d6; background:#fffdf8; }
 .cell:focus { border-color:var(--gold); background:#fff; outline:none; }
 .cell.num { text-align:right; }

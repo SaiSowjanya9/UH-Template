@@ -287,6 +287,10 @@ const splitQtyUnit = (text) => {
   const [, number = "", unit = ""] = QTY_UNIT_RE.exec(String(text).trim());
   return { Qty: number.replace(/,/g, ""), Unit: unit.trim() };
 };
+// What a cell is holding. Its box wraps the words to keep them in sight, but the value is
+// still one line of text: a description pasted in with line breaks reads back with spaces
+// where they were, so nothing in the workspace carries a newline the sheet cannot show.
+const cellText = (input) => String(input.value ?? "").replace(/\s+/g, " ").trim();
 // The workspace fields a spec-sheet cell covers, and what it saves to each of them.
 const cellFields = (field) => (field === QTY_UNIT ? QTY_UNIT_KEYS : [field]);
 const cellValues = (field, text) => (field === QTY_UNIT ? splitQtyUnit(text) : { [field]: text });
@@ -444,13 +448,17 @@ function specDetail(row) {
   </div>`;
 }
 
-// A detail name's box is one row tall until its words need more. field-sizing does that
-// itself where it is supported; elsewhere measure the wrapped text and write the height
-// through the CSSOM, the same way applySpecWidths writes column widths.
-function fitDetailName(name) {
+// A cell's box is one row tall until its words need more. field-sizing does that itself
+// where it is supported; elsewhere measure the wrapped text and write the height through
+// the CSSOM, the same way applySpecWidths writes column widths. A sheet holds hundreds of
+// boxes, so every one is read before any is written: measuring and setting them one at a
+// time would lay the page out again for each.
+function fitCells(cells) {
   if (CSS.supports("field-sizing", "content")) return;
-  name.style.height = "auto";
-  name.style.height = `${name.scrollHeight}px`;
+  const boxes = [...cells];
+  boxes.forEach((box) => { box.style.height = "auto"; });
+  const heights = boxes.map((box) => box.scrollHeight);
+  boxes.forEach((box, index) => { box.style.height = `${heights[index]}px`; });
 }
 
 // If the focused element is a spec cell being typed into, capture its current value into
@@ -517,7 +525,14 @@ function renderSpec() {
       // instead of below, matching the Excel Bulk Items layout.
       const section = c.field === "Item" && state.specGroup !== "Section" && String(r.Section || "").trim();
       const bulk = section && isBulkGroup(name);
-      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}>${bulk ? `<span class="bulk-cat">${esc(section)}</span>` : ""}<input class="cell${c.number ? " num" : ""}${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}"${c.number ? ' type="number" min="0" step="any"' : ` maxlength="4000"`}>${section && !bulk ? `<div class="cell-sub">${esc(section)}</div>` : ""}</td>`;
+      // Words wrap and the box grows with them, like the figures in the project box and like
+      // the printed sheet: a brand or finish longer than its column is read in full instead
+      // of scrolling out of sight behind the column's edge. A price or a markup is a number
+      // on one line, so those two keep the number box they have always had.
+      const box = c.number
+        ? `<input class="cell num${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" value="${esc(value)}" placeholder="${esc(c.placeholder)}" type="number" min="0" step="any">`
+        : `<textarea class="cell${edited ? " dirty" : ""}" data-row="${r._row}" data-field="${esc(c.field)}" rows="1" maxlength="4000" placeholder="${esc(c.placeholder)}">${esc(value)}</textarea>`;
+      return `<td${c.number ? ' class="num"' : c.link ? ' class="link-col"' : ""}>${bulk ? `<span class="bulk-cat">${esc(section)}</span>` : ""}${box}${section && !bulk ? `<div class="cell-sub">${esc(section)}</div>` : ""}</td>`;
     }).join("")}<td><div class="spec-actions"><button class="text-button" data-edit="${r._row}" aria-label="Open ${esc(r.Item)}">Open</button><button class="icon-button" data-spec-remove="${r._row}" aria-label="Remove ${esc(r.Item)}">×</button></div></td></tr>`).join("");
     // The heading is the grouped field's own value, so editing it renames the room or category
     // on every line item under it. While it is being edited the toggle gives way to the box:
@@ -545,7 +560,7 @@ function renderSpec() {
     </article>`;
   }).join("") + (state.specNaming ? namingCard() : "");
   applySpecWidths();
-  document.querySelectorAll("#spec-groups .detail-name").forEach(fitDetailName);
+  fitCells(document.querySelectorAll("#spec-groups textarea.cell"));
   const grand = rows.reduce((sum, r) => sum + lineTotal(r), 0);
   $("spec-total").textContent = grand ? money(grand) : "—";
   specSaveUI();
@@ -933,7 +948,7 @@ async function saveCell(input) {
   const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   if (!record) return;
-  const value = input.value.trim(), values = cellValues(field, value);
+  const value = cellText(input), values = cellValues(field, value);
   if (cellFields(field).every((key) => String(record[key] ?? "") === values[key])) { dropHeldSpecEdit(row, field); return; }
   if (field === "Item" && !value) { toast("An item needs a name.", true); renderSpec(); return; }
   input.classList.add("dirty");
@@ -1516,7 +1531,7 @@ function holdSpecEdit(input) {
   const row = Number(input.dataset.row), field = input.dataset.field;
   const record = projectRows().find((r) => r._row === row);
   const pending = state.specPending.get(row) || {};
-  for (const [key, value] of Object.entries(cellValues(field, input.value.trim()))) {
+  for (const [key, value] of Object.entries(cellValues(field, cellText(input)))) {
     if (record && String(record[key] ?? "") === value) delete pending[key];   // back to the saved value
     else pending[key] = value;
   }
@@ -1542,16 +1557,16 @@ $("spec-groups").addEventListener("change", (event) => {
   action(() => saveCell(event.target)).finally(() => { specSaving--; specSaveUI(); });
 });
 $("spec-groups").addEventListener("input", (event) => {
-  // A wrapped detail name grows its box line by line as a long heading is typed; renderSpec
-  // refits every box again once the edit saves.
-  if (event.target.classList.contains("detail-name")) fitDetailName(event.target);
+  // A cell grows its box line by line as a long value is typed; renderSpec refits every
+  // box on the sheet again once the edit saves.
+  if (event.target.matches?.("textarea.cell")) fitCells([event.target]);
 });
 $("spec-groups").addEventListener("keydown", (event) => {
   const naming = event.target.dataset.groupNew !== undefined;
   if (!naming && event.target.dataset.groupRename === undefined) {
-    // A detail's name still holds one line of text even though its box wraps it: Enter
-    // commits through change like any other spec cell rather than typing a newline.
-    if (event.key === "Enter" && event.target.classList.contains("detail-name")) {
+    // A cell still holds one line of text even though its box wraps it: Enter commits
+    // through change, the way leaving the box does, rather than typing a newline into it.
+    if (event.key === "Enter" && event.target.matches?.("textarea.cell")) {
       event.preventDefault();
       event.target.blur();
     }

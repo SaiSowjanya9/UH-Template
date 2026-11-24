@@ -23,6 +23,18 @@ def settle_layout(page):
     expect(page.locator(".app-shell")).to_have_css("margin-left", "0px")
 
 
+def expect_cells_holding(page, *values):
+    """Wait until exactly one spec cell holds each of these values.
+
+    A cell is a box that wraps its words, so its value lives in the DOM rather than in a
+    value attribute there is a selector for - and dragging a line item renumbers the rows
+    they sit in, so the values themselves are what can be looked for.
+    """
+    page.wait_for_function(
+        "(values) => values.every((value) => [...document.querySelectorAll('#spec-groups .cell')]"
+        ".filter((cell) => cell.value === value).length === 1)", arg=list(values), timeout=15000)
+
+
 @unittest.skipIf(sync_playwright is None, "Install requirements-dev.txt to run browser tests.")
 class BrowserTests(unittest.TestCase):
     def setUp(self):
@@ -126,8 +138,8 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#spec-save")).to_have_text("Save")
 
                         moved = rows.first.get_attribute("data-row")
-                        page.locator(f'tr[data-row="{moved}"] input.cell').first.fill("Autosaved edit")
-                        page.locator(f'tr[data-row="{moved}"] input.cell').first.blur()
+                        page.locator(f'tr[data-row="{moved}"] .cell').first.fill("Autosaved edit")
+                        page.locator(f'tr[data-row="{moved}"] .cell').first.blur()
                         expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
                         self.assertEqual(len(saves), 1, saves)   # the edit wrote itself
 
@@ -136,7 +148,7 @@ class BrowserTests(unittest.TestCase):
 
                         # Qty / Unit is one box over two workspace columns: 7571 means nothing
                         # until it says sq ft, but the Price Schedule still needs the bare number.
-                        quantity = page.locator(f'tr[data-row="{moved}"] input.cell[data-field="Qty / Unit"]')
+                        quantity = page.locator(f'tr[data-row="{moved}"] .cell[data-field="Qty / Unit"]')
                         quantity.fill("7571 sq ft")
                         quantity.blur()
                         expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
@@ -145,9 +157,26 @@ class BrowserTests(unittest.TestCase):
                             " return [r.Qty, r.Unit]; }", int(moved)), ["7571", "sq ft"])
                         expect(quantity).to_have_value("7571 sq ft")
 
+                        # A value longer than its column wraps inside its box and the box grows
+                        # with it as it is typed, so none of it hides behind the column's edge -
+                        # and clicking away still commits it like any other cell.
+                        finish = page.locator(f'tr[data-row="{moved}"] .cell[data-field="Finish / Color"]')
+                        finish.fill("Brass")
+                        one_line = finish.evaluate("box => box.clientHeight")
+                        wrapping = "Stainless steel, transitional handle with brushed brass trim"
+                        finish.fill(wrapping)
+                        grown, unseen = finish.evaluate(
+                            "box => [box.clientHeight, box.scrollHeight - box.clientHeight]")
+                        self.assertGreater(grown, one_line, "the box did not grow with the wrapped value")
+                        self.assertLessEqual(unseen, 1, "part of the typed value is hidden in its box")
+                        with page.expect_response("**/api/selections"):
+                            finish.blur()
+                        expect(page.locator(f'tr[data-row="{moved}"] .cell[data-field="Finish / Color"]')
+                               ).to_have_value(wrapping)
+
                         page.route("**/api/selections", lambda route: route.abort())
-                        page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).fill("Retry me")
-                        page.locator(f'tr[data-row="{moved}"] input.cell').nth(1).blur()
+                        page.locator(f'tr[data-row="{moved}"] .cell').nth(1).fill("Retry me")
+                        page.locator(f'tr[data-row="{moved}"] .cell').nth(1).blur()
                         expect(page.locator("#spec-save")).to_have_text("Save changes (1)", timeout=15000)
                         expect(page.locator("#spec-groups .cell.dirty")).to_have_value("Retry me")
                         page.unroute("**/api/selections")
@@ -163,13 +192,11 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#toast")).to_have_text("Line item moved.", timeout=15000)
 
                         page.evaluate("refresh()")   # what polling does after any background save
-                        expect(page.locator('#spec-groups input.cell[value="Autosaved edit"]')).to_have_count(1)
-                        expect(page.locator('#spec-groups input.cell[value="Retry me"]')).to_have_count(1)
+                        expect_cells_holding(page, "Autosaved edit", "Retry me", wrapping)
 
                         page.reload()
                         page.locator('[data-view="spec"]').click()
-                        expect(page.locator('#spec-groups input.cell[value="Autosaved edit"]')).to_have_count(1)
-                        expect(page.locator('#spec-groups input.cell[value="Retry me"]')).to_have_count(1)
+                        expect_cells_holding(page, "Autosaved edit", "Retry me", wrapping)
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
@@ -704,17 +731,17 @@ class BrowserTests(unittest.TestCase):
                         cell = page.locator(f'tr[data-row="{row}"] .link-col')
                         if cell.locator(".link-edit").count():
                             cell.locator(".link-edit").click()   # the row already links somewhere
-                        cell.locator("input.cell").fill(url)
-                        cell.locator("input.cell").blur()
+                        cell.locator(".cell").fill(url)
+                        cell.locator(".cell").blur()
                         link = page.locator(f'tr[data-row="{row}"] a.product-link')
                         expect(link).to_have_text("Link")
                         expect(link).to_have_attribute("href", url)
                         expect(link).to_have_attribute("title", url)
-                        expect(cell.locator("input.cell")).to_have_count(0)
+                        expect(cell.locator(".cell")).to_have_count(0)
 
                         cell.locator(".link-edit").click()
-                        expect(cell.locator("input.cell")).to_have_value(url)
-                        cell.locator("input.cell").blur()
+                        expect(cell.locator(".cell")).to_have_value(url)
+                        cell.locator(".cell").blur()
                         expect(link).to_have_text("Link")
 
                         page.reload()
@@ -848,7 +875,7 @@ class BrowserTests(unittest.TestCase):
                         page.locator('[data-view="spec"]').click()
                         expect(page.locator("#spec-view")).to_be_visible()
                         page.route("**/api/selections", conflict_once)
-                        cell = page.locator("#spec-groups input.cell").first
+                        cell = page.locator("#spec-groups .cell").first
                         cell.fill("Retried finish")
                         cell.blur()
                         expect(page.locator("#toast")).to_have_text("Saved.", timeout=20000)
@@ -856,7 +883,7 @@ class BrowserTests(unittest.TestCase):
                         self.assertEqual(len(refused), 1, "the first save should have been refused once")
                         page.unroute("**/api/selections")
                         page.reload()
-                        expect(page.locator("#spec-groups input.cell").first).to_have_value("Retried finish")
+                        expect(page.locator("#spec-groups .cell").first).to_have_value("Retried finish")
                         self.assertEqual(errors, [])
                         browser.close()
                 finally:
@@ -1251,7 +1278,7 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator("#project-details-panel")).to_be_visible()
                         page.locator('[data-view="spec"]').click()
                         expect(page.locator("#spec-view")).to_be_visible()
-                        cell = page.locator(".spec-table tr[data-row] input.cell").first
+                        cell = page.locator(".spec-table tr[data-row] .cell").first
                         expect(cell).to_be_attached()
                         cell.click()   # the poll leaves a cell being edited alone, so reads are ours
 
@@ -1282,7 +1309,7 @@ class BrowserTests(unittest.TestCase):
 
                         page.route("**/api/selections", refuse)
                         row = page.locator(".spec-table tr[data-row]").first.get_attribute("data-row")
-                        target = page.locator(f'tr[data-row="{row}"] input.cell').nth(1)
+                        target = page.locator(f'tr[data-row="{row}"] .cell').nth(1)
                         target.fill("Mid deploy")
                         target.blur()
                         expect(page.locator("#toast")).to_contain_text("restarting", timeout=15000)
