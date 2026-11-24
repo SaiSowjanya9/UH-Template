@@ -1278,6 +1278,20 @@ class ScheduleTests(unittest.TestCase):
         from pypdf import PdfReader
         return "\n".join(page.extract_text() for page in PdfReader(str(path)).pages)
 
+    def figures(self):
+        """A home's own eight figures, and the PROJECT rows that carry them."""
+        figures = [("Conditioned area, first floor", "3,819 sq ft"),
+                   ("Conditioned area, second floor", "2,051 sq ft"),
+                   ("Total conditioned house", "5,870 sq ft"),
+                   ("Garage 1, two-car", "719 sq ft"),
+                   ("Total under roof", "7,571 sq ft"),
+                   ("Covered porch / covered patio / covered terrace", "113 / 229 / 327 sq ft"),
+                   ("Open terrace", "142 sq ft"),
+                   ("Garage 2, one-car", "313 sq ft")]
+        return figures, [{**row, "Room / Area": "PROJECT", "Item": name,
+                          "Size / Configuration": value}
+                         for row, (name, value) in zip(self.rows(len(figures)), figures)]
+
     def test_deliverables_use_arial_for_selection_items(self):
         import build_lookbook
         import build_powerpoint
@@ -1439,16 +1453,7 @@ class ScheduleTests(unittest.TestCase):
         import build_lookbook
         import build_word
         from docx import Document
-        figures = [("Conditioned area, first floor", "3,819 sq ft"),
-                   ("Conditioned area, second floor", "2,051 sq ft"),
-                   ("Total conditioned house", "5,870 sq ft"),
-                   ("Garage 1, two-car", "719 sq ft"),
-                   ("Total under roof", "7,571 sq ft"),
-                   ("Covered porch / covered patio / covered terrace", "113 / 229 / 327 sq ft"),
-                   ("Open terrace", "142 sq ft"),
-                   ("Garage 2, one-car", "313 sq ft")]
-        rows = [{**row, "Room / Area": "PROJECT", "Item": name, "Size / Configuration": value}
-                for row, (name, value) in zip(self.rows(len(figures)), figures)]
+        figures, rows = self.figures()
         values = {value for _, value in figures}
         rowcount = -(-len(figures) // build_lookbook.DETAIL_PAIRS)
         for name in build_lookbook.SPEC_ORIENTATIONS:
@@ -1482,6 +1487,45 @@ class ScheduleTests(unittest.TestCase):
                        if table.rows and figures[0][0].upper() in table.rows[0].cells[0].text)
             self.assertEqual(len(box.columns), 3 * build_lookbook.DETAIL_PAIRS - 1, name)
             self.assertEqual(len(box.rows), rowcount, name)
+
+    def test_the_project_figures_are_not_ruled_like_a_ledger(self):
+        """Figures ranged on one edge are already a column, so nothing is ruled between them.
+
+        The band was drawn as a ledger first: a gold hairline under every pair of label and
+        figure, and a hairline of its own laid directly under the section heading's rule, so
+        eight areas came with five rule heights and read as a bank statement. The heading's
+        rule opens the block now and one hairline closes it, which leaves the client band's
+        own four field underlines as the only gold on the sheet.
+        """
+        import build_lookbook
+        import build_word
+        from docx import Document
+        from docx.oxml.ns import qn
+        colors = build_lookbook.CFG["colors"]
+        gold, cream = (rgb(colors[key]) for key in ("field_rule", "hairline"))
+        figures, rows = self.figures()
+        for name in build_lookbook.SPEC_ORIENTATIONS:
+            with tempfile.TemporaryDirectory() as folder:
+                _, rules = pdf_ink(build_lookbook.build_spec(
+                    "UH-1", {"Project Name": "T"}, rows, Path(folder), orientation=name))
+            self.assertEqual(rules.get(gold), 4,
+                             f"the {name} sheet rules the figures in the band's gold")
+            self.assertEqual(rules.get(cream), 3,
+                             f"the {name} sheet draws more than one hairline around the figures")
+            # the Word copy closes the box the same way, and rules nothing else
+            with tempfile.TemporaryDirectory() as folder:
+                document = Document(str(build_word.build_spec(
+                    "UH-1", {"Project Name": "T"}, rows, Path(folder), orientation=name)))
+            box = next(table for table in document.tables
+                       if table.rows and figures[0][0].upper() in table.rows[0].cells[0].text)
+            drawn = {(index, edge.tag.split("}")[1], edge.get(qn("w:color")))
+                     for index, row in enumerate(box.rows) for cell in row.cells
+                     for borders in cell._tc.iter(qn("w:tcBorders")) for edge in borders}
+            self.assertEqual({(edge, color) for _, edge, color in drawn},
+                             {("bottom", colors["hairline"].lstrip("#").upper())},
+                             f"the {name} Word copy rules the figures it should not")
+            self.assertEqual({index for index, _, _ in drawn}, {len(box.rows) - 1},
+                             f"the {name} Word copy rules a row that is not its last")
 
     def test_a_printed_spec_sheet_carries_no_box_around_a_value(self):
         """A field is somewhere to type, never ink: whichever copy comes off the printer

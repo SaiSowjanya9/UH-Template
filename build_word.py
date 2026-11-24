@@ -599,12 +599,13 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
 
 def spec_details(document, items, content_w, hidden):
     """A project's own figures read as a short list on open paper, never a boxed grid: pairs
-    of label and figure across the page, each figure closing on its own gold hairline between
-    the client band's two - the PDF twin's layout, column for column, and the portal's.
+    of label and figure across the page, opened by the section heading's own rule and closed
+    by a single hairline - the PDF twin's layout, column for column, and the portal's.
 
     The figure holds the right edge of its pair, so a column of areas lines up whether the
     label beside it takes one line or two, and the row's other filled columns follow as small
-    print under the label.
+    print under the label. Nothing is ruled between the rows: figures ranged on one edge are
+    already a column, and a gold hairline under every pair read as a bank statement.
     """
     figures = [detail_parts(row, hidden) for row in items]
     pair_w = (content_w - DETAIL_GUTTER * (DETAIL_PAIRS - 1)) / DETAIL_PAIRS
@@ -620,10 +621,8 @@ def spec_details(document, items, content_w, hidden):
         index = start // DETAIL_PAIRS
         cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
         keep_whole(table.rows[-1])
-        for cell in cells:
-            if index == 0:
-                cell_rule(cell, "top", 0.5, COLORS["hairline"])
-            if index == last:
+        if index == last:
+            for cell in cells:
                 cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
         pairs = list(zip(items[start:start + DETAIL_PAIRS],
                          figures[start:start + DETAIL_PAIRS])) + [None] * DETAIL_PAIRS
@@ -637,9 +636,6 @@ def spec_details(document, items, content_w, hidden):
                     bottom=DETAIL_PAD_Y, right=0)
             margins(value._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
                     top=DETAIL_PAD_Y, left=PAD_X, bottom=DETAIL_PAD_Y, right=BAND_INSET)
-            if index < last:        # the hairline under a figure stops at its own pair
-                for cell in (label, value):
-                    cell_rule(cell, "bottom", 0.4, COLORS["field_rule"])
             if not pair:
                 continue            # a short last row stays open, as in the PDF twin
             row, (figure, rest) = pair

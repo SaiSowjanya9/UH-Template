@@ -147,8 +147,8 @@ SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
 SPEC_LABELS = {"Size / Configuration": "Size / Config", PRODUCT_LINK: "Link"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
 # not a set of line items, so the spec sheet, its Word copy and the portal draw it as a short
-# list on open paper rather than a ruled table: pairs of label and figure, a hairline under
-# each, between the client band's own two hairlines.
+# list on open paper rather than a ruled table: pairs of label and figure with nothing ruled
+# between them, the section heading's own rule opening the block and one hairline closing it.
 DETAILS_GROUP = "PROJECT"
 # Two pairs across, as the portal's own box reads. Tiled as fields - a name over its figure on
 # an underline, four across and generously padded - eight areas took a third of the sheet and
@@ -156,8 +156,10 @@ DETAILS_GROUP = "PROJECT"
 # line to read as a label: measured against a home's own eight figures, three across wrapped
 # five of them in landscape and every one of them in portrait, while two wrap none and one.
 DETAIL_PAIRS = 2
-DETAIL_GUTTER = 2 * BAND_INSET      # a real gap between the pairs, so no rule crosses it
-DETAIL_PAD_Y = 3                    # rows, not tiles: a figure takes its own line and no more
+DETAIL_GUTTER = 2 * BAND_INSET      # a real gap, so the two columns read as two
+# Rows, not tiles: a figure takes its own line and no more. The air is what divides them now
+# that no rule does, so it is a little more than a ruled row needed.
+DETAIL_PAD_Y = 4.5
 # The figure column is as wide as the widest figure on the sheet and no wider, so the labels
 # keep the rest of their pair; a value long enough to want half the pair wraps instead of
 # squeezing every label beside it.
@@ -1345,13 +1347,17 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
 
 def spec_details(items, width, hidden):
     """A project's own figures read as a short list on open paper, never a boxed grid: pairs
-    of label and figure across the page, each figure closing on its own gold hairline between
-    the client band's two, which is how the portal's own box reads.
+    of label and figure across the page, opened by the section heading's own rule and closed
+    by a single hairline, which is how the portal's own box reads.
 
     The figure holds the right edge of its pair, so a column of areas lines up whether the
     label beside it takes one line or two, and the row's other filled columns follow as small
-    print under the label. Tiled as band fields instead - a name over its figure, four across,
-    padded for an underline - the same eight figures took a third of the sheet in white space.
+    print under the label. Nothing is ruled between the rows: a handful of figures ranged on
+    one edge are already a column, and a gold hairline under every pair - over a second one
+    laid directly under the heading's own rule - put five rule heights around eight areas and
+    read as a bank statement. The air of DETAIL_PAD_Y does that work instead. Tiled as band
+    fields - a name over its figure, four across, padded for an underline - the same eight
+    figures took a third of the sheet in white space.
     """
     figures = [detail_parts(row, hidden) for row in items]
     pair_w = (width - DETAIL_GUTTER * (DETAIL_PAIRS - 1)) / DETAIL_PAIRS
@@ -1386,18 +1392,14 @@ def spec_details(items, width, hidden):
              ("RIGHTPADDING", (0, 0), (-1, -1), 0),
              ("TOPPADDING", (0, 0), (-1, -1), DETAIL_PAD_Y),
              ("BOTTOMPADDING", (0, 0), (-1, -1), DETAIL_PAD_Y),
-             ("LINEABOVE", (0, 0), (-1, 0), 0.5, C["hairline"]),
              ("LINEBELOW", (0, -1), (-1, -1), 0.5, C["hairline"])]
     for index in range(DETAIL_PAIRS):
         label_col = 3 * index
-        # The label keeps the band's own inset, the figure its padding and a gap from the
-        # label, and the hairline under a figure stops at its pair rather than running on
-        # across the gutter into the next one.
+        # The label keeps the band's own inset, the figure its padding and a gap from the label.
         style += [("LEFTPADDING", (label_col, 0), (label_col, -1), BAND_INSET),
                   ("TOPPADDING", (label_col, 0), (label_col, -1), DETAIL_PAD_Y + DETAIL_BASELINE),
                   ("LEFTPADDING", (label_col + 1, 0), (label_col + 1, -1), PAD_X),
-                  ("RIGHTPADDING", (label_col + 1, 0), (label_col + 1, -1), BAND_INSET),
-                  ("LINEBELOW", (label_col, 0), (label_col + 1, -2), 0.4, C["field_rule"])]
+                  ("RIGHTPADDING", (label_col + 1, 0), (label_col + 1, -1), BAND_INSET)]
     return Table(data, colWidths=widths, style=TableStyle(style))
 
 
