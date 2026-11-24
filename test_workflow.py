@@ -788,11 +788,13 @@ class AppTests(unittest.TestCase):
             self.assertEqual(stale.status_code, 400, route)
 
     def test_the_pdf_goes_out_editable_or_locked_as_the_download_asks(self):
-        """The same sheet, twice over: the editable copy whose cells are typed into and
-        saved, and the locked copy for sending out, which no reader will let anybody
-        change. Locked is the same page to read - every value, every box - with the form
-        fields gone rather than merely protected, and it says Locked in its own name so
-        the two cannot be mixed up on a desk. Word and the CSV have no such choice.
+        """The same sheet, twice over: the locked copy a plain download gives, which no
+        reader will let anybody change, and the editable copy whose cells are typed into
+        and saved. Locked is what a download means, because a reader paints its own pale
+        blue over every form field it finds and nothing in the file can turn that off -
+        a sheet to read has to carry no fields at all. The two are the same page to read,
+        and the editable one says so in its name so the working copy is not the one sent
+        out. Word and the CSV have no such choice.
         """
         from pypdf import PdfReader
         pid = self.state()["projects"][0]["Project ID"]
@@ -808,20 +810,23 @@ class AppTests(unittest.TestCase):
             text = " ".join(" ".join(page.extract_text() for page in reader.pages).split())
             return response, fields, reader.trailer["/Root"].get("/AcroForm"), text
 
-        response, fields, form, editable_text = sheet("")          # the editable copy by default
-        self.assertTrue(fields, "the editable copy has no cells to type into")
-        self.assertIn("Spec_Sheet_Landscape.pdf", response.headers["Content-Disposition"])
-        self.assertNotIn("Locked", response.headers["Content-Disposition"])
-
-        for query in ("&copy=locked", "&copy=locked&orientation=portrait"):
+        for query in ("", "&copy=locked", "&copy=locked&orientation=portrait"):
+            asked = query or "a plain download"
             response, fields, form, text = sheet(query)
-            self.assertEqual(fields, [], f"the locked copy can still be typed into: {query}")
-            self.assertFalse(form and form.get("/Fields"), f"the locked copy carries a form: {query}")
-            self.assertIn("Locked", response.headers["Content-Disposition"], query)
+            self.assertEqual(fields, [], f"{asked} can be typed into")
+            self.assertFalse(form and form.get("/Fields"), f"{asked} carries a form")
+            self.assertNotIn("Editable", response.headers["Content-Disposition"], asked)
             # locking takes nothing off the page: the same line items, still extractable
             for item in items:
-                self.assertIn(item, text, f"{item} is missing from the locked copy ({query})")
-        self.assertEqual(sheet("&copy=editable")[3], editable_text)   # the copies read the same
+                self.assertIn(item, text, f"{item} is missing from {asked}")
+        locked_text = sheet("")[3]
+        self.assertIn("Spec_Sheet_Landscape.pdf", sheet("")[0].headers["Content-Disposition"])
+
+        for query in ("&copy=editable", "&copy=editable&orientation=portrait"):
+            response, fields, form, text = sheet(query)
+            self.assertTrue(fields, f"the editable copy has no cells to type into: {query}")
+            self.assertIn("Editable", response.headers["Content-Disposition"], query)
+        self.assertEqual(sheet("&copy=editable")[3], locked_text)   # the copies read the same
 
         # a copy the builder does not know is refused, never quietly sent out editable
         self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&copy=readonly").status_code, 400)
@@ -1167,6 +1172,20 @@ def pdf_ink(path):
     return fills, rules
 
 
+def painted_boxes(path):
+    """Every rectangle the first page paints, filled or stroked, as (width, height).
+
+    reportlab writes each one as its own path op, so a box drawn around a cell shows up
+    here - whether the page draws it or a form field forces it on - while the sheet's own
+    structure, drawn as lines, does not.
+    """
+    from pypdf import PdfReader
+    stream = PdfReader(str(path)).pages[0].get_contents().get_data().decode("latin-1")
+    return [tuple(round(float(match[index]), 1) for index in (3, 4))
+            for line in stream.splitlines()
+            if (match := re.fullmatch(r"n (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re [bBfsS]\*?", line))]
+
+
 def rule_segments(path):
     """Every stroked rule on each page as (width, x1, y1, x2, y2), in page coordinates.
 
@@ -1334,12 +1353,13 @@ class ScheduleTests(unittest.TestCase):
                                   "a prose value wraps while other columns hold spare room")
 
     def test_a_spec_sheet_field_holds_its_value_inside_its_box(self):
-        """Every cell of the PDF is typed into, and a form field is a box rather than a
-        column: a reader clips the characters that reach past its edge, and the copy
+        """Every cell of the editable copy is typed into, and a form field is a box rather
+        than a column: a reader clips the characters that reach past its edge, and the copy
         drawn underneath for print and extraction spills straight across the cell next
         to it - a finish name read half inside its own box and half over the column
         beside it. A value too long for its box wraps and the box grows to hold the
-        lines, in both orientations and however narrow the column is.
+        lines, in both orientations and however narrow the column is. The locked copy
+        draws the very same lines; only the fields over them are missing.
         """
         import build_lookbook
         from pypdf import PdfReader
@@ -1351,7 +1371,7 @@ class ScheduleTests(unittest.TestCase):
         for name in build_lookbook.SPEC_ORIENTATIONS:
             with tempfile.TemporaryDirectory() as folder:
                 pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
-                                                Path(folder), orientation=name)
+                                                Path(folder), orientation=name, copy="editable")
                 fields = [annotation.get_object() for page in PdfReader(str(pdf)).pages
                           for annotation in page.get("/Annots", [])
                           if annotation.get_object().get("/FT") == "/Tx"]
@@ -1377,6 +1397,46 @@ class ScheduleTests(unittest.TestCase):
                     f"a box on the {name} sheet is shorter than the lines it holds")
             self.assertTrue(wrapped, f"the long finish name did not wrap on the {name} sheet")
             self.assertIn(finish, text, f"the finish name lost words on the {name} sheet")
+
+    def test_a_printed_spec_sheet_carries_no_box_around_a_value(self):
+        """A field is somewhere to type, never ink: whichever copy comes off the printer
+        has to read as a spec sheet rather than as a blank form.
+
+        reportlab fills a field whose colour is left to it in its own default light blue,
+        and forceBorder painted that into the page as well as into the field - so every
+        value on the editable copy printed inside a blue box and underneath one, and a
+        print path that leaves form fields out printed the boxes and not a single value.
+        The only rectangles a spec page paints are the sheet itself and the client band;
+        every other mark on it is text or a hairline. What shows there is something to
+        type into is the highlight a reader paints over its own fields, which stays on
+        screen - so the fields themselves carry no colour a printer can see either.
+        """
+        import build_lookbook
+        from pypdf import PdfReader
+        rows = self.rows(3, **{"Room / Area": "Kitchen", "Manufacturer": "Wolf",
+                               "Model #": "SRT486G", "Finish / Color": "Natural gas"})
+        for copy in build_lookbook.SPEC_COPIES:
+            for name in build_lookbook.SPEC_ORIENTATIONS:
+                page = build_lookbook.spec_page(name)
+                with tempfile.TemporaryDirectory() as folder:
+                    pdf = build_lookbook.build_spec("UH-1", {"Project Name": "T"}, rows,
+                                                    Path(folder), orientation=name, copy=copy)
+                    boxes = painted_boxes(pdf)
+                    fields = [annotation.get_object() for page_ in PdfReader(str(pdf)).pages
+                              for annotation in page_.get("/Annots", [])
+                              if annotation.get_object().get("/FT") == "/Tx"]
+                    text = " ".join(self.text(pdf).split())
+                self.assertEqual(boxes, [(page.width, page.height),
+                                         (page.content_w, build_lookbook.BAND_H)],
+                                 f"the {copy} {name} sheet paints a box around a value")
+                for field in fields:
+                    for key, part in (("/BG", "background"), ("/BC", "border")):
+                        self.assertTrue(all(float(value) == 1
+                                            for value in field.get("/MK", {}).get(key, [])),
+                                        f"a field on the {name} sheet has a {part} that prints")
+                # and nothing is painted over the values a printer that skips fields prints
+                for item in [row["Item"] for row in rows] + ["Wolf", "SRT486G", "Natural gas"]:
+                    self.assertIn(item, text, f"{item} is missing from the {copy} {name} sheet")
 
     def test_the_spec_sheets_column_gaps_are_light_and_close_on_a_row_rule(self):
         """The gaps between columns are secondary structure, so they are the lightest rule on

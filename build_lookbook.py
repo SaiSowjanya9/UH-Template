@@ -148,9 +148,19 @@ SPEC_HEADING_TRACK = 1.2
 # Editable spec-sheet form fields: PDF form fields accept only the standard 14 fonts,
 # so typed text uses Helvetica while every label and heading keeps the brand font.
 SPEC_FORM_FONT = "Helvetica"
-SPEC_FORM_BORDER = Color(0.78, 0.74, 0.65)
+# A field is somewhere to type, never ink. The sheet is printed, marked up and handed over
+# as a spec sheet, so no box may survive the printer: every one of them is the paper's own
+# white, border included, and what shows there is something to click into is the highlight
+# a reader paints over its own form fields - on screen, never on paper. White rather than
+# no colour at all, because a field prints what somebody typed into it while the page
+# underneath still carries the value as exported: with nothing behind it the two print one
+# across the other. Left to itself reportlab fills a field in its own default light blue,
+# and forceBorder painted that into the page as well as into the field - a blue box behind
+# every value and over it, so a printer that left the fields out printed the boxes and not
+# one value.
+SPEC_FIELD_BOX = Color(1, 1, 1)
 SPEC_FIELD_H = 15                    # a box holding one line
-SPEC_FIELD_BW = 0.5                  # the hairline it is drawn with
+SPEC_FIELD_BW = 0.5                  # the hairline it is laid out to, white on white
 # A reader lays a field's text out inside that border rather than against it: it starts
 # the text four border widths in and clips at two, so that much of the box never holds a
 # character. The box is drawn that much wider than its cell instead, half either side, so
@@ -198,7 +208,7 @@ def spec_field_lines(value, room, size=9):
 
 
 class SpecFieldCell(Flowable):
-    """One cell's value in its box: a text field to type into, or the box alone.
+    """One cell's value, with a field over it to type into on the editable copy.
 
     The value is wrapped to the box and the box is as tall as the lines it holds, so
     nothing printed on the sheet is cut off at a field's edge or spilled past it. The
@@ -207,8 +217,9 @@ class SpecFieldCell(Flowable):
     blurred double - and the sheet still prints and extracts its values wherever form
     fields are not rendered at all.
 
-    A locked sheet draws that same box itself and adds no field, so the two copies are
-    the same document to read and only one of them can be typed into.
+    Neither copy draws a box on the page - a hard copy of either reads as a spec sheet
+    rather than as a blank form - so the locked one is simply the same page with no field
+    added: the two are the same document to read and only one of them can be typed into.
     """
 
     def __init__(self, name, value, room, size=9, fillable=True):
@@ -235,25 +246,20 @@ class SpecFieldCell(Flowable):
                                      top - index * SPEC_FIELD_LEADING * self.size, line)
             self.canv.restoreState()
         if not self.fillable:
-            # The locked copy: the field's own border, drawn on the page. Nothing a reader
-            # can click into, so what was exported is what the sheet keeps saying.
-            self.canv.saveState()
-            self.canv.setStrokeColor(SPEC_FORM_BORDER)
-            self.canv.setLineWidth(SPEC_FIELD_BW)
-            self.canv.rect(left, 0, self.width + SPEC_FIELD_INSET, self.height, stroke=1, fill=0)
-            self.canv.restoreState()
+            # The locked copy: the value and nothing else. Nothing a reader can click into,
+            # so what was exported is what the sheet keeps saying.
             return
-        # The editable field over it, transparent so the drawn text shows through until a
-        # reader renders the field itself. Every field is multiline, not only the ones that
-        # opened wrapped: it is what lays a printed value's lines back out as they were, and
-        # what wraps a longer one somebody types in rather than running it off the side.
+        # The editable field over it, white on white paper and bordered in the same, so a
+        # hard copy carries the value and no box around it. Every field is multiline, not
+        # only the ones that opened wrapped: it is what lays a printed value's lines back
+        # out as they were, and what wraps a longer one somebody types in rather than
+        # running it off the side.
         self.canv.acroForm.textfield(
             name=self.name, value=self.value, x=left, y=0,
             width=self.width + SPEC_FIELD_INSET, height=self.height,
             fontName=SPEC_FORM_FONT, fontSize=self.size,
-            textColor=C["body"], fillColor=None,
-            borderColor=SPEC_FORM_BORDER, borderWidth=SPEC_FIELD_BW,
-            forceBorder=True, relative=True,
+            textColor=C["body"], fillColor=SPEC_FIELD_BOX,
+            borderColor=SPEC_FIELD_BOX, borderWidth=SPEC_FIELD_BW, relative=True,
             fieldFlags="doNotSpellCheck multiline")
 
 
@@ -298,15 +304,18 @@ def spec_orientation(value):
     return name
 
 
-# The PDF goes out as one of two copies of the same sheet: the editable one, whose cells
-# are form fields to type into, or the locked one, which is the same page with nothing a
-# reader will let anybody change. Word and the CSV have no such choice - Word is a document
+# The PDF goes out as one of two copies of the same sheet: the locked one, which nothing a
+# reader offers will change, or the editable one, whose cells are form fields to type into.
+# A plain download is the locked copy, because a reader paints its own pale blue highlight
+# over every form field it finds - nothing inside the file can turn that off, so an editable
+# sheet reads as a page of blue boxes however the fields themselves are coloured, and a sheet
+# to read should read as a sheet. Word and the CSV have no such choice - Word is a document
 # to mark up by its nature, and a CSV is text - so this rides with the PDF alone.
-SPEC_COPIES = ("editable", "locked")
+SPEC_COPIES = ("locked", "editable")
 
 
 def spec_copy(value):
-    """Which copy of the spec sheet to print; nothing asked for means the editable one.
+    """Which copy of the spec sheet to print; nothing asked for means the locked one.
 
     Like the orientation, an unknown name is refused rather than quietly answered with
     the other copy: handing somebody a typeable sheet when they asked for a locked one
@@ -1164,7 +1173,7 @@ def _spec_field_name(row_index, column):
 
 
 def spec_cell(row, column, hidden, row_index=0, room=0, fillable=True):
-    """One spec-sheet cell as an editable form field, or as the printed box alone.
+    """One spec-sheet cell as an editable form field, or as the printed value alone.
 
     Product Link stays a clickable link rather than a field, because it is a URL
     and the user is not expected to type one in by hand.  Everything else becomes
@@ -1227,8 +1236,8 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     notes_row = [SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', col.lower()).strip('_')}",
                                "", room, fillable=fillable)
                  for (col, _), room in zip(columns, field_rooms)]
-    # Label the first cell of the notes row so the customer knows it is for notes. On the
-    # locked copy it is a ruled line to write on once the sheet is printed.
+    # Label the first cell of the notes row so the customer knows it is for notes: a line
+    # to type into on screen, and on a hard copy the open row the section's last rule closes.
     first_col = columns[0][0] if columns else "Item"
     notes_row[0] = SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', first_col.lower()).strip('_')}",
                                  "Notes", field_rooms[0], fillable=fillable)
@@ -1282,7 +1291,7 @@ def spec_details(items, width, hidden, landscape=True):
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
-               orientation="landscape", room_order=(), copy="editable"):
+               orientation="landscape", room_order=(), copy=SPEC_COPIES[0]):
     """The internal spec sheet: the app's line items and columns, under the same headings,
     on the page orientation the download asked for, as the editable or the locked copy."""
     page = spec_page(orientation)
@@ -1310,13 +1319,13 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     destination.mkdir(exist_ok=True)
     # The orientation is part of the name: both copies are downloaded to compare, and two
     # files called the same thing leave the browser to tell them apart with a "(1)". The
-    # locked copy says so too, because which one is on the desk cannot be seen by looking
-    # at the page - only by clicking it - and the wrong one sent out is the whole risk.
+    # editable copy says so too, because on paper the two are the same page - the fields
+    # only show in a reader - and the working copy mistaken for the one to send is the risk.
     parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
              re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
              re.sub(r"[^A-Za-z0-9]+", "_", SPEC_TITLE).strip("_")[:60], page.name.title()]
-    if not fillable:
-        parts.append("Locked")
+    if fillable:
+        parts.append("Editable")
     out = destination / ("_".join(part for part in parts if part) + ".pdf")
     doc = BaseDocTemplate(str(out), pagesize=(page.width, page.height), leftMargin=M, rightMargin=M,
                           topMargin=page.height - page.body_top, bottomMargin=BODY_BOTTOM,
@@ -1352,7 +1361,7 @@ def main():
     parser.add_argument("--orientation", default=SPEC_ORIENTATIONS[0], choices=SPEC_ORIENTATIONS,
                         help="Spec sheet page orientation (default: landscape)")
     parser.add_argument("--copy", default=SPEC_COPIES[0], choices=SPEC_COPIES,
-                        help="Spec sheet copy: editable cells, or locked (default: editable)")
+                        help="Spec sheet copy: locked, or editable cells (default: locked)")
     parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")

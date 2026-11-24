@@ -1339,13 +1339,14 @@ function setExportOrientation(value) {
   renderExportOrientation();
 }
 
-// The PDF goes out as one of two copies of the same sheet: the editable one, whose cells are
-// typed into and saved, or the locked one, which is the same page with nothing a reader will
-// let anybody change - what a sheet sent outside the studio should be. Word is a document to
-// mark up by its nature and a CSV is text, so the choice rides with the PDF alone, remembered
-// in this browser like the orientation and the hidden columns.
+// The PDF goes out as one of two copies of the same sheet: the locked one, which a download
+// gives unless it is asked otherwise, or the editable one, whose cells are typed into and
+// saved. Locked leads because a reader highlights every form field it finds in its own pale
+// blue, which no setting in the file can turn off, so only a sheet without fields reads as a
+// sheet. Word is a document to mark up by its nature and a CSV is text, so the choice rides
+// with the PDF alone, remembered in this browser like the orientation and the hidden columns.
 const SPEC_COPY_KEY = "uh-spec-copy";
-const SPEC_COPIES = ["editable", "locked"];
+const SPEC_COPIES = ["locked", "editable"];
 const loadSpecCopy = () => {
   try { const stored = localStorage.getItem(SPEC_COPY_KEY); if (SPEC_COPIES.includes(stored)) return stored; } catch {}
   return SPEC_COPIES[0];
