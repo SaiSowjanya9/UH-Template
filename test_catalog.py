@@ -388,7 +388,17 @@ class CatalogAppTests(AppTestCase):
         self.assertNotIn("&", href)                           # quoted, so the attribute stays whole
         import base64
         icon = text.split('ICON="data:image/png;base64,', 1)[1].split('"', 1)[0]
-        self.assertEqual(base64.b64decode(icon)[:8], b"\x89PNG\r\n\x1a\n")
+        raw = base64.b64decode(icon)
+        self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
+        # a favicon, not the bare symbol: a bookmarks bar paints it near 16px, where the
+        # mark's own hairline strokes vanish, so it rides on the brand's dark tile
+        drawn = Image.open(io.BytesIO(raw)).convert("RGBA")
+        self.assertEqual(drawn.size, (32, 32))
+        middle = drawn.getpixel((16, 16))
+        self.assertEqual(middle[3], 255)                          # opaque through the middle
+        pixels = [drawn.getpixel((x, y)) for y in range(32) for x in range(32)]
+        self.assertTrue(any(p[3] == 255 and max(p[:3]) < 70 for p in pixels), "no dark tile")
+        self.assertTrue(any(p[0] > 150 and p[1] > 110 and p[2] < 130 for p in pixels), "no gold mark")
 
     def test_the_retired_browser_extension_stays_removed(self):
         """The extension was retired for the bookmarklet: its download, its picker routes
