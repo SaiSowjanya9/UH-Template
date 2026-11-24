@@ -52,13 +52,14 @@ from build_lookbook import (BAND_GAP, BAND_H, BAND_INSET, BODY_BOTTOM, BODY_TOP,
                             PAGE_H, PAGE_W, PRODUCT_LINK, ROOM_STYLE, SCHEDULE, SECTION_GAP,
                             SHEET_COLORS, SIGN_H, SIGN_W, SIGN_X, SPEC_ORIENTATIONS, SPEC_TITLE,
                             band_shares, band_values, clean, code_prefix, description,
-                            detail_value, fit,
+                            detail_parts, fit,
                             group_sections, hidden_columns, is_details_group, link_word,
                             load_data,
                             mark_bottom, numbered, presentation_details, product_link, row_widths,
                             schedule_title, spaced_caps, spec_columns, spec_widths,
-                            spec_groups, spec_heading, spec_page, spec_value, DETAIL_COLS,
-                            SPEC_HEADING_TRACK)
+                            spec_groups, spec_heading, spec_page, spec_value,
+                            DETAIL_FIGURE_MAX, DETAIL_FIGURE_STYLE, DETAIL_GUTTER,
+                            DETAIL_PAD_Y, DETAIL_PAIRS, SPEC_HEADING_TRACK)
 from branding import load_logo
 
 COLORS = {key: value.lstrip("#").upper() for key, value in CFG["colors"].items()}
@@ -596,37 +597,65 @@ def build_fillable(pid, project, rows, output_dir=None, title=None, prefix=None,
     return out
 
 
-def spec_details(document, items, content_w, hidden, landscape=True):
-    """A project's own figures print like the client band above them, tiled: open rows of
-    labelled fields, each figure closing on its own gold underline between the strip's
-    two hairlines - never a filled or boxed grid. Names and values wrap inside their
-    field, and bottom alignment holds every underline on a common baseline even when a
-    label takes two lines."""
-    cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
-    widths = [content_w / cols] * cols
-    table = grid(document, widths, pad_x=BAND_INSET, pad_y=7)
-    last = -(-len(items) // cols) - 1                      # index of the final row of fields
-    for start in range(0, len(items), cols):
-        index = start // cols
-        cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)
+def spec_details(document, items, content_w, hidden):
+    """A project's own figures read as a short list on open paper, never a boxed grid: pairs
+    of label and figure across the page, each figure closing on its own gold hairline between
+    the client band's two - the PDF twin's layout, column for column, and the portal's.
+
+    The figure holds the right edge of its pair, so a column of areas lines up whether the
+    label beside it takes one line or two, and the row's other filled columns follow as small
+    print under the label.
+    """
+    figures = [detail_parts(row, hidden) for row in items]
+    pair_w = (content_w - DETAIL_GUTTER * (DETAIL_PAIRS - 1)) / DETAIL_PAIRS
+    figure_w = min(max([pdfmetrics.stringWidth(figure, FONT_BB, DETAIL_FIGURE_STYLE.fontSize)
+                        for figure, _ in figures] + [0]) + BAND_INSET + PAD_X,
+                   pair_w * DETAIL_FIGURE_MAX)
+    widths = []
+    for _ in range(DETAIL_PAIRS):
+        widths += ([DETAIL_GUTTER] if widths else []) + [pair_w - figure_w, figure_w]
+    table = grid(document, widths, pad_x=0, pad_y=DETAIL_PAD_Y)
+    last = -(-len(items) // DETAIL_PAIRS) - 1              # index of the final row of figures
+    for start in range(0, len(items), DETAIL_PAIRS):
+        index = start // DETAIL_PAIRS
+        cells = add_row(table, widths, align=WD_ALIGN_VERTICAL.TOP)
         keep_whole(table.rows[-1])
-        for cell, row in zip(cells, items[start:start + cols] + [None] * cols):
+        for cell in cells:
             if index == 0:
                 cell_rule(cell, "top", 0.5, COLORS["hairline"])
             if index == last:
                 cell_rule(cell, "bottom", 0.5, COLORS["hairline"])
-            if not row:
-                continue                    # a short last row stays open, as in the PDF twin
-            write(cell.paragraphs[0], clean(row.get("Item")).upper(),
+        pairs = list(zip(items[start:start + DETAIL_PAIRS],
+                         figures[start:start + DETAIL_PAIRS])) + [None] * DETAIL_PAIRS
+        for position, pair in zip(range(DETAIL_PAIRS), pairs):
+            label, value = cells[3 * position], cells[3 * position + 1]
+            # Word hangs an exactly spaced line from the bottom of its line box, so the
+            # label starts a leading's difference lower than the figure to share its
+            # baseline; the PDF twin drops it by the difference in font size instead.
+            margins(label._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
+                    top=DETAIL_PAD_Y + SPEC_CELL[1] - SPEC_HEAD[1], left=BAND_INSET,
+                    bottom=DETAIL_PAD_Y, right=0)
+            margins(value._tc.get_or_add_tcPr(), "w:tcMar", TCPR_ORDER,
+                    top=DETAIL_PAD_Y, left=PAD_X, bottom=DETAIL_PAD_Y, right=BAND_INSET)
+            if index < last:        # the hairline under a figure stops at its own pair
+                for cell in (label, value):
+                    cell_rule(cell, "bottom", 0.4, COLORS["field_rule"])
+            if not pair:
+                continue            # a short last row stays open, as in the PDF twin
+            row, (figure, rest) = pair
+            write(label.paragraphs[0], clean(row.get("Item")).upper(),
                   SPEC_HEAD[0], COLORS["muted"], bold=True, leading=SPEC_HEAD[1])
-            line = shape(cell.add_paragraph(), size=SPEC_CELL[0], leading=SPEC_CELL[1], before=5)
-            rule(line, "bottom", 0.5, COLORS["field_rule"])
-            run_text(line, detail_value(row, hidden), SPEC_CELL[0], COLORS["body"])
+            write(value.paragraphs[0], figure, SPEC_CELL[0], COLORS["body"], bold=True,
+                  leading=SPEC_CELL[1], align=WD_ALIGN_PARAGRAPH.RIGHT)
             url = product_link(row, hidden)
+            if not rest and not url:
+                continue
+            small = shape(label.add_paragraph(), size=SPEC_NOTE[0], leading=SPEC_NOTE[1])
+            run_text(small, rest, SPEC_NOTE[0], COLORS["muted"])
             if url:
-                if detail_value(row, hidden):
-                    run_text(line, "  ·  ", SPEC_CELL[0], COLORS["muted"])
-                hyperlink(line, url, link_word(), SPEC_CELL[0], COLORS["accent"])
+                if rest:
+                    run_text(small, "  ·  ", SPEC_NOTE[0], COLORS["muted"])
+                hyperlink(small, url, link_word(), SPEC_NOTE[0], COLORS["accent"])
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
@@ -649,7 +678,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
             heading(document, section, width, first=index == 0, track=SPEC_HEADING_TRACK,
                     rule=SHEET["rule"])
         if is_details_group(section):
-            spec_details(document, items, width, hidden, page.landscape)
+            spec_details(document, items, width, hidden)
             continue
         table = grid(document, widths, pad_x=page.pad_x, pad_y=4)
         titles = add_row(table, widths, align=WD_ALIGN_VERTICAL.BOTTOM)

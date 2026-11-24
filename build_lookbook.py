@@ -33,12 +33,13 @@ from xml.sax.saxutils import escape
 import requests
 from PIL import Image
 from reportlab.lib.colors import Color, HexColor
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Flowable, Frame, HRFlowable,
+from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Flowable, Frame,
                                 KeepTogether, NextPageTemplate, PageBreak, PageTemplate,
                                 Paragraph, Spacer, Table, TableStyle)
 
@@ -110,8 +111,17 @@ NOTE_STYLE = style("note", 8, 10.5, C["muted"], leftIndent=PAD_X, rightIndent=PA
 # documents. Column heads go darker than the data they head: at the muted gold they read as
 # just another small value, and a header nobody can pick out is no header at all.
 SPEC_HEAD_STYLE = style("spec_head", 7, 9.5, C["dark"], font=FONT_BB)
-# The details box's field labels keep the client band's own muted gold instead.
+# The details box's field labels keep the client band's own muted gold instead, and the
+# figure they label reads at the line items' size, bold and set against the right edge of
+# its pair - so a column of areas lines up as figures do, whatever the labels beside them do.
 DETAIL_HEAD_STYLE = style("detail_head", 7, 9.5, C["muted"], font=FONT_BB)
+DETAIL_FIGURE_STYLE = style("detail_figure", 9, 13, C["body"], font=FONT_BB, align=TA_RIGHT)
+# A label and its figure read as one line, so they sit on one baseline. reportlab puts a
+# paragraph's first baseline exactly its font size below the top of its box, so the smaller
+# label starts that much lower than the figure beside it; Word hangs an exactly spaced line
+# from the bottom of its line box instead, so build_word drops it by the leading difference.
+# Both are read off these styles, so neither document can drift from a change of size.
+DETAIL_BASELINE = DETAIL_FIGURE_STYLE.fontSize - DETAIL_HEAD_STYLE.fontSize
 SPEC_CELL_STYLE = style("spec_cell", 9, 13, C["body"])
 SPEC_NOTE_STYLE = style("spec_note", 8, 10.5, C["muted"])
 
@@ -136,11 +146,25 @@ SPEC_COLUMNS = [("Item", 88, "Item"), ("Manufacturer", 67, "Manufacturer"),
 # the freed share goes to the columns whose text actually wraps.
 SPEC_LABELS = {"Size / Configuration": "Size / Config", PRODUCT_LINK: "Link"}
 # A group headed PROJECT carries the home's own figures - areas, garage size, porch counts -
-# not a set of line items, so the spec sheet, its Word copy and the portal draw it like the
-# client band above it: rows of labelled fields on open paper, each closing on the band's
-# own gold underline between the strip's two hairlines.
+# not a set of line items, so the spec sheet, its Word copy and the portal draw it as a short
+# list on open paper rather than a ruled table: pairs of label and figure, a hairline under
+# each, between the client band's own two hairlines.
 DETAILS_GROUP = "PROJECT"
-DETAIL_COLS = 4                     # band-style fields across, like the client band itself
+# Two pairs across, as the portal's own box reads. Tiled as fields - a name over its figure on
+# an underline, four across and generously padded - eight areas took a third of the sheet and
+# nearly all of it white space. Two pairs rather than three because a label has to print on one
+# line to read as a label: measured against a home's own eight figures, three across wrapped
+# five of them in landscape and every one of them in portrait, while two wrap none and one.
+DETAIL_PAIRS = 2
+DETAIL_GUTTER = 2 * BAND_INSET      # a real gap between the pairs, so no rule crosses it
+DETAIL_PAD_Y = 3                    # rows, not tiles: a figure takes its own line and no more
+# The figure column is as wide as the widest figure on the sheet and no wider, so the labels
+# keep the rest of their pair; a value long enough to want half the pair wraps instead of
+# squeezing every label beside it.
+DETAIL_FIGURE_MAX = 0.5
+# The figure itself is the Size / Configuration cell the portal types into, and whatever else
+# the row still shows follows as small print under the label.
+DETAIL_FIGURE = "Size / Configuration"
 # The spec sheet's section headings track their letters instead of spacing between them:
 # the same look the schedule's letter-spaced headings have, at about half the air.
 SPEC_HEADING_TRACK = 1.2
@@ -522,12 +546,26 @@ def is_details_group(name):
     return clean(name).upper() == DETAILS_GROUP
 
 
-def detail_value(row, hidden):
+def detail_parts(row, hidden):
+    """A project figure as the portal shows it: the figure itself, and its small print.
+
+    The figure is the Size / Configuration cell, which is what the portal's own box types
+    into; whatever else the row still shows reads as small print under the label. A row
+    keeping its figure somewhere else - a Qty and a Unit, say - would print an empty field
+    and leave the figure in the small print, so the remainder stands in when that cell is
+    empty.
+    """
+    figure = "" if DETAIL_FIGURE in hidden else spec_value(row, DETAIL_FIGURE)
+    rest = detail_value(row, hidden, skip=(DETAIL_FIGURE,))
+    return (figure, rest) if figure else (rest, "")
+
+
+def detail_value(row, hidden, skip=()):
     """The words a details field carries: every spec column still shown except the item
-    name it is labelled with and the link, joined like a description."""
+    name it is labelled with, the link, and whatever the caller prints itself."""
     bits = []
     for column, _, keys in SPEC_COLUMNS:
-        if column in ("Item", PRODUCT_LINK):
+        if column in ("Item", PRODUCT_LINK) or column in skip:
             continue
         keys = keys if isinstance(keys, tuple) else (keys,)
         shown = [key for key in keys if key not in hidden]
@@ -1256,38 +1294,62 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     ]))
 
 
-def spec_details(items, width, hidden, landscape=True):
-    """A project's own figures print like the client band above them, tiled: open rows of
-    labelled fields, each figure closing on its own gold underline between the strip's
-    two hairlines - never a filled or boxed grid. Names and values wrap inside their
-    field, and bottom alignment holds every underline on a common baseline even when a
-    label takes two lines."""
-    cols = DETAIL_COLS if landscape else DETAIL_COLS - 1
-    def underline():
-        return HRFlowable(width="100%", thickness=0.5, color=C["field_rule"],
-                          spaceBefore=5, spaceAfter=0)
+def spec_details(items, width, hidden):
+    """A project's own figures read as a short list on open paper, never a boxed grid: pairs
+    of label and figure across the page, each figure closing on its own gold hairline between
+    the client band's two, which is how the portal's own box reads.
+
+    The figure holds the right edge of its pair, so a column of areas lines up whether the
+    label beside it takes one line or two, and the row's other filled columns follow as small
+    print under the label. Tiled as band fields instead - a name over its figure, four across,
+    padded for an underline - the same eight figures took a third of the sheet in white space.
+    """
+    figures = [detail_parts(row, hidden) for row in items]
+    pair_w = (width - DETAIL_GUTTER * (DETAIL_PAIRS - 1)) / DETAIL_PAIRS
+    # As wide as the widest figure, its own padding and the least gap a long label may leave.
+    figure_w = min(max([pdfmetrics.stringWidth(figure, FONT_BB, DETAIL_FIGURE_STYLE.fontSize)
+                        for figure, _ in figures] + [0]) + BAND_INSET + PAD_X,
+                   pair_w * DETAIL_FIGURE_MAX)
     cells = []
-    for row in items:
-        value = escape(detail_value(row, hidden))
+    for row, (figure, rest) in zip(items, figures):
+        small = escape(rest)
         url = product_link(row, hidden)
         if url:
             mark = (f'<link href="{escape(url, {chr(34): "&quot;"})}" '
                     f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>')
-            value = f"{value} · {mark}" if value else mark
-        cells.append([Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE),
-                      Paragraph(value or " ", SPEC_CELL_STYLE), underline()])
-    for _ in range(-len(cells) % cols):              # a short last row stays open - no empty underline
-        cells.append("")
-    data = [cells[i:i + cols] for i in range(0, len(cells), cols)]
-    return Table(data, colWidths=[width / cols] * cols, style=TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
-        ("LEFTPADDING", (0, 0), (-1, -1), BAND_INSET),
-        ("RIGHTPADDING", (0, 0), (-1, -1), BAND_INSET),
-        ("TOPPADDING", (0, 0), (-1, -1), 12),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),         # the underline needs air, as in the band
-        ("LINEABOVE", (0, 0), (-1, 0), 0.5, C["hairline"]),
-        ("LINEBELOW", (0, -1), (-1, -1), 0.5, C["hairline"]),
-    ]))
+            small = f"{small} · {mark}" if small else mark
+        label = [Paragraph(escape(clean(row.get("Item")).upper()), DETAIL_HEAD_STYLE)]
+        if small:
+            label.append(Paragraph(small, SPEC_NOTE_STYLE))
+        cells.append([label, Paragraph(escape(figure), DETAIL_FIGURE_STYLE)])
+    for _ in range(-len(cells) % DETAIL_PAIRS):      # a short last row simply stays open
+        cells.append(["", ""])
+    data, widths = [], []
+    for index in range(0, len(cells), DETAIL_PAIRS):
+        line = []
+        for pair in cells[index:index + DETAIL_PAIRS]:
+            line += ([""] if line else []) + pair    # the gutter column between the pairs
+        data.append(line)
+    for index in range(DETAIL_PAIRS):
+        widths += ([DETAIL_GUTTER] if widths else []) + [pair_w - figure_w, figure_w]
+    style = [("VALIGN", (0, 0), (-1, -1), "TOP"),
+             ("LEFTPADDING", (0, 0), (-1, -1), 0),
+             ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+             ("TOPPADDING", (0, 0), (-1, -1), DETAIL_PAD_Y),
+             ("BOTTOMPADDING", (0, 0), (-1, -1), DETAIL_PAD_Y),
+             ("LINEABOVE", (0, 0), (-1, 0), 0.5, C["hairline"]),
+             ("LINEBELOW", (0, -1), (-1, -1), 0.5, C["hairline"])]
+    for index in range(DETAIL_PAIRS):
+        label_col = 3 * index
+        # The label keeps the band's own inset, the figure its padding and a gap from the
+        # label, and the hairline under a figure stops at its pair rather than running on
+        # across the gutter into the next one.
+        style += [("LEFTPADDING", (label_col, 0), (label_col, -1), BAND_INSET),
+                  ("TOPPADDING", (label_col, 0), (label_col, -1), DETAIL_PAD_Y + DETAIL_BASELINE),
+                  ("LEFTPADDING", (label_col + 1, 0), (label_col + 1, -1), PAD_X),
+                  ("RIGHTPADDING", (label_col + 1, 0), (label_col + 1, -1), BAND_INSET),
+                  ("LINEBELOW", (label_col, 0), (label_col + 1, -2), 0.4, C["field_rule"])]
+    return Table(data, colWidths=widths, style=TableStyle(style))
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
@@ -1306,7 +1368,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     for index, (section, items) in enumerate(groups.items()):
         if index:
             story.append(Spacer(0, SECTION_GAP))
-        block = (spec_details(items, page.content_w, hidden, page.landscape)
+        block = (spec_details(items, page.content_w, hidden)
                  if is_details_group(section)
                  else spec_table(items, columns, widths, hidden, page.pad_x,
                                  show_section=group != "Section" and "Section" not in hidden,

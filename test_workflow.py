@@ -1172,6 +1172,20 @@ def pdf_ink(path):
     return fills, rules
 
 
+def text_marks(path, page=0):
+    """Every string a page prints, with the baseline it sits on: (text, x, y).
+
+    A flowable draws inside a translated canvas, so a string's own text matrix is relative
+    to wherever its table put it; the two offsets added together are its place on the page.
+    """
+    from pypdf import PdfReader
+    marks = []
+    PdfReader(str(path)).pages[page].extract_text(
+        visitor_text=lambda text, cm, tm, *_: text.strip() and marks.append(
+            (text.strip(), round(cm[4] + tm[4], 2), round(cm[5] + tm[5], 2))))
+    return marks
+
+
 def painted_boxes(path):
     """Every rectangle the first page paints, filled or stroked, as (width, height).
 
@@ -1397,6 +1411,64 @@ class ScheduleTests(unittest.TestCase):
                     f"a box on the {name} sheet is shorter than the lines it holds")
             self.assertTrue(wrapped, f"the long finish name did not wrap on the {name} sheet")
             self.assertIn(finish, text, f"the finish name lost words on the {name} sheet")
+
+    def test_the_project_figures_read_as_a_short_list_not_a_tiled_grid(self):
+        """A home's own figures are a few lines of a sheet, not a screenful of it.
+
+        Tiled as band fields - a name over its figure on an underline, four across and
+        padded for the underline - eight areas ran a third of the way down the page and
+        nearly all of it was white space. The portal had already dropped that for two
+        columns of one-line rows while both printed copies kept it, which is what "the
+        design is still the same" looked like. They print as pairs now: a label and its
+        figure on one baseline, two pairs across in either orientation, so eight figures
+        take four rows and less room than eight lines of type would.
+        """
+        import build_lookbook
+        import build_word
+        from docx import Document
+        figures = [("Conditioned area, first floor", "3,819 sq ft"),
+                   ("Conditioned area, second floor", "2,051 sq ft"),
+                   ("Total conditioned house", "5,870 sq ft"),
+                   ("Garage 1, two-car", "719 sq ft"),
+                   ("Total under roof", "7,571 sq ft"),
+                   ("Covered porch / covered patio / covered terrace", "113 / 229 / 327 sq ft"),
+                   ("Open terrace", "142 sq ft"),
+                   ("Garage 2, one-car", "313 sq ft")]
+        rows = [{**row, "Room / Area": "PROJECT", "Item": name, "Size / Configuration": value}
+                for row, (name, value) in zip(self.rows(len(figures)), figures)]
+        values = {value for _, value in figures}
+        rowcount = -(-len(figures) // build_lookbook.DETAIL_PAIRS)
+        for name in build_lookbook.SPEC_ORIENTATIONS:
+            with tempfile.TemporaryDirectory() as folder:
+                marks = text_marks(build_lookbook.build_spec(
+                    "UH-1", {"Project Name": "T"}, rows, Path(folder), orientation=name))
+            lines = {}
+            for text, _, y in marks:
+                lines.setdefault(y, []).append(text)
+            printed = sorted({y for y, line in lines.items() if values & set(line)}, reverse=True)
+            self.assertEqual(len(printed), rowcount,
+                             f"the {name} sheet prints the figures on {len(printed)} rows")
+            for y in printed:
+                shown = lines[y]
+                self.assertEqual(len([text for text in shown if text in values]),
+                                 len([text for text in shown if text not in values]),
+                                 f"a figure prints off its label's baseline ({name}): {shown}")
+            self.assertLess(printed[0] - printed[-1],
+                            len(figures) * build_lookbook.DETAIL_FIGURE_STYLE.leading,
+                            f"the figures take more room than one line each ({name})")
+            # two pairs across, because a label has to print on one line to read as a label
+            if name == "landscape":
+                for label, _ in figures:
+                    self.assertIn(label.upper(), [text for line in lines.values() for text in line],
+                                  f"{label} wraps on the landscape sheet")
+            # and the Word copy lays out the same pairs, gutter column and all
+            with tempfile.TemporaryDirectory() as folder:
+                document = Document(str(build_word.build_spec(
+                    "UH-1", {"Project Name": "T"}, rows, Path(folder), orientation=name)))
+            box = next(table for table in document.tables
+                       if table.rows and figures[0][0].upper() in table.rows[0].cells[0].text)
+            self.assertEqual(len(box.columns), 3 * build_lookbook.DETAIL_PAIRS - 1, name)
+            self.assertEqual(len(box.rows), rowcount, name)
 
     def test_a_printed_spec_sheet_carries_no_box_around_a_value(self):
         """A field is somewhere to type, never ink: whichever copy comes off the printer
