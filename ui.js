@@ -1314,6 +1314,31 @@ function setExportOrientation(value) {
   renderExportOrientation();
 }
 
+// The PDF goes out as one of two copies of the same sheet: the editable one, whose cells are
+// typed into and saved, or the locked one, which is the same page with nothing a reader will
+// let anybody change - what a sheet sent outside the studio should be. Word is a document to
+// mark up by its nature and a CSV is text, so the choice rides with the PDF alone, remembered
+// in this browser like the orientation and the hidden columns.
+const SPEC_COPY_KEY = "uh-spec-copy";
+const SPEC_COPIES = ["editable", "locked"];
+const loadSpecCopy = () => {
+  try { const stored = localStorage.getItem(SPEC_COPY_KEY); if (SPEC_COPIES.includes(stored)) return stored; } catch {}
+  return SPEC_COPIES[0];
+};
+state.specCopy = loadSpecCopy();
+
+function renderExportCopy() {
+  document.querySelectorAll("#files-dialog [data-copy]").forEach((chip) =>
+    chip.classList.toggle("active", chip.dataset.copy === state.specCopy));
+}
+
+function setExportCopy(value) {
+  if (!SPEC_COPIES.includes(value)) return;
+  state.specCopy = value;
+  try { localStorage.setItem(SPEC_COPY_KEY, value); } catch {}
+  renderExportCopy();
+}
+
 // The download carries the spec sheet as it is on screen, under the same group headings and
 // without the columns switched off above.
 const specQuery = () => {
@@ -1347,7 +1372,7 @@ const download = async (path) => {
 const FILE_ACTIONS = {
   csv: () => download(`/api/selections/csv${specQuery()}`),
   "spec-docx": () => download(`/api/selections/docx${docQuery()}`),
-  "spec-pdf": () => download(`/api/selections/pdf${docQuery()}`),
+  "spec-pdf": () => download(`/api/selections/pdf${docQuery()}&copy=${encodeURIComponent(state.specCopy)}`),
   "import-csv": () => $("spec-import-file").click(),
 };
 const NEEDS_PROJECT = new Set(["csv", "spec-docx", "spec-pdf", "import-csv"]);
@@ -1378,12 +1403,15 @@ $("files-button").addEventListener("click", () => {
   fileChoice = null;
   renderExportColumns();
   renderExportOrientation();
+  renderExportCopy();
   renderFileChoice();
   $("files-dialog").showModal();
 });
 $("files-dialog").addEventListener("click", (event) => {
   const orientation = event.target.closest("[data-orientation]");
   if (orientation) { setExportOrientation(orientation.dataset.orientation); return; }
+  const copy = event.target.closest("[data-copy]");
+  if (copy) { setExportCopy(copy.dataset.copy); return; }
   const choice = event.target.closest(".file-choice");
   if (!choice || state.busy) return;
   fileChoice = choice.dataset.file;

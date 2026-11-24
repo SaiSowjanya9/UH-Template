@@ -198,7 +198,7 @@ def spec_field_lines(value, room, size=9):
 
 
 class SpecFieldCell(Flowable):
-    """An editable text field holding one cell's value, as wide as the cell's text.
+    """One cell's value in its box: a text field to type into, or the box alone.
 
     The value is wrapped to the box and the box is as tall as the lines it holds, so
     nothing printed on the sheet is cut off at a field's edge or spilled past it. The
@@ -206,11 +206,14 @@ class SpecFieldCell(Flowable):
     a reader lays its own text out in, so the two coincide instead of reading as one
     blurred double - and the sheet still prints and extracts its values wherever form
     fields are not rendered at all.
+
+    A locked sheet draws that same box itself and adds no field, so the two copies are
+    the same document to read and only one of them can be typed into.
     """
 
-    def __init__(self, name, value, room, size=9):
+    def __init__(self, name, value, room, size=9, fillable=True):
         super().__init__()
-        self.name, self.width, self.size = name, room, size
+        self.name, self.width, self.size, self.fillable = name, room, size, fillable
         self.lines = spec_field_lines(spec_form_text(value), room, size)
         self.value = "\n".join(self.lines)
         self.height = SPEC_FIELD_H + (max(len(self.lines), 1) - 1) * SPEC_FIELD_LEADING * size
@@ -231,6 +234,15 @@ class SpecFieldCell(Flowable):
                 self.canv.drawString(left + 4 * SPEC_FIELD_BW,
                                      top - index * SPEC_FIELD_LEADING * self.size, line)
             self.canv.restoreState()
+        if not self.fillable:
+            # The locked copy: the field's own border, drawn on the page. Nothing a reader
+            # can click into, so what was exported is what the sheet keeps saying.
+            self.canv.saveState()
+            self.canv.setStrokeColor(SPEC_FORM_BORDER)
+            self.canv.setLineWidth(SPEC_FIELD_BW)
+            self.canv.rect(left, 0, self.width + SPEC_FIELD_INSET, self.height, stroke=1, fill=0)
+            self.canv.restoreState()
+            return
         # The editable field over it, transparent so the drawn text shows through until a
         # reader renders the field itself. Every field is multiline, not only the ones that
         # opened wrapped: it is what lays a printed value's lines back out as they were, and
@@ -283,6 +295,26 @@ def spec_orientation(value):
     name = clean(value).lower() or SPEC_ORIENTATIONS[0]
     if name not in SPEC_ORIENTATIONS:
         raise ValueError(f"Print the spec sheet in one of: {', '.join(SPEC_ORIENTATIONS)}.")
+    return name
+
+
+# The PDF goes out as one of two copies of the same sheet: the editable one, whose cells
+# are form fields to type into, or the locked one, which is the same page with nothing a
+# reader will let anybody change. Word and the CSV have no such choice - Word is a document
+# to mark up by its nature, and a CSV is text - so this rides with the PDF alone.
+SPEC_COPIES = ("editable", "locked")
+
+
+def spec_copy(value):
+    """Which copy of the spec sheet to print; nothing asked for means the editable one.
+
+    Like the orientation, an unknown name is refused rather than quietly answered with
+    the other copy: handing somebody a typeable sheet when they asked for a locked one
+    is the mistake this option exists to prevent.
+    """
+    name = clean(value).lower() or SPEC_COPIES[0]
+    if name not in SPEC_COPIES:
+        raise ValueError(f"Export the spec sheet as one of: {', '.join(SPEC_COPIES)}.")
     return name
 
 
@@ -1113,8 +1145,8 @@ def _spec_field_name(row_index, column):
     return f"r{row_index}_{slug}"
 
 
-def spec_cell(row, column, hidden, row_index=0, room=0):
-    """One spec-sheet cell as an editable form field.
+def spec_cell(row, column, hidden, row_index=0, room=0, fillable=True):
+    """One spec-sheet cell as an editable form field, or as the printed box alone.
 
     Product Link stays a clickable link rather than a field, because it is a URL
     and the user is not expected to type one in by hand.  Everything else becomes
@@ -1128,11 +1160,11 @@ def spec_cell(row, column, hidden, row_index=0, room=0):
                          f'color="{CFG["colors"]["accent"]}"><u>{link_word()}</u></link>',
                          SPEC_CELL_STYLE)
     return SpecFieldCell(_spec_field_name(row_index, column),
-                         spec_value(row, column), room)
+                         spec_value(row, column), room, fillable=fillable)
 
 
 def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
-               section_tag=""):
+               section_tag="", fillable=True):
     """A repeated-header table of every priced line item, one row per selection.
 
     Every data cell is an editable PDF form field so customers can type directly into the
@@ -1161,7 +1193,7 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     data = [[Paragraph(escape(spec_heading(column)), SPEC_HEAD_STYLE) for column, _ in columns]]
     for row_idx, row in enumerate(items):
         cells = [spec_cell(row, column, hidden, row_index=row.get("_row", row_idx),
-                           room=field_rooms[col_idx])
+                           room=field_rooms[col_idx], fillable=fillable)
                  for col_idx, (column, _) in enumerate(columns)]
         notes = []
         if show_section and clean(row.get("Section")):
@@ -1175,12 +1207,13 @@ def spec_table(items, columns, widths, hidden, pad_x=PAD_X, show_section=True,
     # A single Notes row at the end of the section for the customer to add data.
     safe_tag = re.sub(r"[^a-z0-9]+", "_", (section_tag or "all").lower()).strip("_")
     notes_row = [SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', col.lower()).strip('_')}",
-                               "", room)
+                               "", room, fillable=fillable)
                  for (col, _), room in zip(columns, field_rooms)]
-    # Label the first cell of the notes row so the customer knows it is for notes.
+    # Label the first cell of the notes row so the customer knows it is for notes. On the
+    # locked copy it is a ruled line to write on once the sheet is printed.
     first_col = columns[0][0] if columns else "Item"
     notes_row[0] = SpecFieldCell(f"notes_{safe_tag}_{re.sub(r'[^a-z0-9]+', '_', first_col.lower()).strip('_')}",
-                                 "Notes", field_rooms[0])
+                                 "Notes", field_rooms[0], fillable=fillable)
     data.append(notes_row)
     return Table(data, colWidths=widths, repeatRows=1, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -1231,10 +1264,11 @@ def spec_details(items, width, hidden, landscape=True):
 
 
 def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Area",
-               orientation="landscape", room_order=()):
+               orientation="landscape", room_order=(), copy="editable"):
     """The internal spec sheet: the app's line items and columns, under the same headings,
-    on the page orientation the download asked for."""
+    on the page orientation the download asked for, as the editable or the locked copy."""
     page = spec_page(orientation)
+    fillable = spec_copy(copy) == "editable"
     columns = spec_columns(hidden)
     groups = spec_groups(rows, group, hidden, room_order=room_order)
     tabled = [row for section, items in groups.items() if not is_details_group(section)
@@ -1249,7 +1283,7 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
                  if is_details_group(section)
                  else spec_table(items, columns, widths, hidden, page.pad_x,
                                  show_section=group != "Section" and "Section" not in hidden,
-                                 section_tag=section))
+                                 section_tag=section, fillable=fillable))
         story += (section_block(section, block, page.content_w, page.body_top - BODY_BOTTOM,
                                 rule=SHEET["rule"], track=SPEC_HEADING_TRACK)
                   if section else [block])
@@ -1257,10 +1291,14 @@ def build_spec(pid, project, rows, output_dir=None, hidden=(), group="Room / Are
     destination = Path(output_dir or OUT)
     destination.mkdir(exist_ok=True)
     # The orientation is part of the name: both copies are downloaded to compare, and two
-    # files called the same thing leave the browser to tell them apart with a "(1)".
+    # files called the same thing leave the browser to tell them apart with a "(1)". The
+    # locked copy says so too, because which one is on the desk cannot be seen by looking
+    # at the page - only by clicking it - and the wrong one sent out is the whole risk.
     parts = [re.sub(r"[^A-Za-z0-9_-]", "_", pid)[:50],
              re.sub(r"[^A-Za-z0-9]+", "_", clean(project.get("Project Name"))).strip("_")[:100],
              re.sub(r"[^A-Za-z0-9]+", "_", SPEC_TITLE).strip("_")[:60], page.name.title()]
+    if not fillable:
+        parts.append("Locked")
     out = destination / ("_".join(part for part in parts if part) + ".pdf")
     doc = BaseDocTemplate(str(out), pagesize=(page.width, page.height), leftMargin=M, rightMargin=M,
                           topMargin=page.height - page.body_top, bottomMargin=BODY_BOTTOM,
@@ -1295,6 +1333,8 @@ def main():
     parser.add_argument("--spec", action="store_true", help="Internal priced spec sheet")
     parser.add_argument("--orientation", default=SPEC_ORIENTATIONS[0], choices=SPEC_ORIENTATIONS,
                         help="Spec sheet page orientation (default: landscape)")
+    parser.add_argument("--copy", default=SPEC_COPIES[0], choices=SPEC_COPIES,
+                        help="Spec sheet copy: editable cells, or locked (default: editable)")
     parser.add_argument("--draft", action="store_true", help="Internal review copy (watermarked)")
     parser.add_argument("--title", help=f"Schedule title (default: {SCHEDULE.get('title', 'Selections')})")
     parser.add_argument("--prefix", help=f"Item code prefix (default: {SCHEDULE.get('code_prefix', 'EX')})")
@@ -1314,7 +1354,7 @@ def main():
                 print(f"- {pid}: no line items to export, skipped")
                 continue
             out = build_spec(pid, projects[pid], spec_rows(wb, pid), hidden=hidden,
-                             orientation=args.orientation)
+                             orientation=args.orientation, copy=args.copy)
             print(f"+ {pid}: {out.relative_to(BASE_DIR)}")
         return
     for pid in (list(projects) if args.all else [args.project]):

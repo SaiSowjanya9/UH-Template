@@ -615,6 +615,14 @@ def orientation_option(value):
         raise ValidationError(str(error)) from None
 
 
+def copy_option(value):
+    """Which copy of the spec-sheet PDF this download is: editable cells, or locked."""
+    try:
+        return build_lookbook.spec_copy(value)
+    except ValueError as error:
+        raise ValidationError(str(error)) from None
+
+
 def spec_export_rows():
     """The requested project's line items in spec-sheet order for a document export.
 
@@ -653,15 +661,17 @@ def export_spec_docx():
 
 @app.get("/api/selections/pdf")
 def export_spec_pdf():
-    """The spec sheet as a printable PDF: the same columns as the Word copy."""
+    """The spec sheet as a printable PDF: the same columns as the Word copy, as the
+    editable copy whose cells are typed into or the locked copy that cannot be."""
     hidden = hidden_option(request.args.get("hide", ""))
     group = group_option(request.args.get("group"))
     orientation = orientation_option(request.args.get("orientation"))
+    copy = copy_option(request.args.get("copy"))
     project_id, project, rows, rooms = spec_export_rows()
     with EXPORT_LOCK, tempfile.TemporaryDirectory(prefix="uh_spec_") as folder:
         output = build_lookbook.build_spec(project_id, project, rows, output_dir=Path(folder),
                                            hidden=hidden, group=group, orientation=orientation,
-                                           room_order=rooms)
+                                           room_order=rooms, copy=copy)
         raw = output.read_bytes()
     return send_file(io.BytesIO(raw), as_attachment=True, download_name=output.name, mimetype=PDF_MIME)
 

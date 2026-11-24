@@ -745,6 +745,45 @@ class AppTests(unittest.TestCase):
             stale = self.client.get(f"/api/selections/{route}?project={pid}&orientation=sideways")
             self.assertEqual(stale.status_code, 400, route)
 
+    def test_the_pdf_goes_out_editable_or_locked_as_the_download_asks(self):
+        """The same sheet, twice over: the editable copy whose cells are typed into and
+        saved, and the locked copy for sending out, which no reader will let anybody
+        change. Locked is the same page to read - every value, every box - with the form
+        fields gone rather than merely protected, and it says Locked in its own name so
+        the two cannot be mixed up on a desk. Word and the CSV have no such choice.
+        """
+        from pypdf import PdfReader
+        pid = self.state()["projects"][0]["Project ID"]
+        items = [r["Item"] for r in self.state()["selections"] if r["Project ID"] == pid]
+
+        def sheet(query):
+            response = self.client.get(f"/api/selections/pdf?project={pid}{query}")
+            self.assertEqual(response.status_code, 200, query)
+            reader = PdfReader(io.BytesIO(response.data))
+            fields = [annotation.get_object() for page in reader.pages
+                      for annotation in page.get("/Annots", [])
+                      if annotation.get_object().get("/FT") == "/Tx"]
+            text = " ".join(" ".join(page.extract_text() for page in reader.pages).split())
+            return response, fields, reader.trailer["/Root"].get("/AcroForm"), text
+
+        response, fields, form, editable_text = sheet("")          # the editable copy by default
+        self.assertTrue(fields, "the editable copy has no cells to type into")
+        self.assertIn("Spec_Sheet_Landscape.pdf", response.headers["Content-Disposition"])
+        self.assertNotIn("Locked", response.headers["Content-Disposition"])
+
+        for query in ("&copy=locked", "&copy=locked&orientation=portrait"):
+            response, fields, form, text = sheet(query)
+            self.assertEqual(fields, [], f"the locked copy can still be typed into: {query}")
+            self.assertFalse(form and form.get("/Fields"), f"the locked copy carries a form: {query}")
+            self.assertIn("Locked", response.headers["Content-Disposition"], query)
+            # locking takes nothing off the page: the same line items, still extractable
+            for item in items:
+                self.assertIn(item, text, f"{item} is missing from the locked copy ({query})")
+        self.assertEqual(sheet("&copy=editable")[3], editable_text)   # the copies read the same
+
+        # a copy the builder does not know is refused, never quietly sent out editable
+        self.assertEqual(self.client.get(f"/api/selections/pdf?project={pid}&copy=readonly").status_code, 400)
+
     def test_unit_is_a_selections_column_the_spec_sheet_carries(self):
         """Qty is a bare number without it: 7571 means nothing until it says sq ft.
 
