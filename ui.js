@@ -612,8 +612,12 @@ function specDragEvents() {
       requestAnimationFrame(() => card.classList.add("dragging"));
       return;
     }
+    // Text selected in a cell must never become a drag: the browser would carry it into
+    // whichever cell it was let go over and splice it into that value — "30 in" dropped on
+    // became "30 iStainless steel, transitionaln" — and the cell saves what it is left with.
+    if (event.target.closest?.(".cell")) { event.preventDefault(); return; }
     const rowEl = event.target;
-    if (!rowEl.matches || !rowEl.matches("tr[data-row],.spec-detail[data-row]")) return;   // child drag such as selected input text
+    if (!rowEl.matches || !rowEl.matches("tr[data-row],.spec-detail[data-row]")) return;   // any other child drag
     if (state.busy || (specPress && specPress.closest("input,textarea,select,button,a"))) {
       event.preventDefault();   // presses on cells/buttons keep their normal behavior
       return;

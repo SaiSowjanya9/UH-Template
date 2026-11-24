@@ -442,6 +442,53 @@ class BrowserTests(unittest.TestCase):
                     thread.join(timeout=5)
                     server.server_close()
 
+    def test_text_selected_in_a_cell_cannot_be_dragged_into_another_cell(self):
+        """Selecting a value and moving the mouse used to hand it to the browser as a text
+        drag: let go over a neighbour and it was spliced into that value - "30 in" came back
+        as "30 iStainless steel, transitionaln" - and the cell saved what it was left with.
+        A selection in a cell is never a drag, so both values stand."""
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "textdrag.xlsx"
+            shutil.copy2(app.common.WORKSPACE, workspace)
+            with patch.object(app, "store", WorkspaceStore(workspace)):
+                server = make_server("127.0.0.1", 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(channel="msedge", headless=True)
+                        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(f"http://127.0.0.1:{server.server_port}")
+                        expect(page.locator("#project-details-panel")).to_be_visible()
+                        page.locator('[data-view="spec"]').click()
+                        row = page.locator(".spec-card:not(.collapsed) .spec-table tbody tr").first
+                        finish = row.locator('.cell[data-field="Finish / Color"]')
+                        size = row.locator('.cell[data-field="Size / Configuration"]')
+                        expect(finish).to_be_visible(timeout=15000)
+                        finish.scroll_into_view_if_needed()
+                        finish.fill("Stainless steel, transitional")
+                        size.fill("30 in")
+                        expect(page.locator("#toast")).to_have_text("Saved.", timeout=15000)
+                        finish.click(click_count=3)              # the whole value, selected
+                        start, target = finish.bounding_box(), size.bounding_box()
+                        page.mouse.move(start["x"] + start["width"] / 2, start["y"] + start["height"] / 2)
+                        page.mouse.down()
+                        for step in range(1, 11):                # carry it across into the next cell
+                            page.mouse.move(start["x"] + (target["x"] + 30 - start["x"]) * step / 10,
+                                            target["y"] + target["height"] / 2, steps=2)
+                        page.mouse.up()
+                        page.wait_for_timeout(500)
+                        expect(finish).to_have_value("Stainless steel, transitional")
+                        expect(size).to_have_value("30 in")
+                        self.assertEqual(errors, [])
+                        browser.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    server.server_close()
+
     def test_a_column_switched_off_is_left_out_of_every_download(self):
         """Not every sheet is sent out for the same reason, so the Import & export dialog can
         switch any column off first. Nothing is hidden to begin with, the choice is this
